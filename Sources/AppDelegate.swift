@@ -744,6 +744,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         installShortcutMonitor()
         installShortcutDefaultsObserver()
         NSApp.servicesProvider = self
+
+        // term-mesh: Start the background daemon
+        if !isRunningUnderXCTest {
+            TermMeshDaemon.shared.startDaemon()
+        }
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
         if env["CMUX_UI_TEST_MODE"] == "1" {
@@ -835,6 +840,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationWillTerminate(_ notification: Notification) {
         TerminalController.shared.stop()
+        TermMeshDaemon.shared.stopDaemon()
         BrowserHistoryStore.shared.flushPendingSaves()
         PostHogAnalytics.shared.flush()
         notificationStore?.clearAll()
@@ -844,6 +850,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         self.tabManager = tabManager
         self.notificationStore = notificationStore
         self.sidebarState = sidebarState
+        DashboardController.shared.tabManager = tabManager
 #if DEBUG
         setupJumpUnreadUITestIfNeeded()
         setupGotoSplitUITestIfNeeded()

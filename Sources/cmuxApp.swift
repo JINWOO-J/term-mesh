@@ -219,6 +219,15 @@ struct cmuxApp: App {
                     appDelegate.checkForUpdates(nil)
                 }
                 InstallUpdateMenuItem(model: appDelegate.updateViewModel)
+                Divider()
+                Button("term-mesh Dashboard") {
+                    DashboardController.shared.showDashboard()
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                Toggle("Worktree Sandbox", isOn: Binding(
+                    get: { TermMeshDaemon.shared.worktreeEnabled },
+                    set: { TermMeshDaemon.shared.worktreeEnabled = $0 }
+                ))
             }
 
 #if DEBUG

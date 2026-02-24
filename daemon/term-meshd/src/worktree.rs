@@ -155,6 +155,11 @@ pub fn list(params: serde_json::Value) -> Result<Vec<WorktreeInfo>, String> {
     Ok(result)
 }
 
+/// Check if a worktree name follows the term-mesh convention.
+pub fn is_term_mesh_worktree(name: &str) -> bool {
+    name.starts_with("term-mesh_wt_")
+}
+
 fn worktree_branch(repo: &Repository, wt_name: &str) -> String {
     // Open the worktree's repo to read its HEAD
     let repo_root = match repo.workdir() {
@@ -175,5 +180,118 @@ fn worktree_branch(repo: &Repository, wt_name: &str) -> String {
             Err(_) => "unknown".into(),
         },
         Err(_) => "unknown".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn init_temp_repo() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path().join("repo");
+        std::fs::create_dir(&repo_path).unwrap();
+
+        // Initialize git repo with an initial commit
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        // Create an initial commit (required for HEAD)
+        let file = repo_path.join("README.md");
+        std::fs::write(&file, "# test").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        let path_str = repo_path.to_string_lossy().into_owned();
+        (dir, path_str)
+    }
+
+    #[test]
+    fn is_term_mesh_worktree_name() {
+        assert!(is_term_mesh_worktree("term-mesh_wt_abcd1234"));
+        assert!(!is_term_mesh_worktree("other_worktree"));
+        assert!(!is_term_mesh_worktree(""));
+    }
+
+    #[test]
+    fn create_and_list_worktree() {
+        let (_dir, repo_path) = init_temp_repo();
+
+        let params = serde_json::json!({
+            "repo_path": repo_path,
+        });
+        let info = create(params).unwrap();
+        assert!(info.name.starts_with("term-mesh_wt_"));
+        assert!(info.branch.starts_with("term-mesh/"));
+        assert!(std::path::Path::new(&info.path).exists());
+
+        // List should contain our worktree
+        let list_params = serde_json::json!({ "repo_path": repo_path });
+        let worktrees = list(list_params).unwrap();
+        assert_eq!(worktrees.len(), 1);
+        assert_eq!(worktrees[0].name, info.name);
+    }
+
+    #[test]
+    fn create_and_remove_worktree() {
+        let (_dir, repo_path) = init_temp_repo();
+
+        let params = serde_json::json!({ "repo_path": repo_path });
+        let info = create(params).unwrap();
+
+        let remove_params = serde_json::json!({
+            "repo_path": repo_path,
+            "name": info.name,
+        });
+        remove(remove_params).unwrap();
+
+        // Should be gone from list
+        let list_params = serde_json::json!({ "repo_path": repo_path });
+        let worktrees = list(list_params).unwrap();
+        assert!(worktrees.is_empty());
+    }
+
+    #[test]
+    fn create_with_custom_branch() {
+        let (_dir, repo_path) = init_temp_repo();
+
+        let params = serde_json::json!({
+            "repo_path": repo_path,
+            "branch": "custom-branch",
+        });
+        let info = create(params).unwrap();
+        assert_eq!(info.branch, "custom-branch");
+    }
+
+    #[test]
+    fn invalid_repo_path_returns_error() {
+        let params = serde_json::json!({
+            "repo_path": "/nonexistent/path/to/repo",
+        });
+        let result = create(params);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot open repo"));
     }
 }

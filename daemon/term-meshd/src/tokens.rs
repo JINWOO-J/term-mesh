@@ -395,3 +395,348 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── model_pricing tests ──
+
+    #[test]
+    fn pricing_opus() {
+        let p = model_pricing("claude-opus-4-6-20250101");
+        assert_eq!(p.base_input, 5.0);
+        assert_eq!(p.output, 25.0);
+        assert_eq!(p.cache_read, 0.5);
+        assert_eq!(p.cache_write_1h, 10.0);
+    }
+
+    #[test]
+    fn pricing_opus_45() {
+        let p = model_pricing("claude-opus-4-5-20250101");
+        assert_eq!(p.base_input, 5.0);
+        assert_eq!(p.output, 25.0);
+    }
+
+    #[test]
+    fn pricing_sonnet() {
+        let p = model_pricing("claude-sonnet-4-6-20250101");
+        assert_eq!(p.base_input, 3.0);
+        assert_eq!(p.output, 15.0);
+        assert_eq!(p.cache_read, 0.3);
+        assert_eq!(p.cache_write_1h, 6.0);
+    }
+
+    #[test]
+    fn pricing_sonnet_35() {
+        let p = model_pricing("claude-sonnet-3-5-20241022");
+        assert_eq!(p.base_input, 3.0);
+        assert_eq!(p.output, 15.0);
+    }
+
+    #[test]
+    fn pricing_haiku() {
+        let p = model_pricing("claude-haiku-4-5-20251001");
+        assert_eq!(p.base_input, 1.0);
+        assert_eq!(p.output, 5.0);
+        assert_eq!(p.cache_read, 0.1);
+        assert_eq!(p.cache_write_1h, 2.0);
+    }
+
+    #[test]
+    fn pricing_unknown_defaults_to_sonnet() {
+        let p = model_pricing("gpt-4o");
+        assert_eq!(p.base_input, 3.0);
+        assert_eq!(p.output, 15.0);
+    }
+
+    // ── calculate_line_cost tests ──
+
+    #[test]
+    fn cost_basic_input_output() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation: None,
+        };
+        let cost = calculate_line_cost(&usage, "claude-opus-4-6");
+        // 1M input * $5/MTok + 1M output * $25/MTok = $30
+        assert!((cost - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_with_cache_read() {
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 1_000_000,
+            cache_creation: None,
+        };
+        let cost = calculate_line_cost(&usage, "claude-opus-4-6");
+        // 1M cache_read * $0.5/MTok = $0.5
+        assert!((cost - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_with_cache_write_legacy() {
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 1_000_000,
+            cache_read_input_tokens: 0,
+            cache_creation: None,
+        };
+        let cost = calculate_line_cost(&usage, "claude-opus-4-6");
+        // 1M cache_write * $10/MTok = $10
+        assert!((cost - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_with_cache_creation_breakdown() {
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 500_000, // ignored when breakdown present
+            cache_read_input_tokens: 0,
+            cache_creation: Some(CacheCreationBreakdown {
+                ephemeral_1h_input_tokens: 1_000_000,
+            }),
+        };
+        let cost = calculate_line_cost(&usage, "claude-opus-4-6");
+        // Uses breakdown: 1M * $10/MTok = $10
+        assert!((cost - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cost_zero_tokens() {
+        let usage = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation: None,
+        };
+        assert_eq!(calculate_line_cost(&usage, "claude-opus-4-6"), 0.0);
+    }
+
+    // ── decode_project_dir tests ──
+
+    #[test]
+    fn decode_standard_path() {
+        // Note: decode_project_dir replaces all '-' with '/' — hyphens in
+        // directory names (e.g. tty-mesh) are not preserved. This is a known
+        // limitation; the cwd field from JSONL is preferred when available.
+        let path = PathBuf::from("/home/user/.claude/projects/-Users-jinwoo-work-project/abc.jsonl");
+        let decoded = decode_project_dir(&path);
+        assert_eq!(decoded, "/Users/jinwoo/work/project");
+    }
+
+    #[test]
+    fn decode_no_projects_parent() {
+        let path = PathBuf::from("/tmp/random/file.jsonl");
+        let decoded = decode_project_dir(&path);
+        assert_eq!(decoded, "unknown");
+    }
+
+    // ── process_line tests ──
+
+    fn make_state() -> TrackerState {
+        TrackerState {
+            sessions: HashMap::new(),
+            file_positions: HashMap::new(),
+            claude_projects_dir: PathBuf::from("/tmp"),
+        }
+    }
+
+    #[test]
+    fn process_assistant_line() {
+        let mut state = make_state();
+        let entry = JsonlLine {
+            line_type: "assistant".into(),
+            session_id: Some("sess1".into()),
+            cwd: Some("/home/user/project".into()),
+            message: Some(AssistantMessage {
+                model: Some("claude-opus-4-6".into()),
+                usage: Some(TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    cache_creation: None,
+                }),
+            }),
+        };
+        let path = PathBuf::from("/home/user/.claude/projects/-test/file.jsonl");
+        process_line(&mut state, &entry, &path);
+
+        assert_eq!(state.sessions.len(), 1);
+        let stats = state.sessions.get("sess1").unwrap();
+        assert_eq!(stats.input_tokens, 100);
+        assert_eq!(stats.output_tokens, 50);
+        assert_eq!(stats.api_calls, 1);
+        assert_eq!(stats.project_path, "/home/user/project");
+    }
+
+    #[test]
+    fn process_non_assistant_skipped() {
+        let mut state = make_state();
+        let entry = JsonlLine {
+            line_type: "user".into(),
+            session_id: Some("sess1".into()),
+            cwd: None,
+            message: None,
+        };
+        let path = PathBuf::from("/tmp/file.jsonl");
+        process_line(&mut state, &entry, &path);
+        assert!(state.sessions.is_empty());
+    }
+
+    #[test]
+    fn process_no_session_id_skipped() {
+        let mut state = make_state();
+        let entry = JsonlLine {
+            line_type: "assistant".into(),
+            session_id: None,
+            cwd: None,
+            message: Some(AssistantMessage {
+                model: Some("claude-opus-4-6".into()),
+                usage: Some(TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    cache_creation: None,
+                }),
+            }),
+        };
+        let path = PathBuf::from("/tmp/file.jsonl");
+        process_line(&mut state, &entry, &path);
+        assert!(state.sessions.is_empty());
+    }
+
+    #[test]
+    fn process_no_usage_skipped() {
+        let mut state = make_state();
+        let entry = JsonlLine {
+            line_type: "assistant".into(),
+            session_id: Some("sess1".into()),
+            cwd: None,
+            message: Some(AssistantMessage {
+                model: Some("claude-opus-4-6".into()),
+                usage: None,
+            }),
+        };
+        let path = PathBuf::from("/tmp/file.jsonl");
+        process_line(&mut state, &entry, &path);
+        assert!(state.sessions.is_empty());
+    }
+
+    #[test]
+    fn process_multiple_lines_accumulate() {
+        let mut state = make_state();
+        let path = PathBuf::from("/home/user/.claude/projects/-test/file.jsonl");
+
+        for _ in 0..3 {
+            let entry = JsonlLine {
+                line_type: "assistant".into(),
+                session_id: Some("sess1".into()),
+                cwd: Some("/project".into()),
+                message: Some(AssistantMessage {
+                    model: Some("claude-haiku-4-5".into()),
+                    usage: Some(TokenUsage {
+                        input_tokens: 100,
+                        output_tokens: 50,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 20,
+                        cache_creation: None,
+                    }),
+                }),
+            };
+            process_line(&mut state, &entry, &path);
+        }
+
+        let stats = state.sessions.get("sess1").unwrap();
+        assert_eq!(stats.input_tokens, 300);
+        assert_eq!(stats.output_tokens, 150);
+        assert_eq!(stats.cache_read_tokens, 60);
+        assert_eq!(stats.api_calls, 3);
+    }
+
+    // ── UsageSnapshot aggregation ──
+
+    #[test]
+    fn snapshot_aggregates_multiple_sessions() {
+        let mut state = make_state();
+        let path = PathBuf::from("/home/user/.claude/projects/-test/file.jsonl");
+
+        // Session 1
+        let entry1 = JsonlLine {
+            line_type: "assistant".into(),
+            session_id: Some("sess1".into()),
+            cwd: Some("/project1".into()),
+            message: Some(AssistantMessage {
+                model: Some("claude-opus-4-6".into()),
+                usage: Some(TokenUsage {
+                    input_tokens: 1_000_000,
+                    output_tokens: 500_000,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    cache_creation: None,
+                }),
+            }),
+        };
+        process_line(&mut state, &entry1, &path);
+
+        // Session 2
+        let entry2 = JsonlLine {
+            line_type: "assistant".into(),
+            session_id: Some("sess2".into()),
+            cwd: Some("/project2".into()),
+            message: Some(AssistantMessage {
+                model: Some("claude-haiku-4-5".into()),
+                usage: Some(TokenUsage {
+                    input_tokens: 500_000,
+                    output_tokens: 200_000,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    cache_creation: None,
+                }),
+            }),
+        };
+        process_line(&mut state, &entry2, &path);
+
+        // Build snapshot manually (same logic as UsageTracker::snapshot)
+        let sessions: Vec<SessionUsageStats> = state.sessions.values().cloned().collect();
+        let total_input: u64 = sessions.iter().map(|s| s.input_tokens).sum();
+        let total_output: u64 = sessions.iter().map(|s| s.output_tokens).sum();
+
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(total_input, 1_500_000);
+        assert_eq!(total_output, 700_000);
+    }
+
+    // ── JSONL parsing from string ──
+
+    #[test]
+    fn parse_valid_jsonl_line() {
+        let json = r#"{"type":"assistant","sessionId":"abc","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":50}}}"#;
+        let entry: JsonlLine = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.line_type, "assistant");
+        assert_eq!(entry.session_id.as_deref(), Some("abc"));
+        assert_eq!(entry.message.unwrap().usage.unwrap().input_tokens, 100);
+    }
+
+    #[test]
+    fn parse_malformed_json_returns_error() {
+        let json = r#"{"type": "assistant", broken}"#;
+        assert!(serde_json::from_str::<JsonlLine>(json).is_err());
+    }
+
+    #[test]
+    fn parse_empty_string_returns_error() {
+        assert!(serde_json::from_str::<JsonlLine>("").is_err());
+    }
+}

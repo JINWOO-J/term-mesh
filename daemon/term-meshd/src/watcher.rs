@@ -245,3 +245,133 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_watcher_state() -> Arc<Mutex<WatcherState>> {
+        Arc::new(Mutex::new(WatcherState {
+            event_counts: HashMap::new(),
+            last_event_times: HashMap::new(),
+            recent_events: Vec::new(),
+            watched_paths: Vec::new(),
+            timeline_buckets: HashMap::new(),
+        }))
+    }
+
+    fn make_handle(state: Arc<Mutex<WatcherState>>) -> WatcherHandle {
+        let (tx, _rx) = mpsc::channel(16);
+        WatcherHandle {
+            state,
+            command_tx: tx,
+        }
+    }
+
+    #[test]
+    fn snapshot_empty_state() {
+        let state = make_watcher_state();
+        let handle = make_handle(state);
+        let snap = handle.snapshot();
+
+        assert!(snap.watched_paths.is_empty());
+        assert!(snap.top_files.is_empty());
+        assert!(snap.recent_events.is_empty());
+        assert!(snap.timeline.is_empty());
+    }
+
+    #[test]
+    fn snapshot_top_files_sorted_and_truncated() {
+        let state = make_watcher_state();
+        {
+            let mut s = state.lock().unwrap();
+            // Insert 15 files with different event counts
+            for i in 0..15 {
+                s.event_counts.insert(format!("/file_{i}"), (i + 1) as u64);
+                s.last_event_times.insert(format!("/file_{i}"), 1000 + i as u64);
+            }
+        }
+        let handle = make_handle(state);
+        let snap = handle.snapshot();
+
+        // Should be truncated to 10
+        assert_eq!(snap.top_files.len(), 10);
+        // Should be sorted descending by event_count
+        assert_eq!(snap.top_files[0].event_count, 15);
+        assert_eq!(snap.top_files[9].event_count, 6);
+    }
+
+    #[test]
+    fn snapshot_recent_events_reversed_and_limited() {
+        let state = make_watcher_state();
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..100 {
+                s.recent_events.push(FileEvent {
+                    path: format!("/file_{i}"),
+                    kind: "modify".into(),
+                    timestamp_ms: 1000 + i,
+                });
+            }
+        }
+        let handle = make_handle(state);
+        let snap = handle.snapshot();
+
+        // Should take last 50 (reversed)
+        assert_eq!(snap.recent_events.len(), 50);
+        // First in the result should be the most recent
+        assert_eq!(snap.recent_events[0].path, "/file_99");
+    }
+
+    #[test]
+    fn snapshot_timeline_filters_old_buckets() {
+        let state = make_watcher_state();
+        let now = now_ms();
+        let minute = 60_000u64;
+        let current_minute = (now / minute) * minute;
+
+        {
+            let mut s = state.lock().unwrap();
+            // Recent bucket (should be included)
+            s.timeline_buckets.insert(current_minute, (5, 10, 2));
+            // Very old bucket (should be excluded — more than 10 min ago)
+            s.timeline_buckets.insert(current_minute - 20 * minute, (1, 1, 1));
+        }
+        let handle = make_handle(state);
+        let snap = handle.snapshot();
+
+        // Only the recent bucket should be in the snapshot
+        assert_eq!(snap.timeline.len(), 1);
+        assert_eq!(snap.timeline[0].create, 5);
+        assert_eq!(snap.timeline[0].modify, 10);
+        assert_eq!(snap.timeline[0].remove, 2);
+    }
+
+    #[test]
+    fn watch_path_adds_to_watched() {
+        let state = make_watcher_state();
+        let handle = make_handle(state);
+
+        handle.watch_path("/tmp/test");
+        let snap = handle.snapshot();
+        assert_eq!(snap.watched_paths, vec!["/tmp/test"]);
+
+        // Duplicate watch should not add twice
+        handle.watch_path("/tmp/test");
+        let snap = handle.snapshot();
+        assert_eq!(snap.watched_paths.len(), 1);
+    }
+
+    #[test]
+    fn unwatch_path_removes_from_watched() {
+        let state = make_watcher_state();
+        let handle = make_handle(state);
+
+        handle.watch_path("/tmp/test");
+        handle.watch_path("/tmp/other");
+        handle.unwatch_path("/tmp/test");
+
+        let snap = handle.snapshot();
+        assert_eq!(snap.watched_paths, vec!["/tmp/other"]);
+    }
+}

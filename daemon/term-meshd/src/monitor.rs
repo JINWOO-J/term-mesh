@@ -312,3 +312,96 @@ impl MonitorHandle {
         self.memory_threshold
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── find_descendants tests ──
+
+    #[test]
+    fn find_descendants_returns_children() {
+        // Use the real system — find descendants of PID 1 (launchd)
+        let sys = System::new_all();
+        let descendants = find_descendants(&sys, 1);
+        // PID 1 (launchd) should have many descendants on any macOS system
+        assert!(!descendants.is_empty());
+        // PID 1 itself should NOT be in the descendants
+        assert!(!descendants.contains(&1));
+    }
+
+    #[test]
+    fn find_descendants_nonexistent_pid() {
+        let sys = System::new_all();
+        // Use an impossibly high PID
+        let descendants = find_descendants(&sys, u32::MAX);
+        assert!(descendants.is_empty());
+    }
+
+    #[test]
+    fn find_descendants_no_cycles() {
+        // Ensure BFS terminates even with the full process tree
+        let sys = System::new_all();
+        let descendants = find_descendants(&sys, 1);
+        // If BFS had a cycle bug, this would hang. Completing is the assertion.
+        let _ = descendants.len();
+    }
+
+    // ── BudgetConfig defaults ──
+
+    #[test]
+    fn budget_config_defaults() {
+        let config = BudgetConfig::default();
+        assert_eq!(config.cpu_threshold_percent, 90.0);
+        assert_eq!(config.memory_threshold_bytes, 4 * 1024 * 1024 * 1024);
+        assert!(config.auto_stop);
+    }
+
+    // ── MonitorHandle PID tracking ──
+
+    #[test]
+    fn monitor_handle_track_untrack() {
+        let handle = MonitorHandle {
+            tracked_pids: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            stopped_pids: std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())),
+            auto_stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            cpu_threshold: 90.0,
+            memory_threshold: 4 * 1024 * 1024 * 1024,
+        };
+
+        assert!(handle.tracked_pids().is_empty());
+
+        handle.track_pid(1234);
+        assert_eq!(handle.tracked_pids(), vec![1234]);
+
+        // Duplicate tracking should not add twice
+        handle.track_pid(1234);
+        assert_eq!(handle.tracked_pids(), vec![1234]);
+
+        handle.track_pid(5678);
+        assert_eq!(handle.tracked_pids().len(), 2);
+
+        handle.untrack_pid(1234);
+        assert_eq!(handle.tracked_pids(), vec![5678]);
+
+        handle.untrack_pid(5678);
+        assert!(handle.tracked_pids().is_empty());
+    }
+
+    #[test]
+    fn monitor_handle_auto_stop_toggle() {
+        let handle = MonitorHandle {
+            tracked_pids: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            stopped_pids: std::sync::Arc::new(std::sync::Mutex::new(HashSet::new())),
+            auto_stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            cpu_threshold: 90.0,
+            memory_threshold: 4 * 1024 * 1024 * 1024,
+        };
+
+        assert!(handle.is_auto_stop());
+        handle.set_auto_stop(false);
+        assert!(!handle.is_auto_stop());
+        handle.set_auto_stop(true);
+        assert!(handle.is_auto_stop());
+    }
+}

@@ -48,4 +48,4 @@ tests/visual_report.html
 tmp/
 tmp-*/
 
-daemon/target/debug/
+daemon/target/

@@ -1,0 +1,12 @@
+[package]
+name = "term-mesh-cli"
+version = "0.1.0"
+edition = "2021"
+description = "term-mesh CLI — PTY wrapper for AI agents"
+
+[[bin]]
+name = "term-mesh"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"

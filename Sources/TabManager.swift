@@ -756,16 +756,34 @@ class TabManager: ObservableObject {
     @discardableResult
     func addWorkspace(workingDirectory overrideWorkingDirectory: String? = nil, select: Bool = true) -> Workspace {
         sentryBreadcrumb("workspace.create", data: ["tabCount": tabs.count + 1])
-        let workingDirectory = normalizedWorkingDirectory(overrideWorkingDirectory) ?? preferredWorkingDirectoryForNewTab()
+        var workingDirectory = normalizedWorkingDirectory(overrideWorkingDirectory) ?? preferredWorkingDirectoryForNewTab()
+
+        // term-mesh: Create worktree sandbox if enabled and CWD is a git repo
+        var worktreeInfo: WorktreeInfo?
+        if TermMeshDaemon.shared.worktreeEnabled, let cwd = workingDirectory {
+            if let info = TermMeshDaemon.shared.createWorktree(repoPath: cwd) {
+                workingDirectory = info.path
+                worktreeInfo = info
+                print("[term-mesh] worktree created: \(info.name) at \(info.path)")
+            }
+        }
+
         let inheritedConfig = inheritedTerminalConfigForNewWorkspace()
         let ordinal = Self.nextPortOrdinal
         Self.nextPortOrdinal += 1
         let newWorkspace = Workspace(
-            title: "Terminal \(tabs.count + 1)",
+            title: worktreeInfo.map { "[\($0.branch)] Terminal \(tabs.count + 1)" } ?? "Terminal \(tabs.count + 1)",
             workingDirectory: workingDirectory,
             portOrdinal: ordinal,
             configTemplate: inheritedConfig
         )
+        // term-mesh: Auto-watch the working directory for file heatmap
+        if let cwd = workingDirectory, !cwd.isEmpty {
+            DispatchQueue.global(qos: .utility).async {
+                TermMeshDaemon.shared.watchPath(cwd)
+            }
+        }
+
         wireClosedBrowserTracking(for: newWorkspace)
         let insertIndex = newTabInsertIndex()
         if insertIndex >= 0 && insertIndex <= tabs.count {

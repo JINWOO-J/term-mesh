@@ -400,6 +400,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
             let monitorData = daemon.rpcCallRaw(method: "monitor.snapshot", params: [:])
             let watcherData = daemon.rpcCallRaw(method: "watcher.snapshot", params: [:])
             let sessionData = daemon.rpcCallRaw(method: "session.list", params: [:])
+            let usageData = daemon.rpcCallRaw(method: "usage.snapshot", params: [:])
 
             DispatchQueue.main.async {
                 if let json = monitorData {
@@ -414,6 +415,9 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                 }
                 if let json = sessionData {
                     webView.evaluateJavaScript("if(window.updateAgentStatus)updateAgentStatus(\(json));") { _, _ in }
+                }
+                if let json = usageData {
+                    webView.evaluateJavaScript("if(window.updateUsage)updateUsage(\(json));") { _, _ in }
                 }
             }
         }

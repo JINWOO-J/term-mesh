@@ -131,18 +131,17 @@ final class TermMeshDaemon {
         let _ = rpcCall(method: "budget.auto_stop", params: ["enabled": enabled])
     }
 
-    // MARK: - Token Tracking (F-03/F-04)
+    // MARK: - Usage Tracking (JSONL-based API cost)
 
-    /// Report terminal output text for token counting.
-    /// Accumulates tokens for the given PID.
-    func reportTokens(pid: Int32, text: String) {
-        let _ = rpcCall(method: "tokens.report", params: ["pid": pid, "text": text])
+    /// Get API usage snapshot (parsed from Claude Code JSONL logs).
+    func usageSnapshot() -> [String: Any]? {
+        guard let response = rpcCall(method: "usage.snapshot", params: [:]) as? [String: Any] else { return nil }
+        return response
     }
 
-    /// Get token snapshot for all tracked PIDs.
-    func tokenSnapshot() -> [[String: Any]] {
-        guard let response = rpcCall(method: "tokens.snapshot", params: [:]) as? [[String: Any]] else { return [] }
-        return response
+    /// Trigger an immediate usage scan.
+    func usageScan() {
+        let _ = rpcCall(method: "usage.scan", params: [:])
     }
 
     // MARK: - Watcher (F-05)

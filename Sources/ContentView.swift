@@ -309,7 +309,7 @@ final class FileDropOverlayView: NSView {
     /// The WKWebView currently receiving forwarded drag events, so we can
     /// synthesize draggingExited/draggingEntered as the cursor moves.
     private weak var activeDragWebView: WKWebView?
-    private var lastHitTestLogSignature: String?
+    private var recentHitTestLogSignatures: Set<String> = []
     private var lastDragRouteLogSignatureByPhase: [String: String] = [:]
 
     override var acceptsFirstResponder: Bool { false }
@@ -478,6 +478,7 @@ final class FileDropOverlayView: NSView {
             prev.draggingExited(sender)
             activeDragWebView = nil
         }
+        recentHitTestLogSignatures.removeAll()
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
@@ -661,12 +662,17 @@ final class FileDropOverlayView: NSView {
         guard shouldCapture || isDragEvent || hasRelevantDragTypes(pasteboardTypes) else { return }
 
         let signature = "\(shouldCapture ? 1 : 0)|\(debugEventName(eventType))|\(debugPasteboardTypes(pasteboardTypes))"
-        guard lastHitTestLogSignature != signature else { return }
-        lastHitTestLogSignature = signature
+        guard recentHitTestLogSignatures.insert(signature).inserted else { return }
+        // Cap the set so it doesn't grow unbounded across long drag sessions.
+        if recentHitTestLogSignatures.count > 32 { recentHitTestLogSignatures.removeAll() }
+        // Only compute topHit for actual drag/capture events. debugTopHitViewForCurrentEvent()
+        // hides/shows the overlay which triggers mouseEntered/cursorUpdate events that re-enter
+        // hitTest, creating an infinite alternating feedback loop on the main thread.
+        let topHit = isDragEvent || shouldCapture ? debugTopHitViewForCurrentEvent() : "-"
         dlog(
             "overlay.fileDrop.hitTest capture=\(shouldCapture ? 1 : 0) " +
             "event=\(debugEventName(eventType)) " +
-            "topHit=\(debugTopHitViewForCurrentEvent()) " +
+            "topHit=\(topHit) " +
             "types=\(debugPasteboardTypes(pasteboardTypes))"
         )
     }

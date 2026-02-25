@@ -250,6 +250,103 @@ final class TermMeshDaemon: ObservableObject {
         return rpcCall(method: "agent.add_pid", params: params) != nil
     }
 
+    // MARK: - Tasks (F-06)
+
+    /// Create a new task.
+    func createTask(title: String, description: String? = nil, priority: Int? = nil, createdBy: String? = nil, deps: [String]? = nil) -> TaskInfo? {
+        var params: [String: Any] = ["title": title]
+        if let description { params["description"] = description }
+        if let priority { params["priority"] = priority }
+        if let createdBy { params["created_by"] = createdBy }
+        if let deps { params["deps"] = deps }
+        guard let response = rpcCall(method: "task.create", params: params) as? [String: Any] else { return nil }
+        return parseTaskInfo(response)
+    }
+
+    /// Get a task by ID.
+    func getTask(id: String) -> TaskInfo? {
+        guard let response = rpcCall(method: "task.get", params: ["id": id]) as? [String: Any] else { return nil }
+        return parseTaskInfo(response)
+    }
+
+    /// List tasks with optional status/assignee filters.
+    func listTasks(status: String? = nil, assignee: String? = nil) -> [TaskInfo] {
+        var params: [String: Any] = [:]
+        if let status { params["status"] = status }
+        if let assignee { params["assignee"] = assignee }
+        guard let response = rpcCall(method: "task.list", params: params) as? [[String: Any]] else { return [] }
+        return response.compactMap { parseTaskInfo($0) }
+    }
+
+    /// Update a task (title, description, status, priority, assignee).
+    func updateTask(id: String, title: String? = nil, description: String? = nil, status: String? = nil, priority: Int? = nil, assignee: String? = nil) -> TaskInfo? {
+        var params: [String: Any] = ["id": id]
+        if let title { params["title"] = title }
+        if let description { params["description"] = description }
+        if let status { params["status"] = status }
+        if let priority { params["priority"] = priority }
+        if let assignee { params["assignee"] = assignee }
+        guard let response = rpcCall(method: "task.update", params: params) as? [String: Any] else { return nil }
+        return parseTaskInfo(response)
+    }
+
+    /// Assign a task to an agent.
+    func assignTask(taskId: String, agentId: String) -> TaskInfo? {
+        let params: [String: Any] = ["task_id": taskId, "agent_id": agentId]
+        guard let response = rpcCall(method: "task.assign", params: params) as? [String: Any] else { return nil }
+        return parseTaskInfo(response)
+    }
+
+    /// Get task log entries.
+    func taskLog(taskId: String, limit: Int? = nil) -> [TaskLogEntry] {
+        var params: [String: Any] = ["task_id": taskId]
+        if let limit { params["limit"] = limit }
+        guard let response = rpcCall(method: "task.log", params: params) as? [[String: Any]] else { return [] }
+        return response.compactMap { parseTaskLogEntry($0) }
+    }
+
+    // MARK: - Messages (F-06)
+
+    /// Send a message to an agent.
+    func sendMessage(toAgent: String, content: String, fromAgent: String? = nil) -> AgentMessageInfo? {
+        var params: [String: Any] = ["to_agent": toAgent, "content": content]
+        if let fromAgent { params["from_agent"] = fromAgent }
+        guard let response = rpcCall(method: "message.send", params: params) as? [String: Any] else { return nil }
+        return parseAgentMessageInfo(response)
+    }
+
+    /// List messages for an agent.
+    func listMessages(agentId: String, unreadOnly: Bool = false, limit: Int? = nil) -> [AgentMessageInfo] {
+        var params: [String: Any] = ["agent_id": agentId]
+        if unreadOnly { params["unread_only"] = true }
+        if let limit { params["limit"] = limit }
+        guard let response = rpcCall(method: "message.list", params: params) as? [[String: Any]] else { return [] }
+        return response.compactMap { parseAgentMessageInfo($0) }
+    }
+
+    /// Acknowledge (mark as read) messages by IDs.
+    func ackMessages(messageIds: [Int64]) -> Int {
+        let params: [String: Any] = ["message_ids": messageIds]
+        guard let response = rpcCall(method: "message.ack", params: params) as? [String: Any] else { return 0 }
+        return (response["acknowledged"] as? NSNumber)?.intValue ?? 0
+    }
+
+    // MARK: - Input Queue (F-06)
+
+    /// Enqueue text input for an agent's PTY.
+    func enqueueInput(sessionId: String, text: String) -> Bool {
+        let params: [String: Any] = ["session_id": sessionId, "text": text]
+        return rpcCall(method: "input.enqueue", params: params) != nil
+    }
+
+    /// Poll all pending inputs (for Swift-side PTY injection).
+    func pollInputs() -> [PendingInputInfo] {
+        guard let response = rpcCall(method: "input.poll", params: [:]) as? [[String: Any]] else { return [] }
+        return response.compactMap { parsePendingInputInfo($0) }
+    }
+
+    // MARK: - Private Parsers
+
     private func parseAgentSessionInfo(_ dict: [String: Any]) -> AgentSessionInfo? {
         guard let id = dict["id"] as? String,
               let name = dict["name"] as? String,
@@ -270,6 +367,66 @@ final class TermMeshDaemon: ObservableObject {
             pid: (dict["pid"] as? NSNumber)?.int32Value,
             panelId: dict["panel_id"] as? String,
             createdAtMs: (dict["created_at_ms"] as? NSNumber)?.uint64Value ?? 0
+        )
+    }
+
+    private func parseTaskInfo(_ dict: [String: Any]) -> TaskInfo? {
+        guard let id = dict["id"] as? String,
+              let title = dict["title"] as? String,
+              let status = dict["status"] as? String,
+              let createdAtMs = (dict["created_at_ms"] as? NSNumber)?.uint64Value,
+              let updatedAtMs = (dict["updated_at_ms"] as? NSNumber)?.uint64Value else { return nil }
+        return TaskInfo(
+            id: id,
+            title: title,
+            description: dict["description"] as? String,
+            status: status,
+            priority: (dict["priority"] as? NSNumber)?.intValue ?? 0,
+            assignee: dict["assignee"] as? String,
+            createdBy: dict["created_by"] as? String,
+            deps: dict["deps"] as? [String] ?? [],
+            createdAtMs: createdAtMs,
+            updatedAtMs: updatedAtMs
+        )
+    }
+
+    private func parseTaskLogEntry(_ dict: [String: Any]) -> TaskLogEntry? {
+        guard let id = (dict["id"] as? NSNumber)?.int64Value,
+              let taskId = dict["task_id"] as? String,
+              let message = dict["message"] as? String,
+              let createdAtMs = (dict["created_at_ms"] as? NSNumber)?.uint64Value else { return nil }
+        return TaskLogEntry(
+            id: id,
+            taskId: taskId,
+            agentId: dict["agent_id"] as? String,
+            message: message,
+            createdAtMs: createdAtMs
+        )
+    }
+
+    private func parseAgentMessageInfo(_ dict: [String: Any]) -> AgentMessageInfo? {
+        guard let id = (dict["id"] as? NSNumber)?.int64Value,
+              let toAgent = dict["to_agent"] as? String,
+              let content = dict["content"] as? String,
+              let createdAtMs = (dict["created_at_ms"] as? NSNumber)?.uint64Value else { return nil }
+        return AgentMessageInfo(
+            id: id,
+            fromAgent: dict["from_agent"] as? String,
+            toAgent: toAgent,
+            content: content,
+            read: (dict["read"] as? NSNumber)?.boolValue ?? false,
+            createdAtMs: createdAtMs
+        )
+    }
+
+    private func parsePendingInputInfo(_ dict: [String: Any]) -> PendingInputInfo? {
+        guard let sessionId = dict["session_id"] as? String,
+              let text = dict["text"] as? String,
+              let createdAtMs = (dict["created_at_ms"] as? NSNumber)?.uint64Value else { return nil }
+        return PendingInputInfo(
+            sessionId: sessionId,
+            text: text,
+            createdAtMs: createdAtMs
         )
     }
 
@@ -411,5 +568,41 @@ struct AgentSessionInfo {
     let status: String  // "spawning", "running", "suspended", "terminated"
     let pid: Int32?
     let panelId: String?
+    let createdAtMs: UInt64
+}
+
+struct TaskInfo {
+    let id: String
+    let title: String
+    let description: String?
+    let status: String  // "pending", "assigned", "in_progress", "completed", "failed", "cancelled"
+    let priority: Int
+    let assignee: String?
+    let createdBy: String?
+    let deps: [String]
+    let createdAtMs: UInt64
+    let updatedAtMs: UInt64
+}
+
+struct TaskLogEntry {
+    let id: Int64
+    let taskId: String
+    let agentId: String?
+    let message: String
+    let createdAtMs: UInt64
+}
+
+struct AgentMessageInfo {
+    let id: Int64
+    let fromAgent: String?
+    let toAgent: String
+    let content: String
+    let read: Bool
+    let createdAtMs: UInt64
+}
+
+struct PendingInputInfo {
+    let sessionId: String
+    let text: String
     let createdAtMs: UInt64
 }

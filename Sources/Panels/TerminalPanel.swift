@@ -165,6 +165,12 @@ final class TerminalPanel: Panel, ObservableObject {
         hostedView.sendSyntheticKeyPress(keycode: keycode, characters: characters)
     }
 
+    /// Send a key press directly through the Ghostty surface API.
+    /// Works even when the panel is not in the active tab (no window required).
+    func sendSurfaceKeyPress(keycode: UInt16) {
+        surface.sendSurfaceKeyPress(keycode: keycode)
+    }
+
     func performBindingAction(_ action: String) -> Bool {
         surface.performBindingAction(action)
     }

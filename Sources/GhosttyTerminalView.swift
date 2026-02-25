@@ -1980,6 +1980,23 @@ final class TerminalSurface: Identifiable, ObservableObject {
         writeTextData(data, to: surface)
     }
 
+    /// Send a key press directly through the Ghostty surface API.
+    /// Unlike sendSyntheticKeyPress (which creates an NSEvent and requires the view to be
+    /// in a window), this works even when the surface view is not attached to a window —
+    /// e.g. when the panel is in a non-active tab.
+    func sendSurfaceKeyPress(keycode: UInt16) {
+        guard let surface = surface else { return }
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.action = GHOSTTY_ACTION_PRESS
+        keyEvent.keycode = UInt32(keycode)
+        keyEvent.mods = GHOSTTY_MODS_NONE
+        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+        keyEvent.unshifted_codepoint = 0
+        keyEvent.composing = false
+        keyEvent.text = nil
+        _ = ghostty_surface_key(surface, keyEvent)
+    }
+
     func requestBackgroundSurfaceStartIfNeeded() {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in

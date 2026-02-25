@@ -263,10 +263,12 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                     if let panel = self.findTerminalPanel(agentSessionId: sessionId) {
                         // Send message text via paste path
                         panel.sendText(text)
-                        // Send Return key event after a short delay (bypasses
-                        // bracketed paste so it acts as a real Enter keypress).
+                        // Send Return key via Ghostty surface API after a short delay.
+                        // Uses sendSurfaceKeyPress instead of sendKeyPress (NSEvent) so
+                        // that it works even when the panel is in a non-active tab
+                        // (sendSyntheticKeyPress silently fails when window is nil).
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            panel.sendKeyPress(keycode: 36, characters: "\r") // kVK_Return
+                            panel.sendSurfaceKeyPress(keycode: 36) // kVK_Return
                         }
                     }
                 }

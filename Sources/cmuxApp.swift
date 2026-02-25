@@ -8,6 +8,7 @@ struct cmuxApp: App {
     @StateObject private var notificationStore = TerminalNotificationStore.shared
     @StateObject private var sidebarState = SidebarState()
     @StateObject private var sidebarSelectionState = SidebarSelectionState()
+    @ObservedObject private var termMeshDaemon = TermMeshDaemon.shared
     private let primaryWindowId = UUID()
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
     @AppStorage("titlebarControlsStyle") private var titlebarControlsStyle = TitlebarControlsStyle.classic.rawValue
@@ -227,10 +228,32 @@ struct cmuxApp: App {
                     openDashboardSplit()
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                Toggle("Worktree Sandbox", isOn: Binding(
-                    get: { TermMeshDaemon.shared.worktreeEnabled },
-                    set: { TermMeshDaemon.shared.worktreeEnabled = $0 }
-                ))
+                Button(TermMeshDaemon.shared.worktreeEnabled
+                    ? "✓ Worktree Sandbox"
+                    : "  Worktree Sandbox"
+                ) {
+                    let newValue = !TermMeshDaemon.shared.worktreeEnabled
+                    TermMeshDaemon.shared.worktreeEnabled = newValue
+                    if newValue {
+                        DispatchQueue.global(qos: .utility).async {
+                            let connected = TermMeshDaemon.shared.ping()
+                            if !connected {
+                                DispatchQueue.main.async {
+                                    let alert = NSAlert()
+                                    alert.messageText = "Worktree Sandbox"
+                                    alert.informativeText = "term-meshd daemon is not running.\nNew tabs will open without sandbox until the daemon is started."
+                                    alert.alertStyle = .warning
+                                    alert.addButton(withTitle: "OK")
+                                    alert.runModal()
+                                }
+                            }
+                        }
+                    }
+                }
+                Button("Spawn Agents…") {
+                    showSpawnAgentsDialog()
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
             }
 
 #if DEBUG
@@ -763,6 +786,38 @@ struct cmuxApp: App {
             .flatMap { $0.split(separator: ":").last.map(String.init) } ?? "9876"
         guard let url = URL(string: "http://localhost:\(port)") else { return }
         _ = activeTabManager.createBrowserSplit(direction: .right, url: url)
+    }
+
+    private func showSpawnAgentsDialog() {
+        let alert = NSAlert()
+        alert.messageText = "Spawn Agents"
+        alert.informativeText = "Number of agent sessions to spawn (each gets its own worktree sandbox):"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Spawn")
+        alert.addButton(withTitle: "Cancel")
+
+        let stepper = NSStepper(frame: NSRect(x: 0, y: 0, width: 26, height: 22))
+        stepper.minValue = 1
+        stepper.maxValue = 8
+        stepper.integerValue = 2
+        stepper.valueWraps = false
+
+        let label = NSTextField(labelWithString: "2")
+        label.frame = NSRect(x: 30, y: 2, width: 30, height: 18)
+        label.alignment = .center
+
+        stepper.target = label
+        stepper.action = #selector(NSTextField.takeIntegerValueFrom(_:))
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 22))
+        container.addSubview(stepper)
+        container.addSubview(label)
+        alert.accessoryView = container
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let count = stepper.integerValue
+
+        activeTabManager.spawnAgentSessions(count: count)
     }
 
     @ViewBuilder

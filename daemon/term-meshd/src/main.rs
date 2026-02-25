@@ -1,3 +1,4 @@
+mod agent;
 mod http;
 mod monitor;
 mod socket;
@@ -32,6 +33,14 @@ async fn main() -> anyhow::Result<()> {
     let usage_tracker = tokens::UsageTracker::new().start();
     tracing::info!("usage tracker initialized (JSONL parsing)");
 
+    // Agent session manager (F-06)
+    let agent_db_path = agent::default_db_path();
+    let agent_manager = Arc::new(
+        agent::AgentSessionManager::new(agent_db_path)
+            .expect("failed to initialize agent session DB"),
+    );
+    tracing::info!("agent session manager initialized");
+
     // Shared session store (populated by Swift app via session.sync RPC)
     let sessions: socket::SessionStore = Arc::new(Mutex::new(Vec::new()));
 
@@ -51,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
         watcher_handle.clone(),
         sessions.clone(),
         usage_tracker.clone(),
+        agent_manager.clone(),
         shutdown_rx.clone(),
     ));
 
@@ -60,9 +70,10 @@ async fn main() -> anyhow::Result<()> {
         socket_path.clone(),
         monitor_rx,
         monitor_handle.clone(),
-        watcher_handle,
+        watcher_handle.clone(),
         sessions,
         usage_tracker,
+        agent_manager.clone(),
         shutdown_rx,
     ));
 
@@ -77,13 +88,17 @@ async fn main() -> anyhow::Result<()> {
     // a. Signal servers to stop
     let _ = shutdown_tx.send(true);
 
-    // b. Resume all stopped processes
+    // b. Terminate all agent sessions (cleanup worktrees + PIDs)
+    agent_manager.terminate_all(&watcher_handle);
+    tracing::info!("agent sessions terminated");
+
+    // c. Resume all stopped processes
     let resumed = monitor_handle.resume_all_stopped();
     if resumed > 0 {
         tracing::info!("resumed {resumed} stopped process(es)");
     }
 
-    // c. Wait for servers to finish (with timeout)
+    // d. Wait for servers to finish (with timeout)
     let timeout = tokio::time::Duration::from_secs(5);
     match tokio::time::timeout(timeout, async {
         let _ = socket_task.await;
@@ -95,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => tracing::warn!("server shutdown timed out after 5s"),
     }
 
-    // d. Final cleanup: ensure socket file is removed
+    // e. Final cleanup: ensure socket file is removed
     if socket_path.exists() {
         let _ = std::fs::remove_file(&socket_path);
     }

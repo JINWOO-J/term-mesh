@@ -28,8 +28,9 @@ build:
 		-destination 'platform=macOS' \
 		-derivedDataPath "$(DERIVED_DATA)" \
 		build 2>&1 | grep -E '(warning:|error:|BUILD|Compiling)' || true
-	@# Tag the app bundle
-	@if [ ! -d "$(SRC_APP)" ] && [ -d "$(BASE_APP)" ]; then \
+	@# Tag the app bundle (always refresh from latest build)
+	@if [ -d "$(BASE_APP)" ]; then \
+		rm -rf "$(SRC_APP)"; \
 		cp -R "$(BASE_APP)" "$(SRC_APP)"; \
 	fi
 	@echo "==> Building Rust daemon (release)..."
@@ -45,16 +46,19 @@ test:
 	@cd daemon && cargo test
 
 deploy: build
-	@echo "==> Stopping existing app..."
+	@echo "==> Stopping existing app + daemon..."
 	@-pkill -f "term-mesh.app/Contents/MacOS" 2>/dev/null || true
+	@-pkill -f term-meshd 2>/dev/null || true
 	@sleep 0.5
 	@echo "==> Deploying to $(INSTALL_APP)..."
 	@rm -rf "$(INSTALL_APP)"
 	@cp -R "$(SRC_APP)" "$(INSTALL_APP)"
-	@# Symlink Rust binaries into app bundle
+	@# Copy Rust binaries into app bundle
 	@mkdir -p "$(INSTALL_APP)/Contents/Resources/bin"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(INSTALL_APP)/Contents/Resources/bin/term-meshd"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-mesh" "$(INSTALL_APP)/Contents/Resources/bin/term-mesh"
+	@echo "==> Starting daemon..."
+	@nohup "$(HOME)/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
 	@echo "==> Launching term-mesh..."
 	@open "$(INSTALL_APP)"
 	@echo "==> Deployed to $(INSTALL_APP)"

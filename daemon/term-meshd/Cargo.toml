@@ -33,6 +33,9 @@ notify = "7"
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 
+# SQLite for agent session persistence (F-06)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Error handling
 anyhow = "1"
 

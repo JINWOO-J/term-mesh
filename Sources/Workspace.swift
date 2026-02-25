@@ -302,7 +302,7 @@ final class Workspace: Identifiable, ObservableObject {
     var portOrdinal: Int = 0
 
     /// term-mesh: Worktree metadata for auto-cleanup on tab close.
-    var worktreeName: String?
+    @Published var worktreeName: String?
     var worktreeRepoPath: String?
 
     /// The bonsplit controller managing the split panes for this workspace
@@ -1160,7 +1160,8 @@ final class Workspace: Identifiable, ObservableObject {
         from panelId: UUID,
         orientation: SplitOrientation,
         insertFirst: Bool = false,
-        focus: Bool = true
+        focus: Bool = true,
+        workingDirectory: String? = nil
     ) -> TerminalPanel? {
         // Find the pane containing the source panel
         guard let sourceTabId = surfaceIdFromPanelId(panelId) else { return nil }
@@ -1181,6 +1182,7 @@ final class Workspace: Identifiable, ObservableObject {
             workspaceId: id,
             context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
             configTemplate: inheritedConfig,
+            workingDirectory: workingDirectory,
             portOrdinal: portOrdinal
         )
         panels[newPanel.id] = newPanel

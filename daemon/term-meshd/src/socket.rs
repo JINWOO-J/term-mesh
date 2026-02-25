@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::watch;
 
+use crate::agent::AgentSessionManager;
 use crate::monitor::{MonitorHandle, SystemSnapshot};
 use crate::tokens::UsageTracker;
 use crate::watcher::WatcherHandle;
@@ -64,6 +65,7 @@ pub struct Context {
     pub watcher_handle: WatcherHandle,
     pub sessions: SessionStore,
     pub usage_tracker: UsageTracker,
+    pub agent_manager: Arc<AgentSessionManager>,
 }
 
 pub fn default_socket_path() -> PathBuf {
@@ -80,6 +82,7 @@ pub async fn serve(
     watcher_handle: WatcherHandle,
     sessions: SessionStore,
     usage_tracker: UsageTracker,
+    agent_manager: Arc<AgentSessionManager>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     if path.exists() {
@@ -95,6 +98,7 @@ pub async fn serve(
         watcher_handle,
         sessions,
         usage_tracker,
+        agent_manager,
     });
 
     loop {
@@ -310,6 +314,152 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             match ctx.usage_tracker.scan_all() {
                 Ok(_) => Ok(serde_json::json!("ok")),
                 Err(e) => Err(format!("scan error: {e}")),
+            }
+        }
+
+        // --- Agent Sessions (F-06) ---
+        "agent.spawn" => {
+            match serde_json::from_value::<crate::agent::SpawnParams>(req.params.clone()) {
+                Ok(p) => match ctx.agent_manager.spawn(p, &ctx.watcher_handle) {
+                    Ok(sessions) => Ok(serde_json::to_value(sessions).unwrap()),
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "agent.list" => {
+            #[derive(Deserialize)]
+            struct ListParams {
+                #[serde(default)]
+                include_terminated: bool,
+            }
+            let params: ListParams = serde_json::from_value(req.params.clone()).unwrap_or(ListParams { include_terminated: false });
+            let sessions = ctx.agent_manager.list(params.include_terminated);
+            Ok(serde_json::to_value(sessions).unwrap())
+        }
+        "agent.get" => {
+            #[derive(Deserialize)]
+            struct GetParams { id: String }
+            match serde_json::from_value::<GetParams>(req.params.clone()) {
+                Ok(p) => match ctx.agent_manager.get(&p.id) {
+                    Some(s) => Ok(serde_json::to_value(s).unwrap()),
+                    None => Err(format!("session not found: {}", p.id)),
+                },
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "agent.terminate" => {
+            #[derive(Deserialize)]
+            struct TerminateParams {
+                id: String,
+                #[serde(default)]
+                force: bool,
+            }
+            match serde_json::from_value::<TerminateParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.terminate(&p.id, p.force, &ctx.watcher_handle)
+                    .map(|_| serde_json::json!("ok")),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "agent.bind_panel" => {
+            #[derive(Deserialize)]
+            struct BindParams { session_id: String, panel_id: String }
+            match serde_json::from_value::<BindParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.bind_panel(&p.session_id, &p.panel_id)
+                    .map(|_| serde_json::json!("ok")),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "agent.unbind_panel" => {
+            #[derive(Deserialize)]
+            struct UnbindParams { session_id: String }
+            match serde_json::from_value::<UnbindParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.unbind_panel(&p.session_id)
+                    .map(|_| serde_json::json!("ok")),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "agent.add_pid" => {
+            #[derive(Deserialize)]
+            struct AddPidParams { session_id: String, pid: u32 }
+            match serde_json::from_value::<AddPidParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.add_pid(&p.session_id, p.pid)
+                    .map(|_| serde_json::json!("ok")),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+
+        // --- Tasks (F-06 Phase 2) ---
+        "task.create" => {
+            match serde_json::from_value::<crate::agent::TaskCreateParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.task_create(p)
+                    .map(|t| serde_json::to_value(t).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "task.get" => {
+            #[derive(Deserialize)]
+            struct P { id: String }
+            match serde_json::from_value::<P>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.task_get(&p.id)
+                    .map(|t| serde_json::to_value(t).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "task.list" => {
+            let params: crate::agent::TaskListParams = serde_json::from_value(req.params.clone())
+                .unwrap_or(crate::agent::TaskListParams { status: None, assignee: None });
+            let tasks = ctx.agent_manager.task_list(params);
+            Ok(serde_json::to_value(tasks).unwrap())
+        }
+        "task.update" => {
+            match serde_json::from_value::<crate::agent::TaskUpdateParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.task_update(p)
+                    .map(|t| serde_json::to_value(t).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "task.assign" => {
+            match serde_json::from_value::<crate::agent::TaskAssignParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.task_assign(p)
+                    .map(|t| serde_json::to_value(t).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "task.log" => {
+            #[derive(Deserialize)]
+            struct P { task_id: String, #[serde(default)] limit: Option<i64> }
+            match serde_json::from_value::<P>(req.params.clone()) {
+                Ok(p) => {
+                    let entries = ctx.agent_manager.task_log(&p.task_id, p.limit);
+                    Ok(serde_json::to_value(entries).unwrap())
+                }
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+
+        // --- Messages (F-06 Phase 2) ---
+        "message.send" => {
+            match serde_json::from_value::<crate::agent::MessageSendParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.message_send(p)
+                    .map(|m| serde_json::to_value(m).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "message.list" => {
+            match serde_json::from_value::<crate::agent::MessageListParams>(req.params.clone()) {
+                Ok(p) => {
+                    let msgs = ctx.agent_manager.message_list(p);
+                    Ok(serde_json::to_value(msgs).unwrap())
+                }
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+        "message.ack" => {
+            match serde_json::from_value::<crate::agent::MessageAckParams>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.message_ack(&p.message_ids)
+                    .map(|n| serde_json::json!({"acknowledged": n})),
+                Err(e) => Err(format!("invalid params: {e}")),
             }
         }
 

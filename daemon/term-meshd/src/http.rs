@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tower_http::cors::CorsLayer;
 
+use crate::agent::AgentSessionManager;
 use crate::monitor::{MonitorHandle, SystemSnapshot};
 use crate::socket::SessionStore;
 use crate::tokens::UsageTracker;
@@ -24,6 +25,7 @@ pub struct HttpState {
     pub watcher_handle: WatcherHandle,
     pub sessions: SessionStore,
     pub usage_tracker: UsageTracker,
+    pub agent_manager: Arc<AgentSessionManager>,
     pub dashboard_dir: Option<PathBuf>,
 }
 
@@ -34,6 +36,7 @@ pub async fn serve(
     watcher_handle: WatcherHandle,
     sessions: SessionStore,
     usage_tracker: UsageTracker,
+    agent_manager: Arc<AgentSessionManager>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let dashboard_dir = find_dashboard_dir();
@@ -44,6 +47,7 @@ pub async fn serve(
         watcher_handle,
         sessions,
         usage_tracker,
+        agent_manager,
         dashboard_dir,
     });
 
@@ -58,6 +62,18 @@ pub async fn serve(
         .route("/api/process/resume", post(process_resume_handler))
         .route("/api/usage", get(usage_handler))
         .route("/api/budget/auto-stop", post(budget_auto_stop_handler))
+        .route("/api/agents", get(agents_list_handler))
+        .route("/api/agents/spawn", post(agents_spawn_handler))
+        .route("/api/agents/{id}", get(agents_get_handler))
+        .route("/api/agents/{id}/terminate", post(agents_terminate_handler))
+        // Task & Message endpoints (F-06 Phase 2)
+        .route("/api/tasks", get(tasks_list_handler).post(tasks_create_handler))
+        .route("/api/tasks/{id}", get(tasks_get_handler).patch(tasks_update_handler))
+        .route("/api/tasks/{id}/assign", post(tasks_assign_handler))
+        .route("/api/tasks/{id}/log", get(tasks_log_handler))
+        .route("/api/messages", post(messages_send_handler))
+        .route("/api/messages/ack", post(messages_ack_handler))
+        .route("/api/messages/{agent_id}", get(messages_list_handler))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -176,6 +192,262 @@ async fn budget_auto_stop_handler(
 async fn usage_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
     let snapshot = state.usage_tracker.snapshot();
     Json(serde_json::to_value(snapshot).unwrap())
+}
+
+// --- Agent Session Handlers (F-06) ---
+
+async fn agents_list_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
+    let sessions = state.agent_manager.list(false);
+    Json(serde_json::to_value(sessions).unwrap())
+}
+
+async fn agents_get_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.agent_manager.get(&id) {
+        Some(s) => Json(serde_json::to_value(s).unwrap()).into_response(),
+        None => (StatusCode::NOT_FOUND, "session not found").into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct SpawnRequest {
+    repo_path: String,
+    #[serde(default = "default_count")]
+    count: usize,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    command: Option<String>,
+}
+
+fn default_count() -> usize { 1 }
+
+async fn agents_spawn_handler(
+    State(state): State<Arc<HttpState>>,
+    Json(req): Json<SpawnRequest>,
+) -> impl IntoResponse {
+    let params = crate::agent::SpawnParams {
+        repo_path: req.repo_path,
+        count: req.count,
+        name: req.name,
+        command: req.command,
+    };
+    match state.agent_manager.spawn(params, &state.watcher_handle) {
+        Ok(sessions) => Json(serde_json::to_value(sessions).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct TerminateRequest {
+    #[serde(default)]
+    force: bool,
+}
+
+async fn agents_terminate_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+    body: Option<Json<TerminateRequest>>,
+) -> impl IntoResponse {
+    let force = body.map(|b| b.force).unwrap_or(false);
+    match state.agent_manager.terminate(&id, force, &state.watcher_handle) {
+        Ok(_) => Json(serde_json::json!({"status": "ok"})).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e).into_response(),
+    }
+}
+
+// --- Task Handlers (F-06 Phase 2) ---
+
+#[derive(Deserialize)]
+struct TaskListQuery {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    assignee: Option<String>,
+}
+
+async fn tasks_list_handler(
+    State(state): State<Arc<HttpState>>,
+    Query(q): Query<TaskListQuery>,
+) -> impl IntoResponse {
+    let params = crate::agent::TaskListParams {
+        status: q.status,
+        assignee: q.assignee,
+    };
+    let tasks = state.agent_manager.task_list(params);
+    Json(serde_json::to_value(tasks).unwrap())
+}
+
+#[derive(Deserialize)]
+struct TaskCreateRequest {
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    priority: Option<i32>,
+    #[serde(default)]
+    created_by: Option<String>,
+    #[serde(default)]
+    deps: Option<Vec<String>>,
+}
+
+async fn tasks_create_handler(
+    State(state): State<Arc<HttpState>>,
+    Json(req): Json<TaskCreateRequest>,
+) -> impl IntoResponse {
+    let params = crate::agent::TaskCreateParams {
+        title: req.title,
+        description: req.description,
+        priority: req.priority,
+        created_by: req.created_by,
+        deps: req.deps,
+    };
+    match state.agent_manager.task_create(params) {
+        Ok(task) => (StatusCode::CREATED, Json(serde_json::to_value(task).unwrap())).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+async fn tasks_get_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.agent_manager.task_get(&id) {
+        Ok(task) => Json(serde_json::to_value(task).unwrap()).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct TaskUpdateRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    priority: Option<i32>,
+    #[serde(default)]
+    assignee: Option<String>,
+}
+
+async fn tasks_update_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+    Json(req): Json<TaskUpdateRequest>,
+) -> impl IntoResponse {
+    let params = crate::agent::TaskUpdateParams {
+        id,
+        title: req.title,
+        description: req.description,
+        status: req.status,
+        priority: req.priority,
+        assignee: req.assignee,
+    };
+    match state.agent_manager.task_update(params) {
+        Ok(task) => Json(serde_json::to_value(task).unwrap()).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct TaskAssignRequest {
+    agent_id: String,
+}
+
+async fn tasks_assign_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+    Json(req): Json<TaskAssignRequest>,
+) -> impl IntoResponse {
+    let params = crate::agent::TaskAssignParams {
+        task_id: id,
+        agent_id: req.agent_id,
+    };
+    match state.agent_manager.task_assign(params) {
+        Ok(task) => Json(serde_json::to_value(task).unwrap()).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct TaskLogQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn tasks_log_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+    Query(q): Query<TaskLogQuery>,
+) -> impl IntoResponse {
+    let entries = state.agent_manager.task_log(&id, q.limit);
+    Json(serde_json::to_value(entries).unwrap())
+}
+
+// --- Message Handlers (F-06 Phase 2) ---
+
+#[derive(Deserialize)]
+struct MessageSendRequest {
+    #[serde(default)]
+    from_agent: Option<String>,
+    to_agent: String,
+    content: String,
+}
+
+async fn messages_send_handler(
+    State(state): State<Arc<HttpState>>,
+    Json(req): Json<MessageSendRequest>,
+) -> impl IntoResponse {
+    let params = crate::agent::MessageSendParams {
+        from_agent: req.from_agent,
+        to_agent: req.to_agent,
+        content: req.content,
+    };
+    match state.agent_manager.message_send(params) {
+        Ok(msg) => (StatusCode::CREATED, Json(serde_json::to_value(msg).unwrap())).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct MessageListQuery {
+    #[serde(default)]
+    unread_only: Option<bool>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+async fn messages_list_handler(
+    State(state): State<Arc<HttpState>>,
+    Path(agent_id): Path<String>,
+    Query(q): Query<MessageListQuery>,
+) -> impl IntoResponse {
+    let params = crate::agent::MessageListParams {
+        agent_id,
+        unread_only: q.unread_only,
+        limit: q.limit,
+    };
+    let msgs = state.agent_manager.message_list(params);
+    Json(serde_json::to_value(msgs).unwrap())
+}
+
+#[derive(Deserialize)]
+struct MessageAckRequest {
+    message_ids: Vec<i64>,
+}
+
+async fn messages_ack_handler(
+    State(state): State<Arc<HttpState>>,
+    Json(req): Json<MessageAckRequest>,
+) -> impl IntoResponse {
+    match state.agent_manager.message_ack(&req.message_ids) {
+        Ok(n) => Json(serde_json::json!({"acknowledged": n})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 fn find_dashboard_dir() -> Option<PathBuf> {

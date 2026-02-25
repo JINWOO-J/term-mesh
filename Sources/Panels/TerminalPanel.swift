@@ -21,6 +21,9 @@ final class TerminalPanel: Panel, ObservableObject {
     /// Published directory from the terminal
     @Published private(set) var directory: String = ""
 
+    /// Agent session ID bound to this panel (F-06). nil = plain terminal.
+    var agentSessionId: String?
+
     /// Search state for find functionality
     @Published var searchState: TerminalSurface.SearchState? {
         didSet {
@@ -134,6 +137,12 @@ final class TerminalPanel: Panel, ObservableObject {
     }
 
     func close() {
+        // Unbind agent session if bound (session stays alive in daemon)
+        if let sessionId = agentSessionId {
+            DispatchQueue.global(qos: .utility).async {
+                let _ = TermMeshDaemon.shared.unbindAgentPanel(sessionId: sessionId)
+            }
+        }
         // The surface will be cleaned up by its deinit
         // Just unfocus before closing
         unfocus()

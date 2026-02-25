@@ -3965,7 +3965,11 @@ struct ContentView: View {
             return custom
         }
         let title = workspace.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "Workspace" : title
+        let base = title.isEmpty ? "Workspace" : title
+        if workspace.worktreeName != nil {
+            return "🔀 " + base
+        }
+        return base
     }
 
     private func panelDisplayName(workspace: Workspace, panelId: UUID, fallback: String) -> String {
@@ -5956,11 +5960,17 @@ private struct TabItemView: View {
                         .foregroundColor(activeSecondaryColor(0.8))
                 }
 
-                Text(tab.title)
-                    .font(.system(size: 12.5, weight: titleFontWeight))
-                    .foregroundColor(activePrimaryTextColor)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 4) {
+                    if tab.worktreeName != nil {
+                        Text("🔀")
+                            .font(.system(size: 11))
+                    }
+                    Text(tab.title)
+                        .font(.system(size: 12.5, weight: titleFontWeight))
+                        .foregroundColor(activePrimaryTextColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
 
                 Spacer()
 

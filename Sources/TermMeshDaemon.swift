@@ -1,8 +1,9 @@
 import Foundation
+import Combine
 
 /// Client for communicating with the term-meshd Rust daemon over Unix socket.
 /// Uses JSON-RPC 2.0 (line-delimited) protocol.
-final class TermMeshDaemon {
+final class TermMeshDaemon: ObservableObject {
     static let shared = TermMeshDaemon()
 
     private var daemonProcess: Process?
@@ -10,7 +11,7 @@ final class TermMeshDaemon {
     private var nextId: Int = 1
 
     /// Whether worktree sandboxing is enabled for new tabs.
-    var worktreeEnabled: Bool = false
+    @Published var worktreeEnabled: Bool = false
 
     // MARK: - Socket Path
 
@@ -84,6 +85,44 @@ final class TermMeshDaemon {
         if let branch { params["branch"] = branch }
         guard let response = rpcCall(method: "worktree.create", params: params) else { return nil }
         return parseWorktreeInfo(response)
+    }
+
+    /// Create a worktree with detailed error reporting.
+    func createWorktreeWithError(repoPath: String, branch: String? = nil) -> Result<WorktreeInfo, WorktreeCreateError> {
+        // Check if CWD is inside a git repo (walk up to find .git)
+        guard let gitRoot = findGitRoot(from: repoPath) else {
+            return .failure(.notGitRepo)
+        }
+
+        // Check daemon connectivity
+        guard ping() else {
+            return .failure(.daemonNotConnected)
+        }
+
+        var params: [String: Any] = ["repo_path": gitRoot]
+        if let branch { params["branch"] = branch }
+        guard let response = rpcCall(method: "worktree.create", params: params),
+              let info = parseWorktreeInfo(response) else {
+            return .failure(.rpcError("Worktree creation failed"))
+        }
+        return .success(info)
+    }
+
+    /// Walk up from `path` to find the nearest directory containing `.git`.
+    func findGitRoot(from path: String) -> String? {
+        var current = path
+        guard !current.isEmpty, current.hasPrefix("/") else { return nil }
+        let fm = FileManager.default
+        while current != "/" && !current.isEmpty {
+            let gitDir = (current as NSString).appendingPathComponent(".git")
+            if fm.fileExists(atPath: gitDir) {
+                return current
+            }
+            let parent = (current as NSString).deletingLastPathComponent
+            if parent == current { return nil }  // safety: no progress
+            current = parent
+        }
+        return nil
     }
 
     /// Remove a worktree by name.
@@ -161,6 +200,77 @@ final class TermMeshDaemon {
     /// Sync terminal sessions with the daemon (for remote dashboard).
     func syncSessions(_ sessions: [[String: Any]]) {
         let _ = rpcCall(method: "session.sync", params: ["sessions": sessions])
+    }
+
+    // MARK: - Agent Sessions (F-06)
+
+    /// Spawn N agent sessions with worktree sandboxes.
+    func spawnAgents(repoPath: String, count: Int = 1, name: String? = nil, command: String? = nil) -> [AgentSessionInfo] {
+        var params: [String: Any] = ["repo_path": repoPath, "count": count]
+        if let name { params["name"] = name }
+        if let command { params["command"] = command }
+        guard let response = rpcCall(method: "agent.spawn", params: params) as? [[String: Any]] else { return [] }
+        return response.compactMap { parseAgentSessionInfo($0) }
+    }
+
+    /// List agent sessions (active only by default).
+    func listAgents(includeTerminated: Bool = false) -> [AgentSessionInfo] {
+        let params: [String: Any] = ["include_terminated": includeTerminated]
+        guard let response = rpcCall(method: "agent.list", params: params) as? [[String: Any]] else { return [] }
+        return response.compactMap { parseAgentSessionInfo($0) }
+    }
+
+    /// Get a single agent session by ID.
+    func getAgent(id: String) -> AgentSessionInfo? {
+        guard let response = rpcCall(method: "agent.get", params: ["id": id]) as? [String: Any] else { return nil }
+        return parseAgentSessionInfo(response)
+    }
+
+    /// Terminate an agent session (cleanup worktree + processes).
+    func terminateAgent(id: String, force: Bool = false) -> Bool {
+        let params: [String: Any] = ["id": id, "force": force]
+        return rpcCall(method: "agent.terminate", params: params) != nil
+    }
+
+    /// Bind a UI panel to an agent session.
+    func bindAgentPanel(sessionId: String, panelId: String) -> Bool {
+        let params: [String: Any] = ["session_id": sessionId, "panel_id": panelId]
+        return rpcCall(method: "agent.bind_panel", params: params) != nil
+    }
+
+    /// Unbind a UI panel from an agent session (session stays alive).
+    func unbindAgentPanel(sessionId: String) -> Bool {
+        let params: [String: Any] = ["session_id": sessionId]
+        return rpcCall(method: "agent.unbind_panel", params: params) != nil
+    }
+
+    /// Register a PID with an agent session.
+    func addAgentPid(sessionId: String, pid: Int32) -> Bool {
+        let params: [String: Any] = ["session_id": sessionId, "pid": pid]
+        return rpcCall(method: "agent.add_pid", params: params) != nil
+    }
+
+    private func parseAgentSessionInfo(_ dict: [String: Any]) -> AgentSessionInfo? {
+        guard let id = dict["id"] as? String,
+              let name = dict["name"] as? String,
+              let repoPath = dict["repo_path"] as? String,
+              let worktreeName = dict["worktree_name"] as? String,
+              let worktreePath = dict["worktree_path"] as? String,
+              let worktreeBranch = dict["worktree_branch"] as? String,
+              let status = dict["status"] as? String else { return nil }
+        return AgentSessionInfo(
+            id: id,
+            name: name,
+            repoPath: repoPath,
+            worktreeName: worktreeName,
+            worktreePath: worktreePath,
+            worktreeBranch: worktreeBranch,
+            command: dict["command"] as? String,
+            status: status,
+            pid: (dict["pid"] as? NSNumber)?.int32Value,
+            panelId: dict["panel_id"] as? String,
+            createdAtMs: (dict["created_at_ms"] as? NSNumber)?.uint64Value ?? 0
+        )
     }
 
     // MARK: - General
@@ -282,4 +392,24 @@ struct WorktreeInfo {
     let name: String
     let path: String
     let branch: String
+}
+
+enum WorktreeCreateError: Error {
+    case daemonNotConnected
+    case notGitRepo
+    case rpcError(String)
+}
+
+struct AgentSessionInfo {
+    let id: String
+    let name: String
+    let repoPath: String
+    let worktreeName: String
+    let worktreePath: String
+    let worktreeBranch: String
+    let command: String?
+    let status: String  // "spawning", "running", "suspended", "terminated"
+    let pid: Int32?
+    let panelId: String?
+    let createdAtMs: UInt64
 }

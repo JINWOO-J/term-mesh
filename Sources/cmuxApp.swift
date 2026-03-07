@@ -34,6 +34,7 @@ struct cmuxApp: App {
     @AppStorage(KeyboardShortcutSettings.Action.renameWorkspace.defaultsKey) private var renameWorkspaceShortcutData = Data()
     @AppStorage(KeyboardShortcutSettings.Action.closeWorkspace.defaultsKey) private var closeWorkspaceShortcutData = Data()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var showTeamCreation = false
 
     init() {
         Self.configureGhosttyEnvironment()
@@ -193,6 +194,31 @@ struct cmuxApp: App {
                 }
                 .onChange(of: socketControlMode) { _ in
                     updateSocketController()
+                }
+                .sheet(isPresented: $showTeamCreation) {
+                    TeamCreationView { teamName, leaderMode, agents in
+                        let agentTuples = agents.map { row in
+                            (
+                                name: row.preset.name,
+                                model: row.preset.model,
+                                agentType: row.preset.name,
+                                color: row.preset.color,
+                                instructions: row.customInstructions.isEmpty
+                                    ? row.preset.instructions
+                                    : row.customInstructions
+                            )
+                        }
+                        let workDir = tabManager.selectedTab?.currentDirectory
+                            ?? FileManager.default.currentDirectoryPath
+                        _ = TeamOrchestrator.shared.createTeam(
+                            name: teamName,
+                            agents: agentTuples,
+                            workingDirectory: workDir,
+                            leaderSessionId: UUID().uuidString,
+                            leaderMode: leaderMode,
+                            tabManager: tabManager
+                        )
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -398,6 +424,13 @@ struct cmuxApp: App {
                 splitCommandButton(title: "New Workspace", shortcut: newWorkspaceMenuShortcut) {
                     activeTabManager.addTab()
                 }
+
+                Divider()
+
+                Button("New Agent Team…") {
+                    showTeamCreation = true
+                }
+                .keyboardShortcut("t", modifiers: [.command, .option])
             }
 
             // Close tab/workspace

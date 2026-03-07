@@ -18,6 +18,10 @@
 			A5001534 /* BrowserWindowPortal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001533 /* BrowserWindowPortal.swift */; };
 		A5001540 /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001541 /* PortScanner.swift */; };
 		A5001700 /* TermMeshDaemon.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001701 /* TermMeshDaemon.swift */; };
+		F46F7DFF875543329CD15B08 /* AgentRolePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE801F330BAD4EB88D9D875E /* AgentRolePreset.swift */; };
+		562D55FA859F4E8B94EB49CB /* TeamCreationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B848F672710C48B1944F70BF /* TeamCreationView.swift */; };
+		4C9D95957760492496CD2E3E /* RolePresetEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813264D854BA4B5F9AA4F9FC /* RolePresetEditorView.swift */; };
+		A5001710 /* TeamOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001711 /* TeamOrchestrator.swift */; };
 		A5001702 /* DashboardController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001703 /* DashboardController.swift */; };
 		A5001704 /* dashboard in Resources */ = {isa = PBXBuildFile; fileRef = A5001705 /* dashboard */; };
 			A5001006 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A5001016 /* GhosttyKit.xcframework */; };
@@ -147,6 +151,10 @@
 			A5001533 /* BrowserWindowPortal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWindowPortal.swift; sourceTree = "<group>"; };
 		A5001541 /* PortScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
 		A5001701 /* TermMeshDaemon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermMeshDaemon.swift; sourceTree = "<group>"; };
+		DE801F330BAD4EB88D9D875E /* AgentRolePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRolePreset.swift; sourceTree = "<group>"; };
+		B848F672710C48B1944F70BF /* TeamCreationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamCreationView.swift; sourceTree = "<group>"; };
+		813264D854BA4B5F9AA4F9FC /* RolePresetEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RolePresetEditorView.swift; sourceTree = "<group>"; };
+		A5001711 /* TeamOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamOrchestrator.swift; sourceTree = "<group>"; };
 		A5001703 /* DashboardController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardController.swift; sourceTree = "<group>"; };
 		A5001705 /* dashboard */ = {isa = PBXFileReference; lastKnownFileType = folder; path = dashboard; sourceTree = "<group>"; };
 			A5001016 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
@@ -331,6 +339,10 @@
 				A5001019 /* TerminalController.swift */,
 				A5001541 /* PortScanner.swift */,
 				A5001701 /* TermMeshDaemon.swift */,
+				A5001711 /* TeamOrchestrator.swift */,
+				813264D854BA4B5F9AA4F9FC /* RolePresetEditorView.swift */,
+				B848F672710C48B1944F70BF /* TeamCreationView.swift */,
+				DE801F330BAD4EB88D9D875E /* AgentRolePreset.swift */,
 				A5001703 /* DashboardController.swift */,
 				A5001225 /* SocketControlSettings.swift */,
 				A5001600 /* SentryHelper.swift */,
@@ -564,6 +576,10 @@
 				A5001007 /* TerminalController.swift in Sources */,
 				A5001540 /* PortScanner.swift in Sources */,
 				A5001700 /* TermMeshDaemon.swift in Sources */,
+				A5001710 /* TeamOrchestrator.swift in Sources */,
+				4C9D95957760492496CD2E3E /* RolePresetEditorView.swift in Sources */,
+				562D55FA859F4E8B94EB49CB /* TeamCreationView.swift in Sources */,
+				F46F7DFF875543329CD15B08 /* AgentRolePreset.swift in Sources */,
 				A5001702 /* DashboardController.swift in Sources */,
 				A5001226 /* SocketControlSettings.swift in Sources */,
 				A5001601 /* SentryHelper.swift in Sources */,

@@ -87,14 +87,16 @@ final class TerminalPanel: Panel, ObservableObject {
         configTemplate: ghostty_surface_config_s? = nil,
         workingDirectory: String? = nil,
         portOrdinal: Int = 0,
-        command: String? = nil
+        command: String? = nil,
+        environment: [String: String] = [:]
     ) {
         let surface = TerminalSurface(
             tabId: workspaceId,
             context: context,
             configTemplate: configTemplate,
             workingDirectory: workingDirectory,
-            command: command
+            command: command,
+            environment: environment
         )
         surface.portOrdinal = portOrdinal
         self.init(workspaceId: workspaceId, surface: surface)
@@ -163,6 +165,11 @@ final class TerminalPanel: Panel, ObservableObject {
     /// Send a synthetic key press via NSEvent (bypasses bracketed paste).
     func sendKeyPress(keycode: UInt16, characters: String = "\r") {
         hostedView.sendSyntheticKeyPress(keycode: keycode, characters: characters)
+    }
+
+    /// Send text as key events (works with TUI apps like Claude Code).
+    func sendInputText(_ text: String) {
+        surface.sendInputText(text)
     }
 
     /// Send a key press directly through the Ghostty surface API.

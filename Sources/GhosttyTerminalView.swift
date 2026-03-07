@@ -1403,6 +1403,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
     private let configTemplate: ghostty_surface_config_s?
     private let workingDirectory: String?
     private let command: String?
+    let additionalEnvironment: [String: String]
     let hostedView: GhosttySurfaceScrollView
     private let surfaceView: GhosttyNSView
     private var lastPixelWidth: UInt32 = 0
@@ -1449,7 +1450,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
         context: ghostty_surface_context_e,
         configTemplate: ghostty_surface_config_s?,
         workingDirectory: String? = nil,
-        command: String? = nil
+        command: String? = nil,
+        environment: [String: String] = [:]
     ) {
         self.id = UUID()
         self.tabId = tabId
@@ -1457,6 +1459,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         self.configTemplate = configTemplate
         self.workingDirectory = workingDirectory?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.command = command
+        self.additionalEnvironment = environment
         // Match Ghostty's own SurfaceView: ensure a non-zero initial frame so the backing layer
         // has non-zero bounds and the renderer can initialize without presenting a blank/stretched
         // intermediate frame on the first real resize.
@@ -1658,6 +1661,11 @@ final class TerminalSurface: Identifiable, ObservableObject {
                     }
                 }
             }
+        }
+
+        // Merge caller-supplied environment (e.g. team agent vars)
+        for (key, value) in additionalEnvironment {
+            env[key] = value
         }
 
         env["CMUX_SURFACE_ID"] = id.uuidString
@@ -1995,6 +2003,50 @@ final class TerminalSurface: Identifiable, ObservableObject {
         keyEvent.composing = false
         keyEvent.text = nil
         _ = ghostty_surface_key(surface, keyEvent)
+    }
+
+    /// Send text as key events through the ghostty surface API.
+    /// Unlike sendText (which writes raw bytes to PTY), this sends proper key events
+    /// that work with TUI applications like Claude Code.
+    func sendInputText(_ text: String) {
+        guard let surface = surface else { return }
+        var buffered = ""
+
+        func flush() {
+            guard !buffered.isEmpty else { return }
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 0
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.unshifted_codepoint = 0
+            keyEvent.composing = false
+            buffered.withCString { ptr in
+                keyEvent.text = ptr
+                _ = ghostty_surface_key(surface, keyEvent)
+            }
+            buffered.removeAll(keepingCapacity: true)
+        }
+
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x0A, 0x0D:
+                flush()
+                sendSurfaceKeyPress(keycode: 0x24) // kVK_Return
+            case 0x09:
+                flush()
+                sendSurfaceKeyPress(keycode: 0x30) // kVK_Tab
+            case 0x1B:
+                flush()
+                sendSurfaceKeyPress(keycode: 0x35) // kVK_Escape
+            case 0x7F:
+                flush()
+                sendSurfaceKeyPress(keycode: 0x33) // kVK_Delete
+            default:
+                buffered.unicodeScalars.append(scalar)
+            }
+        }
+        flush()
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {

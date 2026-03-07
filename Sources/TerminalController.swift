@@ -1079,6 +1079,20 @@ class TerminalController {
         case "pane.last":
             return v2Result(id: id, self.v2PaneLast(params: params))
 
+        // Agent Teams
+        case "team.create":
+            return v2Result(id: id, self.v2TeamCreate(params: params))
+        case "team.list":
+            return v2Result(id: id, self.v2TeamList(params: params))
+        case "team.status":
+            return v2Result(id: id, self.v2TeamStatus(params: params))
+        case "team.send":
+            return v2Result(id: id, self.v2TeamSend(params: params))
+        case "team.broadcast":
+            return v2Result(id: id, self.v2TeamBroadcast(params: params))
+        case "team.destroy":
+            return v2Result(id: id, self.v2TeamDestroy(params: params))
+
         // Notifications
         case "notification.create":
             return v2Result(id: id, self.v2NotificationCreate(params: params))
@@ -4164,6 +4178,149 @@ class TerminalController {
             ])
         }
         return result
+    }
+
+    // MARK: - V2 Agent Team Methods
+
+    private func v2TeamCreate(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String, !teamName.isEmpty else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let agentsParam = params["agents"] as? [[String: Any]], !agentsParam.isEmpty else {
+            return .err(code: "invalid_params", message: "Missing or empty agents array", data: nil)
+        }
+
+        let workingDirectory = params["working_directory"] as? String ?? FileManager.default.currentDirectoryPath
+        let leaderSessionId = params["leader_session_id"] as? String ?? UUID().uuidString
+
+        let agents = agentsParam.map { dict -> (name: String, model: String, agentType: String, color: String, instructions: String) in
+            (
+                name: dict["name"] as? String ?? "agent",
+                model: dict["model"] as? String ?? "sonnet",
+                agentType: dict["agent_type"] as? String ?? "general",
+                color: dict["color"] as? String ?? "",
+                instructions: dict["instructions"] as? String ?? ""
+            )
+        }
+
+        let leaderMode = params["leader_mode"] as? String ?? "repl"
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to create team", data: nil)
+        v2MainSync {
+            if let team = TeamOrchestrator.shared.createTeam(
+                name: teamName,
+                agents: agents,
+                workingDirectory: workingDirectory,
+                leaderSessionId: leaderSessionId,
+                leaderMode: leaderMode,
+                tabManager: tabManager
+            ) {
+                result = .ok([
+                    "team_name": team.id,
+                    "agent_count": team.agents.count,
+                    "workspace_id": team.workspaceId.uuidString,
+                    "agents": team.agents.map { [
+                        "id": $0.id,
+                        "name": $0.name,
+                        "model": $0.model,
+                        "workspace_id": $0.workspaceId.uuidString,
+                        "panel_id": $0.panelId.uuidString
+                    ] as [String: Any] }
+                ] as [String: Any])
+            }
+        }
+        return result
+    }
+
+    private func v2TeamList(params: [String: Any]) -> V2CallResult {
+        var result: V2CallResult = .ok([] as [[String: Any]])
+        v2MainSync {
+            result = .ok(TeamOrchestrator.shared.listTeams())
+        }
+        return result
+    }
+
+    private func v2TeamStatus(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        var result: V2CallResult = .err(code: "not_found", message: "Team not found", data: nil)
+        v2MainSync {
+            if let status = TeamOrchestrator.shared.teamStatus(name: teamName) {
+                result = .ok(status)
+            }
+        }
+        return result
+    }
+
+    private func v2TeamSend(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing agent_name", data: nil)
+        }
+        guard let text = params["text"] as? String else {
+            return .err(code: "invalid_params", message: "Missing text", data: nil)
+        }
+
+        var success = false
+        v2MainSync {
+            success = TeamOrchestrator.shared.sendToAgent(
+                teamName: teamName,
+                agentName: agentName,
+                text: text,
+                tabManager: tabManager
+            )
+        }
+        return success
+            ? .ok(["sent": true, "team_name": teamName, "agent_name": agentName])
+            : .err(code: "not_found", message: "Agent or team not found", data: nil)
+    }
+
+    private func v2TeamBroadcast(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let text = params["text"] as? String else {
+            return .err(code: "invalid_params", message: "Missing text", data: nil)
+        }
+
+        var count = 0
+        v2MainSync {
+            count = TeamOrchestrator.shared.broadcast(
+                teamName: teamName,
+                text: text,
+                tabManager: tabManager
+            )
+        }
+        return .ok(["sent_count": count, "team_name": teamName])
+    }
+
+    private func v2TeamDestroy(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+
+        var success = false
+        v2MainSync {
+            success = TeamOrchestrator.shared.destroyTeam(name: teamName, tabManager: tabManager)
+        }
+        return success
+            ? .ok(["destroyed": true, "team_name": teamName])
+            : .err(code: "not_found", message: "Team not found", data: nil)
     }
 
     // MARK: - V2 Notification Methods

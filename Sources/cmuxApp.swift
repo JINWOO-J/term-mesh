@@ -195,6 +195,9 @@ struct cmuxApp: App {
                 .onChange(of: socketControlMode) { _ in
                     updateSocketController()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .teamCreationRequested)) { _ in
+                    showTeamCreation = true
+                }
                 .sheet(isPresented: $showTeamCreation) {
                     TeamCreationView { teamName, leaderMode, agents in
                         let agentTuples = agents.map { row in

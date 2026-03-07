@@ -1162,7 +1162,8 @@ final class Workspace: Identifiable, ObservableObject {
         insertFirst: Bool = false,
         focus: Bool = true,
         workingDirectory: String? = nil,
-        command: String? = nil
+        command: String? = nil,
+        environment: [String: String] = [:]
     ) -> TerminalPanel? {
         // Find the pane containing the source panel
         guard let sourceTabId = surfaceIdFromPanelId(panelId) else { return nil }
@@ -1185,7 +1186,8 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: inheritedConfig,
             workingDirectory: workingDirectory,
             portOrdinal: portOrdinal,
-            command: command
+            command: command,
+            environment: environment
         )
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle

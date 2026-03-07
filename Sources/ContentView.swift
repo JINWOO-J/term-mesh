@@ -3737,6 +3737,35 @@ struct ContentView: View {
             )
         )
 
+        // --- Agent Team Commands ---
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.newAgentTeam",
+                title: constant("New Agent Team…"),
+                subtitle: constant("Team"),
+                shortcutHint: "⌘⌥T",
+                keywords: ["agent", "team", "create", "multi", "orchestrate", "claude"]
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.destroyTeam",
+                title: constant("Destroy Agent Team"),
+                subtitle: constant("Team"),
+                keywords: ["agent", "team", "destroy", "stop", "kill", "close"],
+                when: { _ in !TeamOrchestrator.shared.teams.isEmpty }
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.broadcastToTeam",
+                title: constant("Broadcast to All Agents"),
+                subtitle: constant("Team"),
+                keywords: ["agent", "team", "broadcast", "send", "all", "message"],
+                when: { _ in !TeamOrchestrator.shared.teams.isEmpty }
+            )
+        )
+
         return contributions
     }
 
@@ -3953,6 +3982,25 @@ struct ContentView: View {
         }
         registry.register(commandId: "palette.terminalSplitBrowserDown") {
             _ = tabManager.createBrowserSplit(direction: .down)
+        }
+
+        // --- Agent Team Commands ---
+        registry.register(commandId: "palette.newAgentTeam") {
+            NotificationCenter.default.post(name: .teamCreationRequested, object: nil)
+        }
+        registry.register(commandId: "palette.destroyTeam") {
+            let teams = TeamOrchestrator.shared.teams
+            guard let firstTeam = teams.keys.sorted().first else { return }
+            _ = TeamOrchestrator.shared.destroyTeam(name: firstTeam, tabManager: tabManager)
+        }
+        registry.register(commandId: "palette.broadcastToTeam") {
+            // Broadcast is handled via the leader REPL or socket API;
+            // from palette we focus the leader workspace for the first active team.
+            let teams = TeamOrchestrator.shared.teams
+            guard let firstTeam = teams.values.sorted(by: { $0.createdAt < $1.createdAt }).first else { return }
+            if let workspace = tabManager.tabs.first(where: { $0.id == firstTeam.workspaceId }) {
+                tabManager.selectTab(workspace)
+            }
         }
     }
 

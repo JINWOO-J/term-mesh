@@ -87,6 +87,7 @@ struct SidebarProgressState {
 struct SidebarGitBranchState {
     let branch: String
     let isDirty: Bool
+    var dirtyFileCount: Int?
 }
 
 enum SidebarBranchOrdering {
@@ -873,10 +874,10 @@ final class Workspace: Identifiable, ObservableObject {
         }
     }
 
-    func updatePanelGitBranch(panelId: UUID, branch: String, isDirty: Bool) {
-        let state = SidebarGitBranchState(branch: branch, isDirty: isDirty)
+    func updatePanelGitBranch(panelId: UUID, branch: String, isDirty: Bool, dirtyFileCount: Int? = nil) {
+        let state = SidebarGitBranchState(branch: branch, isDirty: isDirty, dirtyFileCount: dirtyFileCount)
         let existing = panelGitBranches[panelId]
-        if existing?.branch != branch || existing?.isDirty != isDirty {
+        if existing?.branch != branch || existing?.isDirty != isDirty || existing?.dirtyFileCount != dirtyFileCount {
             panelGitBranches[panelId] = state
         }
         if panelId == focusedPanelId {

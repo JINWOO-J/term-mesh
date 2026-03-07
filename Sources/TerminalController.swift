@@ -8327,7 +8327,7 @@ class TerminalController {
           list_log [--limit=N] [--tab=X] - List log entries
           set_progress <0.0-1.0> [--label=X] [--tab=X] - Set progress bar
           clear_progress [--tab=X] - Clear progress bar
-          report_git_branch <branch> [--status=dirty] [--tab=X] [--panel=Y] - Report git branch
+          report_git_branch <branch> [--status=dirty] [--files=N] [--tab=X] [--panel=Y] - Report git branch
           clear_git_branch [--tab=X] [--panel=Y] - Clear git branch
           report_ports <port1> [port2...] [--tab=X] [--panel=Y] - Report listening ports
           report_tty <tty_name> [--tab=X] [--panel=Y] - Register TTY for batched port scanning
@@ -11493,6 +11493,7 @@ class TerminalController {
             return "ERROR: Missing branch name — usage: report_git_branch <branch> [--status=dirty] [--tab=X] [--panel=Y]"
         }
         let isDirty = parsed.options["status"]?.lowercased() == "dirty"
+        let dirtyFileCount = parsed.options["files"].flatMap { Int($0) }
 
         var result = "OK"
         DispatchQueue.main.sync {
@@ -11507,7 +11508,7 @@ class TerminalController {
             let surfaceId: UUID
             if let panelArg {
                 if panelArg.isEmpty {
-                    result = "ERROR: Missing panel id — usage: report_git_branch <branch> [--status=dirty] [--tab=X] [--panel=Y]"
+                    result = "ERROR: Missing panel id — usage: report_git_branch <branch> [--status=dirty] [--files=N] [--tab=X] [--panel=Y]"
                     return
                 }
                 guard let parsedId = UUID(uuidString: panelArg) else {
@@ -11528,7 +11529,7 @@ class TerminalController {
                 return
             }
 
-            tab.updatePanelGitBranch(panelId: surfaceId, branch: branch, isDirty: isDirty)
+            tab.updatePanelGitBranch(panelId: surfaceId, branch: branch, isDirty: isDirty, dirtyFileCount: dirtyFileCount)
         }
         return result
     }

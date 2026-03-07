@@ -3737,6 +3737,19 @@ struct ContentView: View {
             )
         )
 
+        // --- Dev Workflow Commands ---
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.copyGitBranch",
+                title: constant("Copy Git Branch"),
+                subtitle: constant("Dev"),
+                keywords: ["git", "branch", "copy", "clipboard"],
+                when: { _ in
+                    tabManager.selectedWorkspace?.gitBranch != nil
+                }
+            )
+        )
+
         // --- Agent Team Commands ---
         contributions.append(
             CommandPaletteCommandContribution(
@@ -3982,6 +3995,14 @@ struct ContentView: View {
         }
         registry.register(commandId: "palette.terminalSplitBrowserDown") {
             _ = tabManager.createBrowserSplit(direction: .down)
+        }
+
+        // --- Dev Workflow Commands ---
+        registry.register(commandId: "palette.copyGitBranch") {
+            if let branch = tabManager.selectedWorkspace?.gitBranch?.branch {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(branch, forType: .string)
+            }
         }
 
         // --- Agent Team Commands ---
@@ -6087,6 +6108,20 @@ private struct TabItemView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
+            // Active team indicator
+            if let teamName = activeTeamName {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.3.fill")
+                        .font(.system(size: 8))
+                    Text(teamName)
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundColor(activeSecondaryColor(0.9))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+            }
+
             // Latest log entry
             if sidebarShowLog, let latestLog = tab.logEntries.last {
                 HStack(spacing: 4) {
@@ -6596,6 +6631,10 @@ private struct TabItemView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private var activeTeamName: String? {
+        TeamOrchestrator.shared.teams.values.first(where: { $0.workspaceId == tab.id })?.id
+    }
+
     private var branchDirectoryRow: String? {
         var parts: [String] = []
 
@@ -6621,7 +6660,15 @@ private struct TabItemView: View {
 
     private var gitBranchSummaryLines: [String] {
         tab.sidebarGitBranchesInDisplayOrder().map { branch in
-            "\(branch.branch)\(branch.isDirty ? "*" : "")"
+            var text = branch.branch
+            if branch.isDirty {
+                if let count = branch.dirtyFileCount, count > 0 {
+                    text += "* (\(count))"
+                } else {
+                    text += "*"
+                }
+            }
+            return text
         }
     }
 

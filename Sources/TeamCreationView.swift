@@ -15,6 +15,9 @@ struct TeamCreationView: View {
 
     var onCreate: ((_ teamName: String, _ leaderMode: String, _ agents: [TeamAgentRow]) -> Void)?
 
+    @AppStorage("teamDefaultLeaderMode") private var defaultLeaderMode = "repl"
+    @AppStorage("teamDefaultModel") private var defaultModel = "sonnet"
+
     @State private var teamName = "my-team"
     @State private var leaderMode = "repl"  // "repl" or "claude"
     @State private var agents: [TeamAgentRow] = []
@@ -42,6 +45,7 @@ struct TeamCreationView: View {
         .frame(width: 520, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
+            leaderMode = defaultLeaderMode
             if agents.isEmpty {
                 applyQuickPreset(count: 2)
             }
@@ -317,14 +321,17 @@ struct TeamCreationView: View {
 
     private func addAgent() {
         let available = presetManager.presets
-        let preset = available[agents.count % available.count]
+        var preset = available[agents.count % available.count]
+        preset.model = defaultModel
         agents.append(TeamAgentRow(preset: preset, customInstructions: ""))
     }
 
     private func applyQuickPreset(count: Int) {
         let available = presetManager.presets
         agents = (0..<min(count, available.count)).map { i in
-            TeamAgentRow(preset: available[i], customInstructions: "")
+            var preset = available[i]
+            preset.model = defaultModel
+            return TeamAgentRow(preset: preset, customInstructions: "")
         }
     }
 

@@ -2781,6 +2781,10 @@ struct SettingsView: View {
     @AppStorage(SidebarBranchLayoutSettings.key) private var sidebarBranchVerticalLayout = SidebarBranchLayoutSettings.defaultVerticalLayout
     @AppStorage(SidebarActiveTabIndicatorSettings.styleKey)
     private var sidebarActiveTabIndicatorStyle = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
+    @AppStorage("teamDefaultLeaderMode") private var teamDefaultLeaderMode = "repl"
+    @AppStorage("teamDefaultModel") private var teamDefaultModel = "sonnet"
+    @AppStorage("teamDefaultWorkingDirectory") private var teamDefaultWorkingDirectory = ""
+
     @State private var shortcutResetToken = UUID()
     @State private var topBlurOpacity: Double = 0
     @State private var topBlurBaselineOffset: CGFloat?
@@ -3268,6 +3272,78 @@ struct SettingsView: View {
                     }
                     }
 
+                    if sectionVisible(["agent", "team"], rowKeywords: [
+                        ["leader", "mode", "repl", "claude"],
+                        ["model", "sonnet", "opus", "haiku"],
+                        ["directory", "working", "path"]
+                    ]) {
+                    SettingsSectionHeader(title: "Agent Teams")
+                    SettingsCard {
+                        if settingsMatch("leader", "mode", "repl", "claude", "agent", "team") {
+                        SettingsCardRow(
+                            "Default Leader Mode",
+                            subtitle: teamDefaultLeaderMode == "claude"
+                                ? "Leader runs Claude automatically."
+                                : "Leader provides a manual REPL console.",
+                            controlWidth: pickerColumnWidth
+                        ) {
+                            Picker("", selection: $teamDefaultLeaderMode) {
+                                Text("REPL (Manual)").tag("repl")
+                                Text("Claude (Auto)").tag("claude")
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                        }
+                        }
+
+                        if settingsMatch("model", "sonnet", "opus", "haiku", "agent", "team") {
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            "Default Agent Model",
+                            subtitle: "Model used for new agents when creating a team.",
+                            controlWidth: pickerColumnWidth
+                        ) {
+                            Picker("", selection: $teamDefaultModel) {
+                                Text("Sonnet").tag("sonnet")
+                                Text("Opus").tag("opus")
+                                Text("Haiku").tag("haiku")
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                        }
+                        }
+
+                        if settingsMatch("directory", "working", "path", "agent", "team") {
+                        SettingsCardDivider()
+
+                        SettingsCardRow(
+                            "Default Working Directory",
+                            subtitle: teamDefaultWorkingDirectory.isEmpty
+                                ? "Uses the current workspace directory."
+                                : teamDefaultWorkingDirectory
+                        ) {
+                            HStack(spacing: 8) {
+                                TextField("~/projects", text: $teamDefaultWorkingDirectory)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 170)
+                                Button("Browse…") {
+                                    let panel = NSOpenPanel()
+                                    panel.canChooseDirectories = true
+                                    panel.canChooseFiles = false
+                                    panel.allowsMultipleSelection = false
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        teamDefaultWorkingDirectory = url.path
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                        }
+                    }
+                    }
+
                     if settingsMatch("browser", "search", "engine", "theme", "link", "history", "http", "insecure", "suggestion") {
                     SettingsSectionHeader(title: "Browser")
                     SettingsCard {
@@ -3478,6 +3554,7 @@ struct SettingsView: View {
                         let anyVisible = sectionVisible(["app"], rowKeywords: [["theme"], ["workspace"], ["reorder"], ["session", "restore"], ["dock"], ["quit"], ["rename"], ["sidebar"]])
                             || settingsMatch("workspace", "color", "indicator", "palette", "custom")
                             || settingsMatch("automation", "socket", "claude", "port", "integration", "password")
+                            || sectionVisible(["agent", "team"], rowKeywords: [["leader"], ["model"], ["directory"]])
                             || settingsMatch("browser", "search", "engine", "theme", "link", "history", "http", "insecure", "suggestion")
                             || settingsMatch("keyboard", "shortcut", "keybinding", "hotkey")
                             || settingsMatch("reset", "clear", "defaults")

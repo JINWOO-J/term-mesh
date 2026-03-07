@@ -528,7 +528,7 @@ final class TermMeshDaemon: ObservableObject {
         }
 
         // Option 3: Hardcoded project path (development fallback)
-        let fallback = "/Users/jinwoo/work/cmux-term-mesh/daemon/target/debug/term-meshd"
+        let fallback = "/Users/jinwoo/work/project/cmux/daemon/target/debug/term-meshd"
         if FileManager.default.fileExists(atPath: fallback) { return fallback }
 
         return nil

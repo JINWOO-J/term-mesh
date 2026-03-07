@@ -448,6 +448,16 @@ struct BrowserPanelView: View {
         }
     }
 
+    /// Determine the preferred color scheme based on the address bar background brightness.
+    private var addressBarColorScheme: ColorScheme {
+        let color = browserChromeBackgroundColor.usingColorSpace(.sRGB) ?? browserChromeBackgroundColor
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: nil)
+        // Relative luminance (ITU-R BT.709)
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance < 0.5 ? .dark : .light
+    }
+
     private var addressBar: some View {
         HStack(spacing: 8) {
             addressBarButtonBar
@@ -464,6 +474,7 @@ struct BrowserPanelView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, addressBarVerticalPadding)
         .background(Color(nsColor: browserChromeBackgroundColor))
+        .environment(\.colorScheme, addressBarColorScheme)
         // Keep the omnibar stack above WKWebView so the suggestions popup is visible.
         .zIndex(1)
     }
@@ -2508,6 +2519,7 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> OmnibarNativeTextField {
         let field = OmnibarNativeTextField(frame: .zero)
         field.font = .systemFont(ofSize: 12)
+        field.textColor = .labelColor
         field.placeholderString = placeholder
         field.delegate = context.coordinator
         field.target = nil
@@ -2530,6 +2542,14 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.parentField = nsView
         nsView.placeholderString = placeholder
+
+        // Sync NSTextField appearance with the SwiftUI color scheme environment
+        let isDark = context.environment.colorScheme == .dark
+        let desiredAppearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+        if nsView.appearance !== desiredAppearance {
+            nsView.appearance = desiredAppearance
+            nsView.textColor = .labelColor
+        }
 
         let activeInlineCompletion = omnibarInlineCompletionIfBufferMatchesTypedPrefix(
             bufferText: text,

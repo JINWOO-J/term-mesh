@@ -49,3 +49,6 @@ tmp/
 tmp-*/
 
 daemon/target/
+
+# OMC (oh-my-claudecode) state
+.omc/

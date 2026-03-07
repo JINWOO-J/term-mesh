@@ -487,7 +487,7 @@ fn find_dashboard_dir() -> Option<PathBuf> {
             if path.exists() { return Some(path); }
         }
     }
-    let dev_path = PathBuf::from("/Users/jinwoo/work/cmux-term-mesh/Resources/dashboard");
+    let dev_path = PathBuf::from("/Users/jinwoo/work/project/cmux/Resources/dashboard");
     if dev_path.exists() { return Some(dev_path); }
     None
 }

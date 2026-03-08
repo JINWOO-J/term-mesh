@@ -65,9 +65,16 @@ final class TeamOrchestrator {
         tabManager: TabManager
     ) -> Team? {
         guard !agents.isEmpty else { return nil }
-        guard teams[name] == nil else {
-            print("[team] team '\(name)' already exists")
-            return nil
+
+        // Auto-cleanup: if a team with this name exists but its workspace was closed, remove the stale entry
+        if let existing = teams[name] {
+            if tabManager.tabs.first(where: { $0.id == existing.workspaceId }) == nil {
+                print("[team] cleaning up stale team '\(name)' (workspace closed)")
+                teams.removeValue(forKey: name)
+            } else {
+                print("[team] team '\(name)' already exists")
+                return nil
+            }
         }
 
         guard let claudePath = claudeBinaryPath() else {

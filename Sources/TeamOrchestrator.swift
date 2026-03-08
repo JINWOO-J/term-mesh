@@ -18,6 +18,10 @@ final class TeamOrchestrator {
         let panelId: UUID        // specific panel within the workspace
         var parentSessionId: String?
         let createdAt: Date
+        // Worktree isolation
+        var worktreeName: String?
+        var worktreePath: String?
+        var worktreeBranch: String?
     }
 
     struct Team: Identifiable {
@@ -27,6 +31,7 @@ final class TeamOrchestrator {
         let workspaceId: UUID     // single workspace for all agents
         var agents: [AgentMember]
         let createdAt: Date
+        var gitRepoRoot: String?  // for worktree cleanup
     }
 
     private(set) var teams: [String: Team] = [:]
@@ -148,11 +153,36 @@ final class TeamOrchestrator {
         // Close the original empty panel
         workspace.closePanel(defaultPanelId)
 
+        // Worktree isolation: create per-agent worktrees if enabled
+        let useWorktrees = TermMeshDaemon.shared.worktreeEnabled
+        let gitRepoRoot = useWorktrees ? TermMeshDaemon.shared.findGitRoot(from: workingDirectory) : nil
+
         // Build agent panes with Claude running directly via command parameter
         // This bypasses shell init (.zshrc/.zprofile) entirely for reliable startup.
         for (index, agent) in agents.enumerated() {
             let agentColor = agent.color.isEmpty ? colors[index % colors.count] : agent.color
             let agentId = "\(agent.name)@\(name)"
+
+            // Create isolated worktree for this agent if enabled
+            var agentWorkDir = workingDirectory
+            var wtName: String?
+            var wtPath: String?
+            var wtBranch: String?
+
+            if useWorktrees, let repoRoot = gitRepoRoot {
+                let branchName = "team/\(name)/\(agent.name)"
+                let result = TermMeshDaemon.shared.createWorktreeWithError(repoPath: repoRoot, branch: branchName)
+                switch result {
+                case .success(let info):
+                    agentWorkDir = info.path
+                    wtName = info.name
+                    wtPath = info.path
+                    wtBranch = info.branch
+                    print("[team] worktree for \(agent.name): \(info.path) [\(info.branch)]")
+                case .failure(let error):
+                    print("[team] worktree failed for \(agent.name): \(error), using shared directory")
+                }
+            }
 
             let claudeArgs = buildClaudeCommand(
                 claudePath: claudePath,
@@ -176,7 +206,7 @@ final class TeamOrchestrator {
                     from: leaderPanelId,
                     orientation: .horizontal,
                     focus: false,
-                    workingDirectory: workingDirectory,
+                    workingDirectory: agentWorkDir,
                     command: shellCommand,
                     environment: agentEnv
                 ) else {
@@ -191,7 +221,7 @@ final class TeamOrchestrator {
                     from: splitFrom,
                     orientation: .vertical,
                     focus: false,
-                    workingDirectory: workingDirectory,
+                    workingDirectory: agentWorkDir,
                     command: shellCommand,
                     environment: agentEnv
                 ) else {
@@ -201,9 +231,12 @@ final class TeamOrchestrator {
                 panelId = panel.id
             }
 
-            // Set agent name as pane title
+            // Set agent name as pane title (include branch if worktree)
             let colorEmoji = Self.colorEmoji(agentColor)
-            workspace.setPanelCustomTitle(panelId: panelId, title: "\(colorEmoji) \(agent.name)")
+            let paneTitle = wtBranch != nil
+                ? "\(colorEmoji) \(agent.name) [\(wtBranch!)]"
+                : "\(colorEmoji) \(agent.name)"
+            workspace.setPanelCustomTitle(panelId: panelId, title: paneTitle)
 
             let member = AgentMember(
                 id: agentId,
@@ -215,7 +248,10 @@ final class TeamOrchestrator {
                 workspaceId: workspace.id,
                 panelId: panelId,
                 parentSessionId: leaderSessionId,
-                createdAt: Date()
+                createdAt: Date(),
+                worktreeName: wtName,
+                worktreePath: wtPath,
+                worktreeBranch: wtBranch
             )
             members.append(member)
         }
@@ -226,7 +262,8 @@ final class TeamOrchestrator {
             workingDirectory: workingDirectory,
             workspaceId: workspace.id,
             agents: members,
-            createdAt: Date()
+            createdAt: Date(),
+            gitRepoRoot: gitRepoRoot
         )
         teams[name] = team
         print("[team] created team '\(name)' with \(members.count) agent(s) + leader console")
@@ -309,14 +346,21 @@ final class TeamOrchestrator {
             "workspace_id": team.workspaceId.uuidString,
             "agent_count": team.agents.count,
             "agents": team.agents.map { agent in
-                [
+                var info: [String: Any] = [
                     "id": agent.id,
                     "name": agent.name,
                     "model": agent.model,
                     "agent_type": agent.agentType,
                     "workspace_id": agent.workspaceId.uuidString,
                     "panel_id": agent.panelId.uuidString
-                ] as [String: Any]
+                ]
+                if let branch = agent.worktreeBranch {
+                    info["worktree_branch"] = branch
+                }
+                if let path = agent.worktreePath {
+                    info["worktree_path"] = path
+                }
+                return info as [String: Any]
             }
         ] as [String: Any]
     }
@@ -325,6 +369,7 @@ final class TeamOrchestrator {
     func destroyTeam(name: String, tabManager: TabManager) -> Bool {
         guard let team = teams[name] else { return false }
         guard let workspace = tabManager.tabs.first(where: { $0.id == team.workspaceId }) else {
+            cleanupWorktrees(team: team)
             teams.removeValue(forKey: name)
             return true
         }
@@ -336,10 +381,11 @@ final class TeamOrchestrator {
             }
         }
 
-        // Send exit after a delay, then close workspace
+        // Send exit after a delay, then close workspace and clean up worktrees
         let wsRef = workspace
+        let teamCopy = team
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            for agent in team.agents {
+            for agent in teamCopy.agents {
                 if let panel = wsRef.terminalPanel(for: agent.panelId) {
                     panel.sendText("exit\n")
                 }
@@ -347,11 +393,26 @@ final class TeamOrchestrator {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             tabManager.closeTab(wsRef)
+            // Clean up worktrees after workspace is closed
+            self.cleanupWorktrees(team: teamCopy)
         }
 
         teams.removeValue(forKey: name)
         print("[team] destroyed team '\(name)'")
         return true
+    }
+
+    /// Remove all worktrees associated with a team.
+    private func cleanupWorktrees(team: Team) {
+        guard let repoRoot = team.gitRepoRoot else { return }
+        for agent in team.agents {
+            guard let wtName = agent.worktreeName else { continue }
+            if TermMeshDaemon.shared.removeWorktree(repoPath: repoRoot, name: wtName) {
+                print("[team] removed worktree '\(wtName)' for agent '\(agent.name)'")
+            } else {
+                print("[team] failed to remove worktree '\(wtName)' for agent '\(agent.name)'")
+            }
+        }
     }
 
     // MARK: - Private

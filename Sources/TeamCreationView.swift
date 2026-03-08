@@ -15,7 +15,7 @@ struct TeamCreationView: View {
 
     var onCreate: ((_ teamName: String, _ leaderMode: String, _ agents: [TeamAgentRow]) -> Void)?
 
-    @AppStorage("teamDefaultLeaderMode") private var defaultLeaderMode = "repl"
+    @AppStorage("teamDefaultLeaderMode") private var defaultLeaderMode = "claude"
     @AppStorage("teamDefaultModel") private var defaultModel = "sonnet"
 
     @State private var teamName = "my-team"

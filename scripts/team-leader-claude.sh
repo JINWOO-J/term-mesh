@@ -27,8 +27,8 @@ if [ -z "$CLAUDE" ]; then
     exit 1
 fi
 
-# Wait for agents to be ready
-sleep 2
+# Wait for agents to be ready (Claude binary takes ~5s to initialize)
+sleep 5
 
 # Fetch agent list
 AGENTS_JSON=$(python3 -c "

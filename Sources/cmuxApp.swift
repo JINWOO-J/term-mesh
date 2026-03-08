@@ -2781,7 +2781,7 @@ struct SettingsView: View {
     @AppStorage(SidebarBranchLayoutSettings.key) private var sidebarBranchVerticalLayout = SidebarBranchLayoutSettings.defaultVerticalLayout
     @AppStorage(SidebarActiveTabIndicatorSettings.styleKey)
     private var sidebarActiveTabIndicatorStyle = SidebarActiveTabIndicatorSettings.defaultStyle.rawValue
-    @AppStorage("teamDefaultLeaderMode") private var teamDefaultLeaderMode = "repl"
+    @AppStorage("teamDefaultLeaderMode") private var teamDefaultLeaderMode = "claude"
     @AppStorage("teamDefaultModel") private var teamDefaultModel = "sonnet"
     @AppStorage("teamDefaultWorkingDirectory") private var teamDefaultWorkingDirectory = ""
 

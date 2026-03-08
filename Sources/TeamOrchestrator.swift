@@ -249,7 +249,9 @@ final class TeamOrchestrator {
     private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager) -> Bool {
         guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return false }
         guard let panel = workspace.terminalPanel(for: panelId) else { return false }
-        panel.sendInputText(text)
+        // Use sendText (pty write) instead of sendInputText (key simulation)
+        // — more reliable when the agent TUI is still initializing.
+        panel.sendText(text)
         panel.surface.forceRefresh()
         return true
     }

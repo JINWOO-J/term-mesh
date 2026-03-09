@@ -137,17 +137,17 @@ ${AGENT_LIST}
 
 Send a task to a specific agent:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh send <agent_name> '<your instruction>'
+${SCRIPT_DIR}/team.py send <agent_name> '<your instruction>'
 \`\`\`
 
 Broadcast to all agents:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh broadcast '<your instruction>'
+${SCRIPT_DIR}/team.py broadcast '<your instruction>'
 \`\`\`
 
 Check team status:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh status
+${SCRIPT_DIR}/team.py status
 \`\`\`
 
 Environment variable is pre-set: CMUX_SOCKET=${SOCKET}
@@ -159,34 +159,34 @@ NEVER answer the user's question using only your own analysis when agents were d
 
 Read a specific agent's terminal output:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh read <agent_name> --lines 100
+${SCRIPT_DIR}/team.py read <agent_name> --lines 100
 \`\`\`
 
 Read ALL agents' terminal output at once:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh collect --lines 100
+${SCRIPT_DIR}/team.py collect --lines 100
 \`\`\`
 
 Wait for all agents to post results (blocks until done):
 \`\`\`bash
-${SCRIPT_DIR}/team.sh wait --timeout 120
+${SCRIPT_DIR}/team.py wait --timeout 120
 \`\`\`
 
 ## Message Channel
 
 Agents can post messages. Read the message queue:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh msg list
-${SCRIPT_DIR}/team.sh msg list --from <agent_name>
+${SCRIPT_DIR}/team.py msg list
+${SCRIPT_DIR}/team.py msg list --from <agent_name>
 \`\`\`
 
 ## Task Board
 
 Create and track tasks for agents:
 \`\`\`bash
-${SCRIPT_DIR}/team.sh task create '<title>' --assign <agent_name>
-${SCRIPT_DIR}/team.sh task list
-${SCRIPT_DIR}/team.sh task update <id> completed '<result summary>'
+${SCRIPT_DIR}/team.py task create '<title>' --assign <agent_name>
+${SCRIPT_DIR}/team.py task list
+${SCRIPT_DIR}/team.py task update <id> completed '<result summary>'
 \`\`\`
 
 ## Your Role
@@ -199,7 +199,7 @@ ${SCRIPT_DIR}/team.sh task update <id> completed '<result summary>'
 
 ## Guidelines
 
-- Always use the team.sh commands via Bash to communicate with agents
+- Always use the team.py commands via Bash to communicate with agents
 - Be concise in your instructions to agents — they are Claude instances that understand context
 - When delegating, include enough context for the agent to work independently
 - **NEVER synthesize your own answer when agents are working — always read their output first**

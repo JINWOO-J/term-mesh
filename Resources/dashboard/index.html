@@ -495,6 +495,33 @@
     padding: 1px 6px; border-radius: 3px; font-size: 10px; cursor: pointer; }
   .agent-session .terminate-btn:hover { background: rgba(233,69,96,0.15); }
 
+  /* Team Overview — responsive card grid */
+  .team-overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+  .team-overview-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--surface-strong); min-width: 0; }
+  .team-overview-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+  .team-overview-name { font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .team-overview-badge { font-size: 8px; padding: 1px 5px; border-radius: 3px; background: rgba(129,154,145,0.12); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+  .team-overview-agents { display: flex; flex-direction: column; gap: 2px; }
+  .team-agent-row { display: flex; align-items: center; gap: 5px; padding: 2px 0; min-width: 0; }
+  .team-agent-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .team-agent-dot.running { background: var(--success); box-shadow: 0 0 3px rgba(129,154,145,0.4); }
+  .team-agent-dot.blocked { background: var(--danger); }
+  .team-agent-dot.review { background: var(--accent-strong); }
+  .team-agent-dot.idle { background: var(--text-dim); }
+  .team-agent-dot.stale { background: var(--accent); }
+  .team-agent-info { flex: 1; display: flex; align-items: baseline; gap: 4px; min-width: 0; overflow: hidden; }
+  .team-agent-label { font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .team-agent-cli { font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+  .team-agent-task { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .team-agent-status { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
+  .team-agent-status.running { background: rgba(129,154,145,0.16); color: var(--success); }
+  .team-agent-status.blocked { background: rgba(143,106,82,0.14); color: var(--danger); }
+  .team-agent-status.review { background: rgba(167,193,168,0.2); color: var(--accent-strong); }
+  .team-agent-status.idle { background: rgba(129,154,145,0.08); color: var(--text-dim); }
+  .team-agent-status.stale { background: rgba(209,216,190,0.9); color: var(--accent-strong); }
+  .team-overview-meta { margin-top: 4px; font-size: 9px; color: var(--text-dim); display: flex; gap: 10px; overflow: hidden; }
+  .team-overview-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   .attention-list { display: flex; flex-direction: column; gap: 6px; }
   .attention-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--surface-strong); }
   .attention-item .top { display: flex; gap: 8px; align-items: center; }
@@ -978,6 +1005,12 @@
   <div class="card full" id="agent-status-card" style="display:none">
     <h2>Agent Status</h2>
     <div id="agent-status"></div>
+  </div>
+
+  <!-- Team Overview -->
+  <div class="card full" id="team-overview-card" style="display:none">
+    <h2>Team Overview</h2>
+    <div id="team-overview" class="team-overview-grid"><div class="empty">No active teams</div></div>
   </div>
 
   <!-- System Resources -->
@@ -1850,10 +1883,54 @@ function updateTeamAgents(teams) {
     }
   }
   _cachedTeamAgents = flattened;
+  renderTeamOverview();
   renderAgents();
   renderTeamTaskToolbar();
   updateLeaderConsole();
   updateSummaryCards();
+}
+
+function renderTeamOverview() {
+  const teams = _cachedTeams || [];
+  const card = document.getElementById('team-overview-card');
+  const el = document.getElementById('team-overview');
+  if (!teams.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  el.innerHTML = teams.map(team => {
+    const agents = (team.agents || []).map(agent => {
+      const status = deriveTeamAgentStatus(agent);
+      const taskSnippet = agent.active_task_title
+        ? `<span class="team-agent-task" title="${agent.active_task_title}">${agent.active_task_title}</span>` : '';
+      const hb = agent.heartbeat_age_seconds != null
+        ? `<span class="team-agent-cli">${formatAgeSeconds(agent.heartbeat_age_seconds)}</span>` : '';
+      return `<div class="team-agent-row">
+        <span class="team-agent-dot ${status.className}"></span>
+        <div class="team-agent-info">
+          <span class="team-agent-label">${agent.name}</span>
+          <span class="team-agent-cli">${agent.cli || ''}</span>
+          ${taskSnippet}
+        </div>
+        ${hb}
+        <span class="team-agent-status ${status.className}">${status.text}</span>
+      </div>`;
+    }).join('');
+    const createdAgo = team.created_at ? formatTimeAgo(new Date(team.created_at).getTime()) : '';
+    return `<div class="team-overview-item">
+      <div class="team-overview-header">
+        <span class="team-overview-name">${team.team_name}</span>
+        <span class="team-overview-badge">${team.agent_count || 0} agents</span>
+        ${team.attention_count > 0 ? `<span class="team-overview-badge" style="background:rgba(143,106,82,0.18);color:var(--danger)">${team.attention_count} attention</span>` : ''}
+      </div>
+      <div class="team-overview-agents">${agents || '<div class="empty">No agents</div>'}</div>
+      <div class="team-overview-meta">
+        <span>Dir: ${(team.working_directory || '').split('/').pop()}</span>
+        ${createdAgo ? `<span>Created ${createdAgo}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function deriveTeamAgentStatus(agent) {

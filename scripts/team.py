@@ -574,8 +574,28 @@ def cmd_brief(sock: str, args: argparse.Namespace) -> None:
     msg_res = rpc(sock, "team.message.list", {"team_name": TEAM, "from": args.agent, "limit": 5})
     messages = msg_res.get("result", {}).get("messages", []) if msg_res.get("ok") else []
 
+    # Try reading terminal output — multiple fallback approaches
+    terminal_tail = ""
+    # Approach 1: team.read RPC (direct pane buffer)
     read_res = rpc(sock, "team.read", {"team_name": TEAM, "agent_name": args.agent, "lines": args.lines})
-    terminal_tail = read_res.get("result", {}).get("text", "") if read_res.get("ok") else ""
+    if read_res.get("ok"):
+        terminal_tail = read_res.get("result", {}).get("text", "")
+
+    # Approach 2: If team.read returned empty, try reading from the agent's panel
+    if not terminal_tail.strip():
+        panel_id = agent.get("panel_id")
+        if panel_id:
+            pane_res = rpc(sock, "pane.read", {"panel_id": panel_id, "lines": args.lines})
+            if pane_res.get("ok"):
+                terminal_tail = pane_res.get("result", {}).get("text", "")
+
+    # Approach 3: If still empty, try reading the agent's last report
+    if not terminal_tail.strip():
+        report_res = rpc(sock, "team.reports", {"team_name": TEAM, "agent_name": args.agent, "limit": 1})
+        if report_res.get("ok"):
+            reports = report_res.get("result", {}).get("reports", [])
+            if reports:
+                terminal_tail = f"[Last report] {reports[0].get('content', '')[:500]}"
 
     payload = {
         "team_name": TEAM,
@@ -588,6 +608,10 @@ def cmd_brief(sock: str, args: argparse.Namespace) -> None:
             "active_task_status": agent.get("active_task_status"),
             "active_task_title": agent.get("active_task_title"),
             "attention_reason": agent.get("attention_reason"),
+            "last_heartbeat_at": agent.get("last_heartbeat_at"),
+            "last_heartbeat_summary": agent.get("last_heartbeat_summary"),
+            "heartbeat_age_seconds": agent.get("heartbeat_age_seconds"),
+            "heartbeat_is_stale": agent.get("heartbeat_is_stale"),
         },
         "active_task": active_task,
         "recent_messages": messages,

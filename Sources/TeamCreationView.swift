@@ -211,7 +211,7 @@ struct TeamCreationView: View {
                         Text(cli).tag(cli)
                     }
                 }
-                .frame(width: 75)
+                .frame(width: 95)
 
                 // Model picker
                 Picker("", selection: Binding(

@@ -61,6 +61,8 @@ pub async fn serve(
 
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/api/health", get(health_handler))
+        .route("/api/version", get(version_handler))
         .route("/api/brand-icon", get(brand_icon_handler))
         .route("/api/sessions", get(sessions_handler))
         .route("/api/team", get(team_handler))
@@ -115,6 +117,25 @@ async fn index_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse
         }
     }
     Html(FALLBACK_HTML.to_string())
+}
+
+static START_TIME: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+async fn health_handler() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "status": "ok",
+        "uptime_seconds": START_TIME.elapsed().as_secs(),
+    }))
+}
+
+async fn version_handler() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "name": env!("CARGO_PKG_NAME"),
+        "build_timestamp": option_env!("BUILD_TIMESTAMP").unwrap_or("dev"),
+        "git_hash": option_env!("GIT_HASH").unwrap_or("unknown"),
+    }))
 }
 
 async fn brand_icon_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {

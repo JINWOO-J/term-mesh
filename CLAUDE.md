@@ -112,6 +112,51 @@ tail -f "$(cat /tmp/cmux-last-debug-log-path 2>/dev/null || echo /tmp/cmux-debug
 - Only explicit focus-intent commands may mutate in-app focus/selection (`window.focus`, `workspace.select/next/previous/last`, `surface.focus`, `pane.focus/last`, browser focus commands, and v1 focus equivalents).
 - All non-focus commands should preserve current user focus context while still applying data/model changes.
 
+## Team agent system (OMC → cmux integration)
+
+When using multi-agent teams inside cmux (e.g., via OMC `/team` skill or manual team creation),
+**always use cmux's native team API** via `scripts/team.py` instead of Claude Code's built-in
+Team/Task tools (`TeamCreate`, `SendMessage`, `TaskCreate`, etc.).
+
+cmux's team system provides GPU-accelerated terminal panes, pane buffer reading, and socket-based
+bidirectional communication — capabilities that Claude Code's native team API does not have.
+
+### CLI reference
+
+```bash
+# Create team (agents get split panes in cmux)
+./scripts/team.py create [N] [--claude-leader]
+
+# Send commands to agents
+./scripts/team.py send <agent> '<instruction>'
+./scripts/team.py broadcast '<instruction>'
+
+# Read agent output (bidirectional — the key advantage over Claude Code native teams)
+./scripts/team.py read <agent> --lines 100
+./scripts/team.py collect --lines 100
+./scripts/team.py wait --timeout 120 --mode any
+
+# Message queue (agent ↔ leader)
+./scripts/team.py msg send '<text>' --from <agent>
+./scripts/team.py msg list [--from <agent>]
+
+# Task board
+./scripts/team.py task create '<title>' --assign <agent>
+./scripts/team.py task update <id> <status> [result]
+./scripts/team.py task list
+```
+
+### When OMC `/team` skill is triggered
+
+If the OMC keyword detector fires `[MAGIC KEYWORD: TEAM]`, the LLM should:
+1. Use `./scripts/team.py create` to spawn agents in cmux panes (NOT `TeamCreate`)
+2. Use `./scripts/team.py send` to assign work (NOT `SendMessage`)
+3. Use `./scripts/team.py read/collect/wait` to get results (NOT poll via `TaskGet`)
+4. Use `./scripts/team.py task` for task tracking (NOT `TaskCreate/TaskList`)
+5. Use `./scripts/team.py destroy` to clean up (NOT `TeamDelete`)
+
+This ensures a single team infrastructure with no state duplication.
+
 ## E2E mac UI tests
 
 Run UI tests on the UTM macOS VM (never on the host machine). Always run e2e UI tests via `ssh cmux-vm`:

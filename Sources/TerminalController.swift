@@ -1093,6 +1093,32 @@ class TerminalController {
         case "team.destroy":
             return v2Result(id: id, self.v2TeamDestroy(params: params))
 
+        // Agent Team Bidirectional Communication
+        case "team.read":
+            return v2Result(id: id, self.v2TeamRead(params: params))
+        case "team.collect":
+            return v2Result(id: id, self.v2TeamCollect(params: params))
+        case "team.report":
+            return v2Result(id: id, self.v2TeamReport(params: params))
+        case "team.result.status":
+            return v2Result(id: id, self.v2TeamResultStatus(params: params))
+        case "team.result.collect":
+            return v2Result(id: id, self.v2TeamResultCollect(params: params))
+        case "team.message.post":
+            return v2Result(id: id, self.v2TeamMessagePost(params: params))
+        case "team.message.list":
+            return v2Result(id: id, self.v2TeamMessageList(params: params))
+        case "team.message.clear":
+            return v2Result(id: id, self.v2TeamMessageClear(params: params))
+        case "team.task.create":
+            return v2Result(id: id, self.v2TeamTaskCreate(params: params))
+        case "team.task.update":
+            return v2Result(id: id, self.v2TeamTaskUpdate(params: params))
+        case "team.task.list":
+            return v2Result(id: id, self.v2TeamTaskList(params: params))
+        case "team.task.clear":
+            return v2Result(id: id, self.v2TeamTaskClear(params: params))
+
         // Notifications
         case "notification.create":
             return v2Result(id: id, self.v2NotificationCreate(params: params))
@@ -4321,6 +4347,284 @@ class TerminalController {
         return success
             ? .ok(["destroyed": true, "team_name": teamName])
             : .err(code: "not_found", message: "Team not found", data: nil)
+    }
+
+    // MARK: - V2 Agent Team Bidirectional Communication
+
+    // Feature A: Read agent pane screen
+    private func v2TeamRead(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing agent_name", data: nil)
+        }
+        let lineLimit = params["lines"] as? Int
+
+        var result: V2CallResult = .err(code: "not_found", message: "Agent not found", data: nil)
+        v2MainSync {
+            guard let panel = TeamOrchestrator.shared.agentPanel(
+                teamName: teamName, agentName: agentName, tabManager: tabManager
+            ) else { return }
+
+            let response = readTerminalTextBase64(
+                terminalPanel: panel,
+                includeScrollback: true,
+                lineLimit: lineLimit
+            )
+            guard response.hasPrefix("OK ") else {
+                result = .err(code: "internal_error", message: response, data: nil)
+                return
+            }
+            let base64 = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = Data(base64Encoded: base64).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            result = .ok([
+                "text": text,
+                "agent_name": agentName,
+                "team_name": teamName
+            ])
+        }
+        return result
+    }
+
+    // Feature A: Read all agent pane screens
+    private func v2TeamCollect(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        let lineLimit = params["lines"] as? Int
+
+        var agentTexts: [[String: Any]] = []
+        v2MainSync {
+            let panels = TeamOrchestrator.shared.allAgentPanels(teamName: teamName, tabManager: tabManager)
+            for (name, panel) in panels {
+                let response = readTerminalTextBase64(
+                    terminalPanel: panel,
+                    includeScrollback: true,
+                    lineLimit: lineLimit
+                )
+                var text = ""
+                if response.hasPrefix("OK ") {
+                    let base64 = String(response.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    text = Data(base64Encoded: base64).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                }
+                agentTexts.append(["agent_name": name, "text": text])
+            }
+        }
+        return .ok(["team_name": teamName, "agents": agentTexts])
+    }
+
+    // Feature B: Agent posts a result (file-based + message)
+    private func v2TeamReport(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing agent_name", data: nil)
+        }
+        guard let content = params["content"] as? String else {
+            return .err(code: "invalid_params", message: "Missing content", data: nil)
+        }
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to report", data: nil)
+        v2MainSync {
+            let wrote = TeamOrchestrator.shared.writeResult(teamName: teamName, agentName: agentName, content: content)
+            // Also post to message queue for real-time access
+            TeamOrchestrator.shared.postMessage(teamName: teamName, from: agentName, content: content, type: "report")
+            result = .ok(["reported": wrote, "team_name": teamName, "agent_name": agentName])
+        }
+        return result
+    }
+
+    // Feature B: Check result status
+    private func v2TeamResultStatus(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        var result: V2CallResult = .err(code: "not_found", message: "Team not found", data: nil)
+        v2MainSync {
+            let status = TeamOrchestrator.shared.resultStatus(teamName: teamName)
+            if !status.isEmpty {
+                result = .ok(status)
+            }
+        }
+        return result
+    }
+
+    // Feature B: Collect all file-based results
+    private func v2TeamResultCollect(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        var result: V2CallResult = .ok([] as [[String: Any]])
+        v2MainSync {
+            result = .ok(["team_name": teamName, "results": TeamOrchestrator.shared.collectResults(teamName: teamName)])
+        }
+        return result
+    }
+
+    // Feature C: Post a message
+    private func v2TeamMessagePost(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let from = params["from"] as? String else {
+            return .err(code: "invalid_params", message: "Missing from", data: nil)
+        }
+        guard let content = params["content"] as? String else {
+            return .err(code: "invalid_params", message: "Missing content", data: nil)
+        }
+        let type = params["type"] as? String ?? "report"
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to post message", data: nil)
+        v2MainSync {
+            if let msg = TeamOrchestrator.shared.postMessage(teamName: teamName, from: from, content: content, type: type) {
+                result = .ok([
+                    "id": msg.id,
+                    "from": msg.from,
+                    "type": msg.type,
+                    "team_name": teamName,
+                    "timestamp": ISO8601DateFormatter().string(from: msg.timestamp)
+                ])
+            }
+        }
+        return result
+    }
+
+    // Feature C: List messages
+    private func v2TeamMessageList(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        let from = params["from"] as? String
+        let type = params["type"] as? String
+        let limit = params["limit"] as? Int
+
+        var result: V2CallResult = .ok([] as [[String: Any]])
+        v2MainSync {
+            let msgs = TeamOrchestrator.shared.getMessages(teamName: teamName, from: from, type: type, limit: limit)
+            let formatted = msgs.map { msg -> [String: Any] in
+                [
+                    "id": msg.id,
+                    "from": msg.from,
+                    "type": msg.type,
+                    "content": msg.content,
+                    "timestamp": ISO8601DateFormatter().string(from: msg.timestamp)
+                ]
+            }
+            result = .ok(["team_name": teamName, "messages": formatted, "count": formatted.count])
+        }
+        return result
+    }
+
+    // Feature C: Clear messages
+    private func v2TeamMessageClear(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        v2MainSync {
+            TeamOrchestrator.shared.clearMessages(teamName: teamName)
+        }
+        return .ok(["cleared": true, "team_name": teamName])
+    }
+
+    // Feature D: Create task
+    private func v2TeamTaskCreate(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let title = params["title"] as? String else {
+            return .err(code: "invalid_params", message: "Missing title", data: nil)
+        }
+        let assignee = params["assignee"] as? String
+
+        var result: V2CallResult = .err(code: "internal_error", message: "Failed to create task", data: nil)
+        v2MainSync {
+            if let task = TeamOrchestrator.shared.createTask(teamName: teamName, title: title, assignee: assignee) {
+                result = .ok([
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "assignee": task.assignee as Any,
+                    "team_name": teamName
+                ])
+            }
+        }
+        return result
+    }
+
+    // Feature D: Update task
+    private func v2TeamTaskUpdate(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        guard let taskId = params["task_id"] as? String else {
+            return .err(code: "invalid_params", message: "Missing task_id", data: nil)
+        }
+        let status = params["status"] as? String
+        let taskResult = params["result"] as? String
+        let assignee = params["assignee"] as? String
+
+        var result: V2CallResult = .err(code: "not_found", message: "Task not found", data: nil)
+        v2MainSync {
+            if let task = TeamOrchestrator.shared.updateTask(
+                teamName: teamName, taskId: taskId, status: status, result: taskResult, assignee: assignee
+            ) {
+                result = .ok([
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "assignee": task.assignee as Any,
+                    "result": task.result as Any,
+                    "team_name": teamName
+                ])
+            }
+        }
+        return result
+    }
+
+    // Feature D: List tasks
+    private func v2TeamTaskList(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        let status = params["status"] as? String
+        let assignee = params["assignee"] as? String
+
+        var result: V2CallResult = .ok([] as [[String: Any]])
+        v2MainSync {
+            let tasks = TeamOrchestrator.shared.listTasks(teamName: teamName, status: status, assignee: assignee)
+            let formatted = tasks.map { task -> [String: Any] in
+                [
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "assignee": task.assignee as Any,
+                    "result": task.result as Any,
+                    "created_at": ISO8601DateFormatter().string(from: task.createdAt),
+                    "updated_at": ISO8601DateFormatter().string(from: task.updatedAt)
+                ]
+            }
+            result = .ok(["team_name": teamName, "tasks": formatted, "count": formatted.count])
+        }
+        return result
+    }
+
+    // Feature D: Clear tasks
+    private func v2TeamTaskClear(params: [String: Any]) -> V2CallResult {
+        guard let teamName = params["team_name"] as? String else {
+            return .err(code: "invalid_params", message: "Missing team_name", data: nil)
+        }
+        v2MainSync {
+            TeamOrchestrator.shared.clearTasks(teamName: teamName)
+        }
+        return .ok(["cleared": true, "team_name": teamName])
     }
 
     // MARK: - V2 Notification Methods

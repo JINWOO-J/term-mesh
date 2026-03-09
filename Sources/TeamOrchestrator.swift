@@ -36,6 +36,37 @@ final class TeamOrchestrator {
 
     private(set) var teams: [String: Team] = [:]
 
+    // MARK: - Bidirectional Communication
+
+    /// B: File-based results — convention directory
+    static func resultDirectory(teamName: String) -> String {
+        "/tmp/cmux-team-\(teamName)"
+    }
+
+    /// C: In-memory message queue (agent → leader)
+    struct TeamMessage {
+        let id: String
+        let from: String       // agent name or "leader"
+        let teamName: String
+        let content: String
+        let timestamp: Date
+        let type: String       // "report", "progress", "error", "complete"
+    }
+
+    /// D: Shared task board
+    struct TeamTask {
+        let id: String
+        var title: String
+        var assignee: String?
+        var status: String     // "pending", "in_progress", "completed", "failed"
+        var result: String?
+        let createdAt: Date
+        var updatedAt: Date
+    }
+
+    private(set) var messages: [String: [TeamMessage]] = [:]   // team_name → messages
+    private(set) var taskBoards: [String: [TeamTask]] = [:]    // team_name → tasks
+
     // MARK: - Claude Binary
 
     private func claudeBinaryPath() -> String? {
@@ -98,10 +129,27 @@ final class TeamOrchestrator {
         workspace.customTitle = "[\(name)]"
         workspace.title = "[\(name)]"
 
-        // Env vars — skip .zshrc/.zprofile heavy init
+        // Env vars for agent panes
+        // Include essential PATH entries since pane commands may not source shell profiles
+        let essentialPaths = [
+            "\(NSHomeDirectory())/.local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+        // Merge essential paths with app's PATH to ensure node/homebrew are available
+        let appPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let existingPaths = Set(appPath.split(separator: ":").map(String.init))
+        let missingPaths = essentialPaths.filter { !existingPaths.contains($0) }
+        let currentPath = (appPath.isEmpty ? essentialPaths : appPath.split(separator: ":").map(String.init) + missingPaths).joined(separator: ":")
         let baseEnv: [String: String] = [
             "CMUX_TEAM_AGENT": "1",
             "CMUX_TEAM_NAME": name,
+            "PATH": currentPath,
         ]
         // Agent panes get CLAUDECODE=1; leader pane in "claude" mode must NOT have it
         // (Claude Code refuses to start inside another CLAUDECODE session)
@@ -293,10 +341,20 @@ final class TeamOrchestrator {
     private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager) -> Bool {
         guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return false }
         guard let panel = workspace.terminalPanel(for: panelId) else { return false }
-        // Use sendText (pty write) instead of sendInputText (key simulation)
-        // — more reliable when the agent TUI is still initializing.
-        panel.sendText(text)
+        // Strip trailing newlines — we append \n to trigger Return via key events.
+        let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
+        guard !trimmed.isEmpty else { return true }
+
+        // Send text + Return as key events (NOT bracketed paste).
+        // sendInputText sends each character via ghostty_surface_key and converts
+        // \n to a Return key press. This is the only approach that reliably submits
+        // in Claude Code TUI (bracketed paste + delayed Return does not work).
+        panel.sendInputText(trimmed + "\n")
         panel.surface.forceRefresh()
+
+        #if DEBUG
+        dlog("[team.sendTextToPanel] sendInputText textLen=\(trimmed.count) text=\(trimmed.prefix(80).debugDescription)")
+        #endif
         return true
     }
 
@@ -397,6 +455,11 @@ final class TeamOrchestrator {
             self.cleanupWorktrees(team: teamCopy)
         }
 
+        // Clean up bidirectional communication state
+        clearResults(teamName: name)
+        clearMessages(teamName: name)
+        clearTasks(teamName: name)
+
         teams.removeValue(forKey: name)
         print("[team] destroyed team '\(name)'")
         return true
@@ -462,5 +525,165 @@ final class TeamOrchestrator {
         case "magenta": return "🟣"
         default:        return "⚪"
         }
+    }
+
+    // MARK: - B: File-Based Results
+
+    /// Write an agent's result to the file-based result directory.
+    func writeResult(teamName: String, agentName: String, content: String) -> Bool {
+        let dir = Self.resultDirectory(teamName: teamName)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let path = (dir as NSString).appendingPathComponent("\(agentName).result.json")
+        let payload: [String: Any] = [
+            "agent": agentName,
+            "team": teamName,
+            "content": content,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]) else { return false }
+        return FileManager.default.createFile(atPath: path, contents: data)
+    }
+
+    /// Read an agent's result file.
+    func readResult(teamName: String, agentName: String) -> [String: Any]? {
+        let path = (Self.resultDirectory(teamName: teamName) as NSString).appendingPathComponent("\(agentName).result.json")
+        guard let data = FileManager.default.contents(atPath: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json
+    }
+
+    /// Collect all agent results for a team.
+    func collectResults(teamName: String) -> [[String: Any]] {
+        guard let team = teams[teamName] else { return [] }
+        return team.agents.compactMap { readResult(teamName: teamName, agentName: $0.name) }
+    }
+
+    /// Check which agents have submitted results.
+    func resultStatus(teamName: String) -> [String: Any] {
+        guard let team = teams[teamName] else { return [:] }
+        let dir = Self.resultDirectory(teamName: teamName)
+        var agentStatus: [[String: Any]] = []
+        for agent in team.agents {
+            let path = (dir as NSString).appendingPathComponent("\(agent.name).result.json")
+            let hasResult = FileManager.default.fileExists(atPath: path)
+            agentStatus.append(["name": agent.name, "has_result": hasResult])
+        }
+        let completed = agentStatus.filter { $0["has_result"] as? Bool == true }.count
+        return [
+            "team_name": teamName,
+            "total": team.agents.count,
+            "completed": completed,
+            "all_done": completed == team.agents.count,
+            "agents": agentStatus
+        ]
+    }
+
+    /// Clean up result files for a team.
+    func clearResults(teamName: String) {
+        let dir = Self.resultDirectory(teamName: teamName)
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+
+    // MARK: - A: Read Agent Pane Screen
+
+    /// Read terminal text from a specific agent's pane.
+    /// Returns the panel for external callers to use with readTerminalTextBase64.
+    func agentPanel(teamName: String, agentName: String, tabManager: TabManager) -> TerminalPanel? {
+        guard let team = teams[teamName] else { return nil }
+        guard let agent = team.agents.first(where: { $0.name == agentName }) else { return nil }
+        guard let workspace = tabManager.tabs.first(where: { $0.id == agent.workspaceId }) else { return nil }
+        return workspace.terminalPanel(for: agent.panelId)
+    }
+
+    /// Get all agent panels for a team.
+    func allAgentPanels(teamName: String, tabManager: TabManager) -> [(name: String, panel: TerminalPanel)] {
+        guard let team = teams[teamName] else { return [] }
+        var results: [(name: String, panel: TerminalPanel)] = []
+        for agent in team.agents {
+            guard let workspace = tabManager.tabs.first(where: { $0.id == agent.workspaceId }),
+                  let panel = workspace.terminalPanel(for: agent.panelId) else { continue }
+            results.append((name: agent.name, panel: panel))
+        }
+        return results
+    }
+
+    // MARK: - C: Message Queue
+
+    /// Post a message from an agent (or leader) to the team message queue.
+    @discardableResult
+    func postMessage(teamName: String, from: String, content: String, type: String = "report") -> TeamMessage? {
+        guard teams[teamName] != nil else { return nil }
+        let msg = TeamMessage(
+            id: UUID().uuidString,
+            from: from,
+            teamName: teamName,
+            content: content,
+            timestamp: Date(),
+            type: type
+        )
+        messages[teamName, default: []].append(msg)
+        return msg
+    }
+
+    /// Get messages for a team, optionally filtered.
+    func getMessages(teamName: String, from: String? = nil, type: String? = nil, since: Date? = nil, limit: Int? = nil) -> [TeamMessage] {
+        guard let msgs = messages[teamName] else { return [] }
+        var filtered = msgs
+        if let from { filtered = filtered.filter { $0.from == from } }
+        if let type { filtered = filtered.filter { $0.type == type } }
+        if let since { filtered = filtered.filter { $0.timestamp > since } }
+        if let limit { filtered = Array(filtered.suffix(limit)) }
+        return filtered
+    }
+
+    /// Clear messages for a team.
+    func clearMessages(teamName: String) {
+        messages.removeValue(forKey: teamName)
+    }
+
+    // MARK: - D: Task Board
+
+    /// Create a new task on the team's task board.
+    @discardableResult
+    func createTask(teamName: String, title: String, assignee: String? = nil) -> TeamTask? {
+        guard teams[teamName] != nil else { return nil }
+        let task = TeamTask(
+            id: UUID().uuidString.prefix(8).lowercased().description,
+            title: title,
+            assignee: assignee,
+            status: "pending",
+            result: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        taskBoards[teamName, default: []].append(task)
+        return task
+    }
+
+    /// Update a task's status and optional result.
+    @discardableResult
+    func updateTask(teamName: String, taskId: String, status: String? = nil, result: String? = nil, assignee: String? = nil) -> TeamTask? {
+        guard var tasks = taskBoards[teamName],
+              let idx = tasks.firstIndex(where: { $0.id == taskId }) else { return nil }
+        if let status { tasks[idx].status = status }
+        if let result { tasks[idx].result = result }
+        if let assignee { tasks[idx].assignee = assignee }
+        tasks[idx].updatedAt = Date()
+        taskBoards[teamName] = tasks
+        return tasks[idx]
+    }
+
+    /// List tasks, optionally filtered by status or assignee.
+    func listTasks(teamName: String, status: String? = nil, assignee: String? = nil) -> [TeamTask] {
+        guard let tasks = taskBoards[teamName] else { return [] }
+        var filtered = tasks
+        if let status { filtered = filtered.filter { $0.status == status } }
+        if let assignee { filtered = filtered.filter { $0.assignee == assignee } }
+        return filtered
+    }
+
+    /// Clear the task board for a team.
+    func clearTasks(teamName: String) {
+        taskBoards.removeValue(forKey: teamName)
     }
 }

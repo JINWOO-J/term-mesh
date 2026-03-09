@@ -214,18 +214,41 @@ except: print(sys.stdin.read())
     wait)
         TIMEOUT=120
         INTERVAL=3
+        WAIT_MODE="report"  # report | msg | any
         while [ $# -gt 0 ]; do
             case "$1" in
                 --timeout) TIMEOUT="$2"; shift 2 ;;
                 --interval) INTERVAL="$2"; shift 2 ;;
+                --mode) WAIT_MODE="$2"; shift 2 ;;
                 *) shift ;;
             esac
         done
-        echo "Waiting for agents in team '$TEAM' (timeout: ${TIMEOUT}s)..."
+        echo "Waiting for agents in team '$TEAM' (timeout: ${TIMEOUT}s, mode: $WAIT_MODE)..."
+
+        # Get agent list for msg-based detection
+        AGENT_LIST=""
+        if [ "$WAIT_MODE" = "msg" ] || [ "$WAIT_MODE" = "any" ]; then
+            AGENT_LIST=$(rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.status\",\"params\":{\"team_name\":\"$TEAM\"}}" | python3 -c "
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    agents = r.get('result', {}).get('agents', [])
+    print(' '.join(a['name'] for a in agents))
+except: print('')
+")
+        fi
+
         ELAPSED=0
         while [ $ELAPSED -lt $TIMEOUT ]; do
-            R=$(rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.result.status\",\"params\":{\"team_name\":\"$TEAM\"}}")
-            ALL_DONE=$(echo "$R" | python3 -c "
+            REPORT_DONE="false"
+            REPORT_PROGRESS="0/0"
+            MSG_DONE="false"
+            MSG_PROGRESS="0/0"
+
+            # Check report-based completion
+            if [ "$WAIT_MODE" = "report" ] || [ "$WAIT_MODE" = "any" ]; then
+                R=$(rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.result.status\",\"params\":{\"team_name\":\"$TEAM\"}}")
+                eval $(echo "$R" | python3 -c "
 import json, sys
 try:
     r = json.load(sys.stdin)
@@ -233,19 +256,54 @@ try:
     done = res.get('completed', 0)
     total = res.get('total', 0)
     all_done = res.get('all_done', False)
-    print(f'{done}/{total}', end=' ')
-    print('DONE' if all_done else 'WAITING')
-except: print('0/0 ERROR')
+    print(f'REPORT_PROGRESS=\"{done}/{total}\" REPORT_DONE=\"{\"true\" if all_done else \"false\"}\"')
+except: print('REPORT_PROGRESS=\"0/0\" REPORT_DONE=\"false\"')
 ")
-            STATUS=$(echo "$ALL_DONE" | awk '{print $2}')
-            PROGRESS=$(echo "$ALL_DONE" | awk '{print $1}')
-            echo "  [$ELAPSED/${TIMEOUT}s] $PROGRESS agents reported"
-            if [ "$STATUS" = "DONE" ]; then
-                echo "All agents have reported results."
-                # Collect and display results
-                rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.result.collect\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty
-                exit 0
             fi
+
+            # Check message-based completion (each agent has posted at least one message)
+            if [ "$WAIT_MODE" = "msg" ] || [ "$WAIT_MODE" = "any" ]; then
+                R=$(rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.message.list\",\"params\":{\"team_name\":\"$TEAM\"}}")
+                eval $(echo "$R" | python3 -c "
+import json, sys
+agent_list = sys.argv[1].split()
+try:
+    r = json.load(sys.stdin)
+    messages = r.get('result', {}).get('messages', [])
+    senders = set(m.get('from', '') for m in messages)
+    reported = sum(1 for a in agent_list if a in senders)
+    total = len(agent_list)
+    all_done = reported >= total and total > 0
+    print(f'MSG_PROGRESS=\"{reported}/{total}\" MSG_DONE=\"{\"true\" if all_done else \"false\"}\"')
+except: print('MSG_PROGRESS=\"0/0\" MSG_DONE=\"false\"')
+" "$AGENT_LIST")
+            fi
+
+            # Determine overall status based on mode
+            case "$WAIT_MODE" in
+                report)
+                    echo "  [$ELAPSED/${TIMEOUT}s] $REPORT_PROGRESS agents reported (report)"
+                    [ "$REPORT_DONE" = "true" ] && { echo "All agents have reported results."; rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.result.collect\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty; exit 0; }
+                    ;;
+                msg)
+                    echo "  [$ELAPSED/${TIMEOUT}s] $MSG_PROGRESS agents messaged (msg)"
+                    [ "$MSG_DONE" = "true" ] && { echo "All agents have posted messages."; rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.message.list\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty; exit 0; }
+                    ;;
+                any)
+                    echo "  [$ELAPSED/${TIMEOUT}s] report=$REPORT_PROGRESS msg=$MSG_PROGRESS (any)"
+                    if [ "$REPORT_DONE" = "true" ]; then
+                        echo "All agents have reported results."
+                        rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.result.collect\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty
+                        exit 0
+                    fi
+                    if [ "$MSG_DONE" = "true" ]; then
+                        echo "All agents have posted messages."
+                        rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.message.list\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty
+                        exit 0
+                    fi
+                    ;;
+            esac
+
             sleep "$INTERVAL"
             ELAPSED=$((ELAPSED + INTERVAL))
         done
@@ -278,17 +336,65 @@ print(json.dumps({'jsonrpc':'2.0','id':1,'method':'team.report','params':{
         SUBCMD="${1:-list}"
         shift 2>/dev/null || true
         case "$SUBCMD" in
+            send)
+                # msg send [--to <recipient>] [--from <sender>] [--report] <text>
+                FROM="${CMUX_AGENT_NAME:-anonymous}"
+                TO=""
+                DO_REPORT=""
+                TEXT=""
+                while [ $# -gt 0 ]; do
+                    case "$1" in
+                        --to) TO="$2"; shift 2 ;;
+                        --from) FROM="$2"; shift 2 ;;
+                        --report) DO_REPORT="true"; shift ;;
+                        *) TEXT="$*"; break ;;
+                    esac
+                done
+                [ -z "$TEXT" ] && { echo "Usage: team.sh msg send [--to X] [--from X] [--report] <text>"; exit 1; }
+                REQ=$(python3 -c "
+import json, sys
+params = {
+    'team_name': sys.argv[1], 'from': sys.argv[2], 'content': sys.argv[3], 'type': 'report'
+}
+if sys.argv[4]:
+    params['to'] = sys.argv[4]
+print(json.dumps({'jsonrpc':'2.0','id':1,'method':'team.message.post','params':params}))" "$TEAM" "$FROM" "$TEXT" "$TO")
+                rpc "$REQ" | pretty
+                # Also submit a report so wait can detect completion
+                if [ "$DO_REPORT" = "true" ] && [ -n "$CMUX_AGENT_NAME" ]; then
+                    REPORT_REQ=$(python3 -c "
+import json, sys
+print(json.dumps({'jsonrpc':'2.0','id':2,'method':'team.report','params':{
+    'team_name': sys.argv[1], 'agent_name': sys.argv[2], 'content': sys.argv[3]
+}}))" "$TEAM" "$CMUX_AGENT_NAME" "$TEXT")
+                    rpc "$REPORT_REQ" > /dev/null
+                fi
+                ;;
             post)
-                FROM="${1:?Usage: team.sh msg post <from> <text>}"
+                # msg post [--report] <from> <text>
+                DO_REPORT=""
+                if [ "$1" = "--report" ]; then
+                    DO_REPORT="true"; shift
+                fi
+                FROM="${1:?Usage: team.sh msg post [--report] <from> <text>}"
                 shift
                 TEXT="$*"
-                [ -z "$TEXT" ] && { echo "Usage: team.sh msg post <from> <text>"; exit 1; }
+                [ -z "$TEXT" ] && { echo "Usage: team.sh msg post [--report] <from> <text>"; exit 1; }
                 REQ=$(python3 -c "
 import json, sys
 print(json.dumps({'jsonrpc':'2.0','id':1,'method':'team.message.post','params':{
     'team_name': sys.argv[1], 'from': sys.argv[2], 'content': sys.argv[3], 'type': 'report'
 }}))" "$TEAM" "$FROM" "$TEXT")
                 rpc "$REQ" | pretty
+                # Also submit a report so wait can detect completion
+                if [ "$DO_REPORT" = "true" ]; then
+                    REPORT_REQ=$(python3 -c "
+import json, sys
+print(json.dumps({'jsonrpc':'2.0','id':2,'method':'team.report','params':{
+    'team_name': sys.argv[1], 'agent_name': sys.argv[2], 'content': sys.argv[3]
+}}))" "$TEAM" "$FROM" "$TEXT")
+                    rpc "$REPORT_REQ" > /dev/null
+                fi
                 ;;
             list)
                 FROM_FILTER=""
@@ -310,7 +416,12 @@ print(json.dumps({'jsonrpc':'2.0','id':1,'method':'team.message.post','params':{
                 rpc "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"team.message.clear\",\"params\":{\"team_name\":\"$TEAM\"}}" | pretty
                 ;;
             *)
-                echo "Usage: team.sh msg <post|list|clear> [args]"
+                echo "Usage: team.sh msg <send|post|list|clear> [args]"
+                echo ""
+                echo "  send [--to X] [--from X] [--report] <text>   Send message (auto-detects sender)"
+                echo "  post [--report] <from> <text>                Post message with explicit sender"
+                echo "  list [--from X] [--limit N]                  List messages"
+                echo "  clear                                        Clear all messages"
                 ;;
         esac
         ;;
@@ -389,12 +500,13 @@ print(json.dumps({'jsonrpc':'2.0','id':1,'method':'team.message.post','params':{
         echo ""
         echo "Results & Wait (B):"
         echo "  report <text>               Agent posts result (needs CMUX_AGENT_NAME)"
-        echo "  wait [--timeout N]          Wait for all agents to report results"
+        echo "  wait [--timeout N] [--mode M]  Wait for agents (mode: report|msg|any)"
         echo ""
         echo "Messages (C):"
-        echo "  msg post <from> <text>      Post a message"
-        echo "  msg list [--from X]         List messages"
-        echo "  msg clear                   Clear all messages"
+        echo "  msg send [--to X] [--from X] [--report] <text>  Send message (auto sender)"
+        echo "  msg post [--report] <from> <text>               Post message (explicit sender)"
+        echo "  msg list [--from X] [--limit N]                 List messages"
+        echo "  msg clear                                       Clear all messages"
         echo ""
         echo "Task Board (D):"
         echo "  task create <title> [--assign agent]   Create a task"

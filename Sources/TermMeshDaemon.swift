@@ -202,6 +202,11 @@ final class TermMeshDaemon: ObservableObject {
         let _ = rpcCall(method: "session.sync", params: ["sessions": sessions])
     }
 
+    /// Sync app-side team dashboard state with the daemon (for remote dashboard).
+    func syncTeams(_ payload: [String: Any]) {
+        let _ = rpcCall(method: "team.sync", params: payload)
+    }
+
     // MARK: - Agent Sessions (F-06)
 
     /// Spawn N agent sessions with worktree sandboxes.

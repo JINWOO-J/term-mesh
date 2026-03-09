@@ -43,6 +43,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Shared session store (populated by Swift app via session.sync RPC)
     let sessions: socket::SessionStore = Arc::new(Mutex::new(Vec::new()));
+    let team_state: socket::TeamStateStore = Arc::new(Mutex::new(serde_json::json!({
+        "teams": [],
+        "tasks": [],
+        "attention": [],
+        "instance": {},
+    })));
 
     // 3. Shutdown channel
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -59,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         monitor_handle.clone(),
         watcher_handle.clone(),
         sessions.clone(),
+        team_state.clone(),
         usage_tracker.clone(),
         agent_manager.clone(),
         shutdown_rx.clone(),
@@ -72,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
         monitor_handle.clone(),
         watcher_handle.clone(),
         sessions,
+        team_state,
         usage_tracker,
         agent_manager.clone(),
         shutdown_rx,

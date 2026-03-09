@@ -28,6 +28,8 @@ final class TeamOrchestrator {
     struct Team: Identifiable {
         let id: String            // team name
         let leaderSessionId: String
+        let leaderMode: String    // "repl", "claude", "kiro", "codex", "gemini"
+        let leaderPanelId: UUID   // leader pane for sending instructions
         let workingDirectory: String
         let workspaceId: UUID     // single workspace for all agents
         var agents: [AgentMember]
@@ -248,7 +250,7 @@ final class TeamOrchestrator {
             leaderCommand = scriptPath.map { "\($0) \(socketPath) \(name)" }
         case "kiro":
             if let path = kiroBinaryPath() {
-                leaderCommand = buildKiroCommand(kiroPath: path, agentName: "leader", teamName: name, model: "sonnet")
+                leaderCommand = buildKiroCommand(kiroPath: path, agentName: "leader", teamName: name, model: "sonnet", isLeader: true)
             } else { leaderCommand = nil }
         case "codex":
             if let path = codexBinaryPath() {
@@ -435,6 +437,8 @@ final class TeamOrchestrator {
         let team = Team(
             id: name,
             leaderSessionId: leaderSessionId,
+            leaderMode: leaderMode,
+            leaderPanelId: leaderPanelId,
             workingDirectory: workingDirectory,
             workspaceId: workspace.id,
             agents: members,
@@ -443,6 +447,40 @@ final class TeamOrchestrator {
         )
         teams[name] = team
         print("[team] created team '\(name)' with \(members.count) agent(s) + leader console")
+
+        // For non-Claude CLI leaders (kiro, codex, gemini), inject team instructions
+        // as the first interactive message after the CLI finishes initializing.
+        // Claude leaders get instructions via --system-prompt in team-leader-claude.sh.
+        if leaderMode != "repl" && leaderMode != "claude" {
+            let scriptDir = Self.findScriptsDir(workingDirectory: workingDirectory)
+            let prompt = buildTeamLeaderPrompt(
+                teamName: name,
+                agents: members,
+                socketPath: socketPath,
+                scriptDir: scriptDir
+            )
+            // Write prompt to a temp file — multiline text can't be sent via sendInputText
+            // because each newline triggers Enter in the TUI, breaking the message.
+            let promptFile = "/tmp/term-mesh-leader-\(name).md"
+            try? prompt.write(toFile: promptFile, atomically: true, encoding: .utf8)
+
+            // kiro-cli takes ~8s for MCP init, codex/gemini ~3-5s
+            let delay: Double = leaderMode == "kiro" ? 10.0 : 5.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                let msg = "Read the file \(promptFile) — it contains your team leader instructions with agent list and team.py commands. Follow those instructions for all team coordination."
+                let sent = self.sendTextToPanel(
+                    workspaceId: workspace.id,
+                    panelId: leaderPanelId,
+                    text: msg,
+                    tabManager: tabManager
+                )
+                #if DEBUG
+                dlog("[team] leader prompt injection \(sent ? "OK" : "FAILED") for \(leaderMode) leader in team '\(name)'")
+                #endif
+            }
+        }
+
         return team
     }
 
@@ -457,6 +495,114 @@ final class TeamOrchestrator {
         let projectPath = "\(home)/work/project/cmux/scripts/\(filename)"
         if FileManager.default.fileExists(atPath: projectPath) { return projectPath }
         return nil
+    }
+
+    /// Find the scripts/ directory (for team.py path in leader prompts).
+    private static func findScriptsDir(workingDirectory: String) -> String {
+        let devPath = "scripts"
+        if FileManager.default.fileExists(atPath: devPath) { return devPath }
+        let home = NSHomeDirectory()
+        let projectPath = "\(home)/work/project/cmux/scripts"
+        if FileManager.default.fileExists(atPath: projectPath) { return projectPath }
+        return "scripts"  // fallback
+    }
+
+    /// Build team leader instructions for non-Claude CLI leaders (kiro, codex, gemini).
+    /// These CLIs lack a --system-prompt flag, so we inject instructions as the first message.
+    private func buildTeamLeaderPrompt(
+        teamName: String,
+        agents: [AgentMember],
+        socketPath: String,
+        scriptDir: String
+    ) -> String {
+        let agentList = agents.enumerated().map { i, a in
+            "  \(i + 1). \(a.name) (\(a.agentType))"
+        }.joined(separator: "\n")
+
+        let teamPy = "\(scriptDir)/team.py"
+
+        // Worktree info
+        let worktreeAgents = agents.filter { $0.worktreeBranch != nil }
+        let worktreeSection: String
+        if !worktreeAgents.isEmpty {
+            let wtList = worktreeAgents.map { a in
+                "  - \(a.name): branch='\(a.worktreeBranch ?? "?")' path='\(a.worktreePath ?? "?")'"
+            }.joined(separator: "\n")
+            worktreeSection = """
+
+            ## Worktree Isolation (ACTIVE)
+            Each agent works in its own isolated git worktree.
+            \(wtList)
+            When agents complete work, instruct them to: git add -A && git commit && git push && gh pr create
+            """
+        } else {
+            worktreeSection = ""
+        }
+
+        return """
+        You are the TEAM LEADER for team '\(teamName)'. You direct agent workers running in terminal split panes.
+
+        ## Your Agents
+        \(agentList)
+
+        ## How to Command Agents
+
+        Send a task to a specific agent:
+        ```
+        \(teamPy) send <agent_name> '<your instruction>'
+        ```
+
+        Broadcast to all agents:
+        ```
+        \(teamPy) broadcast '<your instruction>'
+        ```
+
+        Check team status:
+        ```
+        \(teamPy) status
+        ```
+
+        ## Reading Agent Results (MANDATORY)
+
+        After sending tasks, you MUST collect results before responding.
+
+        Read a specific agent's output:
+        ```
+        \(teamPy) read <agent_name> --lines 100
+        ```
+
+        Read ALL agents' output:
+        ```
+        \(teamPy) collect --lines 100
+        ```
+
+        Wait for agents to finish:
+        ```
+        \(teamPy) wait --timeout 120
+        ```
+
+        ## Message Channel
+        ```
+        \(teamPy) msg list
+        \(teamPy) msg list --from <agent_name>
+        ```
+
+        ## Task Board
+        ```
+        \(teamPy) task create '<title>' --assign <agent_name>
+        \(teamPy) task list
+        \(teamPy) task update <id> completed '<result>'
+        ```
+        \(worktreeSection)
+
+        ## Your Role
+        1. Break down user tasks and delegate to appropriate agents
+        2. ALWAYS read agent results using read/collect/wait before responding
+        3. Coordinate dependencies between agents
+        4. Synthesize results and report back
+
+        Environment: TERMMESH_SOCKET=\(socketPath)
+        """
     }
 
     /// Send text to a specific agent in a team.
@@ -662,17 +808,58 @@ final class TeamOrchestrator {
         }
     }
 
+    /// Ensure kiro agent profiles exist at ~/.kiro/agents/ for team use.
+    /// Creates them on-demand so no external install step is needed.
+    private static func ensureKiroAgentProfiles() {
+        let agentsDir = "\(NSHomeDirectory())/.kiro/agents"
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: agentsDir, withIntermediateDirectories: true)
+
+        let profiles: [(String, String, String)] = [
+            ("term-mesh-worker", "Minimal agent for term-mesh team worker panes.",
+             "You are a focused worker agent in a term-mesh team. Rules: 1) Be EXTREMELY concise — no preamble, no summaries unless asked. 2) Output only code, commands, or direct answers. 3) When done, state the result in 1-2 lines max. 4) Never repeat the task back."),
+            ("term-mesh-leader", "Team leader agent for term-mesh. Orchestrates workers via team.py.",
+             "You are a team leader in term-mesh. Coordinate worker agents via ./scripts/team.py. Rules: 1) Be concise. 2) Delegate work, don't do it yourself. 3) Always read agent results before responding. 4) Use short, clear instructions.")
+        ]
+
+        for (name, description, prompt) in profiles {
+            let path = "\(agentsDir)/\(name).json"
+            guard !fm.fileExists(atPath: path) else { continue }
+            let json: [String: Any] = [
+                "name": name,
+                "description": description,
+                "prompt": prompt,
+                "mcpServers": [String: Any](),
+                "tools": ["read", "write", "shell", "thinking", "todo"],
+                "toolAliases": [String: Any](),
+                "allowedTools": [String](),
+                "resources": ["file://AGENTS.md", "file://CLAUDE.md"],
+                "hooks": [String: Any](),
+                "toolsSettings": [String: Any](),
+                "useLegacyMcpJson": false
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]) {
+                fm.createFile(atPath: path, contents: data)
+            }
+        }
+    }
+
     private func buildKiroCommand(
         kiroPath: String,
         agentName: String,
         teamName: String,
-        model: String
+        model: String,
+        isLeader: Bool = false
     ) -> String {
+        Self.ensureKiroAgentProfiles()
+
         let path = kiroPath.contains(" ") ? "\"\(kiroPath)\"" : kiroPath
         var parts = [
             path,
             "chat",
-            "--trust-all-tools"   // equivalent to claude's --dangerously-skip-permissions
+            "--trust-all-tools",   // equivalent to claude's --dangerously-skip-permissions
+            "--wrap never",        // reduce formatting overhead in split panes
+            "--agent \(isLeader ? "term-mesh-leader" : "term-mesh-worker")"
         ]
 
         if !model.isEmpty {

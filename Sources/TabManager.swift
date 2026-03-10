@@ -715,6 +715,15 @@ class TabManager: ObservableObject {
             }
         })
         observers.append(NotificationCenter.default.addObserver(
+            forName: .termMeshBroadcastIMEText,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let text = notification.userInfo?["text"] as? String else { return }
+            self.broadcastIMEText(text)
+        })
+        observers.append(NotificationCenter.default.addObserver(
             forName: .ghosttyDidFocusSurface,
             object: nil,
             queue: .main
@@ -807,6 +816,21 @@ class TabManager: ObservableObject {
 
     func hideFind() {
         selectedTerminalPanel?.searchState = nil
+    }
+
+    func toggleIMEInputBar() {
+        guard let panel = selectedTerminalPanel else { return }
+        NotificationCenter.default.post(name: .termMeshToggleIMEInputBar, object: panel.surface)
+    }
+
+    func broadcastIMEText(_ text: String) {
+        guard let workspace = selectedWorkspace else { return }
+        // Send text + Enter to all terminal panes for immediate execution
+        let textWithReturn = text + "\r"
+        for panel in workspace.panels.values {
+            guard let terminalPanel = panel as? TerminalPanel else { continue }
+            terminalPanel.sendText(textWithReturn)
+        }
     }
 
     @discardableResult

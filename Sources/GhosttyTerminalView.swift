@@ -2725,13 +2725,6 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     private var markedText = NSMutableAttributedString()
     private var lastPerformKeyEvent: TimeInterval?
 
-    // IME position stabilization: cache the IME point when composition starts.
-    // ink-based TUI apps (Claude Code) rapidly move the physical cursor during
-    // re-renders, causing macOS IME candidate window to jump to the wrong position.
-    // By freezing the IME point during active composition, the candidate window
-    // stays at the position where the user started typing.
-    private var imePointStabilized: NSRect? = nil
-
 #if DEBUG
     // Test-only accessors for keyTextAccumulator to verify CJK IME composition behavior.
     func setKeyTextAccumulatorForTesting(_ value: [String]?) {
@@ -4944,8 +4937,6 @@ extension GhosttyNSView: NSTextInputClient {
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        let wasComposing = markedText.length > 0
-
         switch string {
         case let v as NSAttributedString:
             markedText = NSMutableAttributedString(attributedString: v)
@@ -4953,14 +4944,6 @@ extension GhosttyNSView: NSTextInputClient {
             markedText = NSMutableAttributedString(string: v)
         default:
             break
-        }
-
-        // IME position stabilization: capture the current IME point when
-        // composition begins (first setMarkedText call). This prevents the
-        // candidate window from jumping when TUI apps (ink/Claude Code) move
-        // the physical cursor during re-renders.
-        if !wasComposing && markedText.length > 0 {
-            imePointStabilized = computeIMERect()
         }
 
         // If we're not in a keyDown event, sync preedit immediately.
@@ -4974,7 +4957,6 @@ extension GhosttyNSView: NSTextInputClient {
     func unmarkText() {
         if markedText.length > 0 {
             markedText.mutableString.setString("")
-            imePointStabilized = nil
             syncPreedit()
         }
     }
@@ -5013,12 +4995,12 @@ extension GhosttyNSView: NSTextInputClient {
         return 0
     }
 
-    /// Compute the IME rect in screen coordinates from the current Ghostty cursor position.
-    private func computeIMERect() -> NSRect {
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         guard let window = self.window else {
             return NSRect(x: frame.origin.x, y: frame.origin.y, width: 0, height: 0)
         }
 
+        // Use Ghostty's IME point API for accurate cursor position if available.
         var x: Double = 0
         var y: Double = 0
         var w: Double = cellSize.width
@@ -5038,15 +5020,6 @@ extension GhosttyNSView: NSTextInputClient {
         }
 #endif
 
-        // Clamp coordinates to view bounds so the IME candidate window
-        // never appears outside the terminal surface. TUI apps that use
-        // alternate screen + raw mode (ink/Claude Code) can report cursor
-        // positions at extreme edges during re-renders.
-        let maxY = max(frame.size.height - cellSize.height, 0)
-        let maxX = max(frame.size.width - cellSize.width, 0)
-        x = min(max(x, 0), maxX)
-        y = min(max(y, 0), maxY)
-
         // Ghostty coordinates are top-left origin; AppKit expects bottom-left.
         let viewRect = NSRect(
             x: x,
@@ -5056,18 +5029,6 @@ extension GhosttyNSView: NSTextInputClient {
         )
         let winRect = convert(viewRect, to: nil)
         return window.convertToScreen(winRect)
-    }
-
-    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        // During active IME composition, return the stabilized position captured
-        // when composition started. This prevents the candidate window from
-        // jumping when TUI apps (ink/Claude Code) rapidly reposition the cursor
-        // during their render cycles.
-        if let stabilized = imePointStabilized, markedText.length > 0 {
-            return stabilized
-        }
-
-        return computeIMERect()
     }
 
     func insertText(_ string: Any, replacementRange: NSRange) {

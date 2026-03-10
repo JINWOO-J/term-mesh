@@ -1,5 +1,22 @@
 import SwiftUI
 
+// MARK: - Settings
+
+enum IMEInputBarSettings {
+    static let defaultFontSize: Double = 14
+    static let defaultHeight: Double = 90
+
+    static var fontSize: CGFloat {
+        let val = UserDefaults.standard.double(forKey: "imeBarFontSize")
+        return val > 0 ? CGFloat(val) : CGFloat(defaultFontSize)
+    }
+
+    static var height: CGFloat {
+        let val = UserDefaults.standard.double(forKey: "imeBarHeight")
+        return val > 0 ? CGFloat(val) : CGFloat(defaultHeight)
+    }
+}
+
 // MARK: - History persistence
 
 private enum IMEHistory {
@@ -230,7 +247,7 @@ struct IMETextEditor: NSViewRepresentable {
 
         let textView = IMETextView()
         textView.delegate = context.coordinator
-        textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.font = NSFont.monospacedSystemFont(ofSize: IMEInputBarSettings.fontSize, weight: .regular)
         textView.textColor = NSColor.labelColor
         textView.backgroundColor = NSColor.clear
         textView.drawsBackground = false

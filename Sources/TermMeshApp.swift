@@ -2814,6 +2814,8 @@ struct SettingsView: View {
     @AppStorage("cliPath.kiro") private var cliPathKiro = ""
     @AppStorage("cliPath.codex") private var cliPathCodex = ""
     @AppStorage("cliPath.gemini") private var cliPathGemini = ""
+    @AppStorage("imeBarFontSize") private var imeBarFontSize = IMEInputBarSettings.defaultFontSize
+    @AppStorage("imeBarHeight") private var imeBarHeight = IMEInputBarSettings.defaultHeight
     @AppStorage(TermMeshDaemon.dashboardEnabledKey) private var dashboardEnabled = true
     @AppStorage(TermMeshDaemon.dashboardLocalhostOnlyKey) private var dashboardLocalhostOnly = false
     @AppStorage(TermMeshDaemon.dashboardPortKey) private var dashboardPort = 9876
@@ -3606,6 +3608,29 @@ struct SettingsView: View {
                     }
                     }
 
+                    if settingsMatch("ime", "input", "bar", "font", "height", "cjk") {
+                    SettingsSectionHeader(title: "IME Input Bar")
+                    SettingsCard {
+                        SettingsCardRow("Font Size", subtitle: "Text size in the IME input bar (pt).", controlWidth: pickerColumnWidth) {
+                            TextField("", value: $imeBarFontSize, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardRow("Bar Height", subtitle: "Height of the IME input bar (px).", controlWidth: pickerColumnWidth) {
+                            TextField("", value: $imeBarHeight, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                        }
+
+                        SettingsCardDivider()
+
+                        SettingsCardNote("The IME input bar (Cmd+Shift+I) provides a native text field for CJK composition. Adjust font size and bar height to your preference.")
+                    }
+                    }
+
                     if settingsMatch("keyboard", "shortcut", "keybinding", "hotkey") {
                     SettingsSectionHeader(title: "Keyboard Shortcuts")
                     SettingsCard {
@@ -3842,6 +3867,8 @@ struct SettingsView: View {
         socketPasswordDraft = ""
         socketPasswordStatusMessage = nil
         socketPasswordStatusIsError = false
+        imeBarFontSize = IMEInputBarSettings.defaultFontSize
+        imeBarHeight = IMEInputBarSettings.defaultHeight
         KeyboardShortcutSettings.resetAll()
         WorkspaceTabColorSettings.reset()
         reloadWorkspaceTabColorSettings()

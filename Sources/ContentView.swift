@@ -1917,7 +1917,7 @@ struct ContentView: View {
                     WelcomeView(onGetStarted: {
                         hideWelcomeScreen = true
                     })
-                    .frame(width: 480, height: 400)
+                    .frame(width: 560, height: 560)
                 }
         )
 

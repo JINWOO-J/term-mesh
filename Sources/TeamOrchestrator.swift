@@ -89,6 +89,20 @@ final class TeamOrchestrator {
     private let staleTaskThreshold: TimeInterval = 10 * 60
     private let staleHeartbeatThreshold: TimeInterval = 5 * 60
 
+    // MARK: - Balanced Split Layout
+
+    /// Compute the split orientation for agent at the given index in the balanced binary tree.
+    /// Left children (odd index) alternate from parent; right children (even index) keep parent's.
+    private func agentSplitOrientation(at index: Int) -> SplitOrientation {
+        if index == 0 { return .horizontal }
+        let parentIndex = (index - 1) / 2
+        let parentOrientation = agentSplitOrientation(at: parentIndex)
+        let isLeftChild = (index % 2 == 1)
+        return isLeftChild
+            ? (parentOrientation == .horizontal ? .vertical : .horizontal)
+            : parentOrientation
+    }
+
     // MARK: - Agent CLI Binaries
 
     /// Resolve the binary path for a given CLI type ("claude", "kiro", "codex", "gemini").
@@ -395,25 +409,30 @@ final class TeamOrchestrator {
             // Select the right environment: non-claude agents don't need CLAUDECODE
             let paneEnv = agentCli == "claude" ? claudeAgentEnv : kiroAgentEnv
 
-            // Balanced binary tree split: each agent splits from its tree-parent so
-            // panes stay roughly equal. Agent i splits from agent floor((i-1)/2).
-            // Example for 4 agents (each gets 25% of the right side):
-            //   A0: H from leader (50%)
-            //   A1: V from A0 → A0=25%, A1=25%
-            //   A2: V from A0 → A0=12.5%, A2=12.5%, A1=25%
-            //   A3: V from A1 → all 12.5% (equal)
-            let orientation: SplitOrientation
+            // Balanced binary tree with alternating H/V orientations for grid layout.
+            // Agent i splits from agent floor((i-1)/2). Left children alternate
+            // orientation from parent, right children keep parent's orientation.
+            // Example for 4 agents → clean 2×2 grid:
+            //   A0: H from leader, A1: V from A0, A2: H from A0, A3: H from A1
+            //   | Leader | A0 | A2 |
+            //   |        |----|----|
+            //   |        | A1 | A3 |
             let splitFrom: UUID
+            let orientation: SplitOrientation
 
             if index == 0 {
-                // First agent: split horizontally from leader
                 orientation = .horizontal
                 splitFrom = leaderPanelId
             } else {
-                // Balanced tree: split from parent node (the largest available pane)
                 let parentIndex = (index - 1) / 2
-                orientation = .vertical
                 splitFrom = members[parentIndex].panelId
+                // Compute orientation: walk up the tree to determine parent's orientation,
+                // then alternate for left child (odd index), keep for right child (even index).
+                let parentOrientation = agentSplitOrientation(at: parentIndex)
+                let isLeftChild = (index % 2 == 1)
+                orientation = isLeftChild
+                    ? (parentOrientation == .horizontal ? .vertical : .horizontal)
+                    : parentOrientation
             }
 
             guard let panel = workspace.newTerminalSplit(

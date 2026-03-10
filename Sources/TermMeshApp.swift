@@ -2810,6 +2810,10 @@ struct SettingsView: View {
     @AppStorage("teamDefaultLeaderMode") private var teamDefaultLeaderMode = "claude"
     @AppStorage("teamDefaultModel") private var teamDefaultModel = "sonnet"
     @AppStorage("teamDefaultWorkingDirectory") private var teamDefaultWorkingDirectory = ""
+    @AppStorage("cliPath.claude") private var cliPathClaude = ""
+    @AppStorage("cliPath.kiro") private var cliPathKiro = ""
+    @AppStorage("cliPath.codex") private var cliPathCodex = ""
+    @AppStorage("cliPath.gemini") private var cliPathGemini = ""
     @AppStorage(TermMeshDaemon.dashboardEnabledKey) private var dashboardEnabled = true
     @AppStorage(TermMeshDaemon.dashboardLocalhostOnlyKey) private var dashboardLocalhostOnly = false
     @AppStorage(TermMeshDaemon.dashboardPortKey) private var dashboardPort = 9876
@@ -3371,6 +3375,20 @@ struct SettingsView: View {
                         }
                         }
                     }
+                    }
+
+                    if settingsMatch("cli", "path", "claude", "kiro", "codex", "gemini", "binary", "agent") {
+                    SettingsSectionHeader(title: "Agent CLI Paths")
+                    SettingsCard {
+                        CLIPathRow(label: "Claude", cliKey: "claude", path: $cliPathClaude)
+                        SettingsCardDivider()
+                        CLIPathRow(label: "Kiro", cliKey: "kiro", path: $cliPathKiro)
+                        SettingsCardDivider()
+                        CLIPathRow(label: "Codex", cliKey: "codex", path: $cliPathCodex)
+                        SettingsCardDivider()
+                        CLIPathRow(label: "Gemini", cliKey: "gemini", path: $cliPathGemini)
+                    }
+                    SettingsCardNote("Leave empty to use auto-detected path. Custom paths take priority.")
                     }
 
                     if settingsMatch("dashboard", "http", "localhost", "port", "remote") {
@@ -3988,6 +4006,93 @@ private struct SettingsCardDivider: View {
         Rectangle()
             .fill(Color(nsColor: NSColor.separatorColor).opacity(0.5))
             .frame(height: 1)
+    }
+}
+
+private struct CLIPathRow: View {
+    let label: String
+    let cliKey: String
+    @Binding var path: String
+    @State private var autoDetected: String = ""
+
+    var body: some View {
+        let resolvedPath = path.isEmpty ? autoDetected : path
+        let exists = !resolvedPath.isEmpty && FileManager.default.fileExists(atPath: resolvedPath)
+
+        SettingsCardRow(
+            label,
+            subtitle: resolvedPath.isEmpty
+                ? "Not found"
+                : resolvedPath
+        ) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(resolvedPath.isEmpty ? Color.red : (exists ? Color.green : Color.red))
+                    .frame(width: 8, height: 8)
+                    .help(resolvedPath.isEmpty ? "Not found" : (exists ? "Found" : "File not found"))
+                TextField("auto-detect", text: $path)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                Button("Browse…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = false
+                    panel.canChooseFiles = true
+                    panel.allowsMultipleSelection = false
+                    panel.treatsFilePackagesAsDirectories = true
+                    if panel.runModal() == .OK, let url = panel.url {
+                        path = url.path
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .onAppear { autoDetected = CLIPathSettings.autoDetect(cli: cliKey) }
+    }
+}
+
+enum CLIPathSettings {
+    static func resolvedPath(for cli: String, defaults: UserDefaults = .standard) -> String? {
+        let key = "cliPath.\(cli)"
+        let custom = defaults.string(forKey: key) ?? ""
+        if !custom.isEmpty && FileManager.default.fileExists(atPath: custom) {
+            return custom
+        }
+        let detected = autoDetect(cli: cli)
+        return detected.isEmpty ? nil : detected
+    }
+
+    static func autoDetect(cli: String) -> String {
+        let home = NSHomeDirectory()
+        let candidates: [String]
+        switch cli {
+        case "claude":
+            candidates = [
+                (home as NSString).appendingPathComponent(".local/bin/claude"),
+            ]
+        case "kiro":
+            candidates = [
+                (home as NSString).appendingPathComponent(".local/bin/kiro-cli"),
+                "/usr/local/bin/kiro-cli",
+                "/opt/homebrew/bin/kiro-cli",
+            ]
+        case "codex":
+            candidates = [
+                "/opt/homebrew/bin/codex",
+                "/usr/local/bin/codex",
+                (home as NSString).appendingPathComponent(".local/bin/codex"),
+                (home as NSString).appendingPathComponent(".cargo/bin/codex"),
+            ]
+        case "gemini":
+            candidates = [
+                "/opt/homebrew/bin/gemini",
+                "/usr/local/bin/gemini",
+                (home as NSString).appendingPathComponent(".local/bin/gemini"),
+            ]
+        default:
+            candidates = []
+        }
+        return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? ""
     }
 }
 

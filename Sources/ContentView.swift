@@ -7876,8 +7876,8 @@ private struct TitlebarLeadingInsetReader: NSViewRepresentable {
 }
 
 private struct SidebarBackdrop: View {
-    @AppStorage("sidebarTintOpacity") private var sidebarTintOpacity = 0.18
-    @AppStorage("sidebarTintHex") private var sidebarTintHex = "#000000"
+    @AppStorage("sidebarTintOpacity") private var sidebarTintOpacity = 0.75
+    @AppStorage("sidebarTintHex") private var sidebarTintHex = "#FFFFFF"
     @AppStorage("sidebarMaterial") private var sidebarMaterial = SidebarMaterialOption.sidebar.rawValue
     @AppStorage("sidebarBlendMode") private var sidebarBlendMode = SidebarBlendModeOption.withinWindow.rawValue
     @AppStorage("sidebarState") private var sidebarState = SidebarStateOption.followWindow.rawValue
@@ -8079,7 +8079,7 @@ enum SidebarPresetOption: String, CaseIterable, Identifiable {
 
     var tintHex: String {
         switch self {
-        case .nativeSidebar: return "#000000"
+        case .nativeSidebar: return "#FFFFFF"
         case .glassBehind: return "#000000"
         case .softBlur: return "#000000"
         case .popoverGlass: return "#000000"
@@ -8090,7 +8090,7 @@ enum SidebarPresetOption: String, CaseIterable, Identifiable {
 
     var tintOpacity: Double {
         switch self {
-        case .nativeSidebar: return 0.18
+        case .nativeSidebar: return 0.75
         case .glassBehind: return 0.36
         case .softBlur: return 0.28
         case .popoverGlass: return 0.10

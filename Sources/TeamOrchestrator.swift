@@ -395,37 +395,45 @@ final class TeamOrchestrator {
             // Select the right environment: non-claude agents don't need CLAUDECODE
             let paneEnv = agentCli == "claude" ? claudeAgentEnv : kiroAgentEnv
 
-            let panelId: UUID
+            // Grid layout: arrange agents in a 2-row grid so panes stay roughly equal.
+            // Column 0: agents 0,1  Column 1: agents 2,3  Column 2: agents 4,5 ...
+            // First agent per column splits horizontal; second splits vertical.
+            let maxRowsPerColumn = 2
+            let orientation: SplitOrientation
+            let splitFrom: UUID
+
             if index == 0 {
-                // First agent: split horizontally from leader (right side)
-                guard let panel = workspace.newTerminalSplit(
-                    from: leaderPanelId,
-                    orientation: .horizontal,
-                    focus: false,
-                    workingDirectory: agentWorkDir,
-                    command: shellCommand,
-                    environment: paneEnv
-                ) else {
+                // First agent: split horizontally from leader
+                orientation = .horizontal
+                splitFrom = leaderPanelId
+            } else if index % maxRowsPerColumn == 0 {
+                // First agent of a new column: split horizontally from previous column head
+                let prevColumnHeadIndex = index - maxRowsPerColumn
+                orientation = .horizontal
+                splitFrom = members[prevColumnHeadIndex].panelId
+            } else {
+                // Fill column vertically: split from this column's head
+                let columnHeadIndex = index - (index % maxRowsPerColumn)
+                orientation = .vertical
+                splitFrom = members[columnHeadIndex].panelId
+            }
+
+            guard let panel = workspace.newTerminalSplit(
+                from: splitFrom,
+                orientation: orientation,
+                focus: false,
+                workingDirectory: agentWorkDir,
+                command: shellCommand,
+                environment: paneEnv
+            ) else {
+                if index == 0 {
                     print("[team] failed to create first agent split pane")
                     return nil
                 }
-                panelId = panel.id
-            } else {
-                // Stack agents vertically on the right side
-                let splitFrom = members[index - 1].panelId
-                guard let panel = workspace.newTerminalSplit(
-                    from: splitFrom,
-                    orientation: .vertical,
-                    focus: false,
-                    workingDirectory: agentWorkDir,
-                    command: shellCommand,
-                    environment: paneEnv
-                ) else {
-                    print("[team] failed to create split pane for agent '\(agent.name)'")
-                    continue
-                }
-                panelId = panel.id
+                print("[team] failed to create split pane for agent '\(agent.name)'")
+                continue
             }
+            let panelId = panel.id
 
             // Set agent name as pane title (include branch if worktree)
             let colorEmoji = Self.colorEmoji(agentColor)

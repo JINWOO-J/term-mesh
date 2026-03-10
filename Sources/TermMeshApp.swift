@@ -1962,7 +1962,6 @@ private struct AboutPanelView: View {
                 .resizable()
                 .renderingMode(.original)
                 .frame(width: 96, height: 96)
-                .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
 
             VStack(alignment: .center, spacing: 32) {
                 VStack(alignment: .center, spacing: 8) {

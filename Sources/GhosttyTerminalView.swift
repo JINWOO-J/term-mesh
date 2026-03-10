@@ -2634,7 +2634,14 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         }
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool {
+        // When the IME input bar is active, refuse first responder so all key events
+        // go directly to IMETextView via AppKit's responder chain.
+        if enclosingSurfaceScrollView?.findIMETextView() != nil {
+            return false
+        }
+        return true
+    }
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
@@ -2831,6 +2838,22 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         guard event.type == .keyDown else { return false }
         guard let fr = window?.firstResponder as? NSView,
               fr === self || fr.isDescendant(of: self) else { return false }
+
+        // When the IME input bar is active, redirect focus there.
+        // Let Cmd+Shift+I (keyCode 34) pass through so the menu can toggle it off.
+        if let imeTextView = enclosingSurfaceScrollView?.findIMETextView() {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isCmdShiftI = event.keyCode == 34
+                && flags.contains(.command)
+                && flags.contains(.shift)
+            if !isCmdShiftI {
+                if window?.firstResponder !== imeTextView {
+                    window?.makeFirstResponder(imeTextView)
+                }
+                return false
+            }
+        }
+
         guard let surface = ensureSurfaceReadyForInput() else { return false }
 
         // If the IME is composing (marked text present), don't intercept key
@@ -2948,6 +2971,16 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 
     override func keyDown(with event: NSEvent) {
+        // When the IME input bar is active, redirect all key events to its text view
+        // so the user can keep typing without manually clicking the IME bar.
+        if let imeTextView = enclosingSurfaceScrollView?.findIMETextView() {
+            if window?.firstResponder !== imeTextView {
+                window?.makeFirstResponder(imeTextView)
+            }
+            imeTextView.keyDown(with: event)
+            return
+        }
+
         guard let surface = ensureSurfaceReadyForInput() else {
             super.keyDown(with: event)
             return
@@ -3279,7 +3312,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         #if DEBUG
         dlog("terminal.mouseDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
         #endif
-        window?.makeFirstResponder(self)
+        // Don't steal focus from the IME input bar when it's active
+        if enclosingSurfaceScrollView?.findIMETextView() == nil {
+            window?.makeFirstResponder(self)
+        }
         guard let surface = surface else { return }
         let point = convert(event.locationInWindow, from: nil)
         ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, modsFromEvent(event))
@@ -3555,6 +3591,16 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         dlog("terminal.fileDrop surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
         #endif
         return insertDroppedPasteboard(sender.draggingPasteboard)
+    }
+
+    /// Walk the superview chain to find the enclosing `GhosttySurfaceScrollView`.
+    var enclosingSurfaceScrollView: GhosttySurfaceScrollView? {
+        var current: NSView? = superview
+        while let view = current {
+            if let scrollView = view as? GhosttySurfaceScrollView { return scrollView }
+            current = view.superview
+        }
+        return nil
     }
 }
 
@@ -3956,7 +4002,7 @@ final class GhosttySurfaceScrollView: NSView {
         // If IME bar is visible, dock it at the bottom and shrink the terminal area.
         let imeBarHeight: CGFloat
         if let imeView = imeInputBarHostingView {
-            imeBarHeight = 90
+            imeBarHeight = IMEInputBarSettings.height
             imeView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: imeBarHeight)
         } else {
             imeBarHeight = 0
@@ -4170,6 +4216,20 @@ final class GhosttySurfaceScrollView: NSView {
         // Re-layout to restore terminal to full size
         needsLayout = true
         moveFocus()
+    }
+
+    /// Finds the IMETextView inside the IME input bar hosting view (if active).
+    func findIMETextView() -> IMETextView? {
+        guard let hostingView = imeInputBarHostingView else { return nil }
+        return Self.findSubview(of: IMETextView.self, in: hostingView)
+    }
+
+    private static func findSubview<T: NSView>(of type: T.Type, in view: NSView) -> T? {
+        for sub in view.subviews {
+            if let match = sub as? T { return match }
+            if let match = findSubview(of: type, in: sub) { return match }
+        }
+        return nil
     }
 
     private func dropZoneOverlayFrame(for zone: DropZone, in size: CGSize) -> CGRect {
@@ -4651,6 +4711,7 @@ final class GhosttySurfaceScrollView: NSView {
             return
         }
         guard surfaceView.terminalSurface?.searchState == nil else { return }
+        guard findIMETextView() == nil else { return }
         guard let window, window.isKeyWindow else { return }
         if let fr = window.firstResponder as? NSView,
            fr === surfaceView || fr.isDescendant(of: surfaceView) {

@@ -507,6 +507,13 @@ struct TermMeshApp: App {
                     .keyboardShortcut("e", modifiers: .command)
                     .disabled(!(activeTabManager.canUseSelectionForFind))
                 }
+
+                Divider()
+
+                Button("IME Input Bar") {
+                    activeTabManager.toggleIMEInputBar()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
             }
 
             // Tab navigation

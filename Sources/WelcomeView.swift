@@ -7,20 +7,21 @@ struct WelcomeView: View {
     private let shortcuts: [(key: String, description: String)] = [
         ("⌘T", "New Tab"),
         ("⌘D", "Split Right"),
-        ("⌘⇧D", "Split Down"),
+        ("⌘⇧D", "Split Down / Dashboard"),
         ("⌘⇧I", "IME Input Bar"),
-        ("⌘⇧T", "New Team"),
+        ("⌘⇧T", "New Agent Team"),
         ("⌘W", "Close Tab"),
+        ("⌘⇧A", "Run Agent"),
+        ("⌘K", "Command Palette"),
     ]
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 28) {
             // App icon
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .renderingMode(.original)
                 .frame(width: 80, height: 80)
-                .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
 
             // Branding
             VStack(spacing: 6) {
@@ -33,10 +34,10 @@ struct WelcomeView: View {
             }
 
             Divider()
-                .frame(maxWidth: 400)
+                .frame(maxWidth: 420)
 
             // Shortcuts grid
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Keyboard Shortcuts")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.gray)
@@ -49,14 +50,14 @@ struct WelcomeView: View {
                         GridItem(.flexible()),
                     ],
                     alignment: .leading,
-                    spacing: 8
+                    spacing: 10
                 ) {
                     ForEach(shortcuts, id: \.key) { shortcut in
                         ShortcutRow(key: shortcut.key, description: shortcut.description)
                     }
                 }
             }
-            .frame(maxWidth: 400)
+            .frame(maxWidth: 420)
 
             // Get Started button
             Button(action: onGetStarted) {
@@ -76,8 +77,8 @@ struct WelcomeView: View {
             }
             .toggleStyle(.checkbox)
         }
-        .padding(.horizontal, 60)
-        .padding(.vertical, 48)
+        .padding(.horizontal, 64)
+        .padding(.vertical, 56)
         .background(Color.white)
     }
 }

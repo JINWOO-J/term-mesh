@@ -27,6 +27,10 @@ struct TeamCreationView: View {
     @State private var selectedWorkflowName: String?
     @State private var hoveredAgentId: UUID?
 
+    private var isTeamNameDuplicate: Bool {
+        !teamName.isEmpty && TeamOrchestrator.shared.teams[teamName] != nil
+    }
+
     private let models = ["sonnet", "opus", "haiku"]
 
     var body: some View {
@@ -127,14 +131,31 @@ struct TeamCreationView: View {
 
     private var teamSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Team Name")
-                    .font(.subheadline.bold())
-                Spacer()
-                TextField("team name", text: $teamName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack {
+                    Text("Team Name")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    TextField("team name", text: $teamName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(isTeamNameDuplicate ? Color.yellow : Color.clear, lineWidth: 2)
+                        )
+                }
+                if isTeamNameDuplicate {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        Text("Team '\(teamName)' already exists")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
+            .animation(.easeInOut(duration: 0.15), value: isTeamNameDuplicate)
 
             HStack {
                 Text("Leader")
@@ -453,7 +474,7 @@ struct TeamCreationView: View {
                 .keyboardShortcut(.cancelAction)
             Button("Create Team") { createTeam() }
                 .keyboardShortcut(.defaultAction)
-                .disabled(teamName.isEmpty || agents.isEmpty)
+                .disabled(teamName.isEmpty || agents.isEmpty || isTeamNameDuplicate)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

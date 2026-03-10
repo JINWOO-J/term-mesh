@@ -106,68 +106,21 @@ final class TeamOrchestrator {
     // MARK: - Agent CLI Binaries
 
     /// Resolve the binary path for a given CLI type ("claude", "kiro", "codex", "gemini").
+    /// Uses Settings custom path first, then falls back to auto-detection.
     private func agentBinaryPath(cli: String) -> String? {
-        switch cli {
-        case "kiro":
-            return kiroBinaryPath()
-        case "codex":
-            return codexBinaryPath()
-        case "gemini":
-            return geminiBinaryPath()
-        default:
-            return claudeBinaryPath()
+        if let path = CLIPathSettings.resolvedPath(for: cli) {
+            return path
         }
-    }
-
-    private func claudeBinaryPath() -> String? {
-        // Prefer the symlink at ~/.local/bin/claude
-        let localBin = (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/claude")
-        if FileManager.default.fileExists(atPath: localBin) { return localBin }
-
-        // Fallback: latest version in ~/.local/share/claude/versions/
-        let versionsDir = (NSHomeDirectory() as NSString).appendingPathComponent(".local/share/claude/versions")
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: versionsDir) {
-            let sorted = contents.sorted()
-            if let latest = sorted.last {
-                let path = (versionsDir as NSString).appendingPathComponent(latest)
-                if FileManager.default.fileExists(atPath: path) { return path }
+        // Extra fallback for claude: check versioned installs
+        if cli == "claude" {
+            let versionsDir = (NSHomeDirectory() as NSString).appendingPathComponent(".local/share/claude/versions")
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: versionsDir) {
+                let sorted = contents.sorted()
+                if let latest = sorted.last {
+                    let path = (versionsDir as NSString).appendingPathComponent(latest)
+                    if FileManager.default.fileExists(atPath: path) { return path }
+                }
             }
-        }
-
-        return nil
-    }
-
-    private func kiroBinaryPath() -> String? {
-        let localBin = (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/kiro-cli")
-        if FileManager.default.fileExists(atPath: localBin) { return localBin }
-        // Fallback: common install locations
-        for path in ["/usr/local/bin/kiro-cli", "/opt/homebrew/bin/kiro-cli"] {
-            if FileManager.default.fileExists(atPath: path) { return path }
-        }
-        return nil
-    }
-
-    private func codexBinaryPath() -> String? {
-        // Codex CLI (OpenAI): typically installed via npm/cargo
-        for path in [
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex",
-            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/codex"),
-            (NSHomeDirectory() as NSString).appendingPathComponent(".cargo/bin/codex"),
-        ] {
-            if FileManager.default.fileExists(atPath: path) { return path }
-        }
-        return nil
-    }
-
-    private func geminiBinaryPath() -> String? {
-        // Gemini CLI (Google): typically installed via npm
-        for path in [
-            "/opt/homebrew/bin/gemini",
-            "/usr/local/bin/gemini",
-            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin/gemini"),
-        ] {
-            if FileManager.default.fileExists(atPath: path) { return path }
         }
         return nil
     }
@@ -282,15 +235,15 @@ final class TeamOrchestrator {
             let scriptPath = leaderScriptPath(mode: "claude")
             leaderCommand = scriptPath.map { "\($0) \(socketPath) \(name)" }
         case "kiro":
-            if let path = kiroBinaryPath() {
+            if let path = agentBinaryPath(cli: "kiro") {
                 leaderCommand = buildKiroCommand(kiroPath: path, agentName: "leader", teamName: name, model: "sonnet", isLeader: true)
             } else { leaderCommand = nil }
         case "codex":
-            if let path = codexBinaryPath() {
+            if let path = agentBinaryPath(cli: "codex") {
                 leaderCommand = buildCodexCommand(codexPath: path, agentName: "leader", teamName: name, model: "sonnet")
             } else { leaderCommand = nil }
         case "gemini":
-            if let path = geminiBinaryPath() {
+            if let path = agentBinaryPath(cli: "gemini") {
                 leaderCommand = buildGeminiCommand(geminiPath: path, agentName: "leader", teamName: name, model: "sonnet")
             } else { leaderCommand = nil }
         default:

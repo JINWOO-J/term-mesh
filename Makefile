@@ -114,7 +114,20 @@ prod:
 		fi
 	@echo "==> Building Rust daemon (release)..."
 	@cd daemon && cargo build --release 2>&1 | grep -v "Compiling " || true
-	@echo "==> Release build complete: $(PROD_APP)"
+	@echo ""
+	@echo "================================================"
+	@echo "  Release build complete!"
+	@echo "================================================"
+	@echo "  App:     $(PROD_APP)"
+	@echo "  Daemon:  $(PROJECT_DIR)/daemon/target/release/term-meshd"
+	@echo ""
+	@echo "  Install:"
+	@echo "    cp -R \"$(PROD_APP)\" /Applications/"
+	@echo "    xattr -cr /Applications/term-mesh.app"
+	@echo ""
+	@echo "  Or use:  make deploy-prod   (auto install + launch)"
+	@echo "           make dmg           (create distributable DMG)"
+	@echo "================================================"
 
 deploy-prod: prod
 	@echo "==> Stopping existing app + daemon..."

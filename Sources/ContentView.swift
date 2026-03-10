@@ -6235,7 +6235,7 @@ private struct TabItemView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(backgroundColor)
+                .fill(activeTabGradientOrColor)
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(activeBorderColor, lineWidth: activeBorderLineWidth)
@@ -6463,6 +6463,23 @@ private struct TabItemView: View {
             if isMultiSelected { return Color.accentColor.opacity(0.25) }
             return Color.clear
         }
+    }
+
+    private var activeTabGradientOrColor: AnyShapeStyle {
+        if isActive && resolvedCustomTabColor == nil {
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.95, green: 0.45, blue: 0.55),  // soft pink
+                        Color(red: 0.55, green: 0.45, blue: 0.95),  // soft purple
+                        Color(red: 0.45, green: 0.55, blue: 0.95),  // soft blue
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        }
+        return AnyShapeStyle(backgroundColor)
     }
 
     private var railColor: Color {

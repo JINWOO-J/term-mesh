@@ -296,6 +296,11 @@ struct TeamCreationView: View {
         TeamPreset(name: "Performance", icon: "gauge.high", roles: ["perf", "debugger", "tester"]),
         TeamPreset(name: "Security Audit", icon: "lock.shield", roles: ["security", "reviewer", "explorer"]),
         TeamPreset(name: "Full Team", icon: "person.3.sequence", roles: ["planner", "explorer", "executor", "reviewer", "tester"]),
+        TeamPreset(name: "Super Team", icon: "star.circle", roles: [
+            "planner", "architect", "explorer",
+            "executor", "frontend", "backend",
+            "tester", "reviewer", "security", "writer"
+        ]),
     ]
 
     private var workflowButtons: some View {

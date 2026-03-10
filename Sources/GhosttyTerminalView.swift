@@ -2756,6 +2756,35 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 #endif
 
+    /// Send text from the IME Input Bar to the terminal surface as key input.
+    func sendIMEText(_ text: String, withReturn: Bool = true) {
+        guard let surface = surface else { return }
+        // Send the text
+        text.withCString { ptr in
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 0
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.text = ptr
+            keyEvent.composing = false
+            _ = ghostty_surface_key(surface, keyEvent)
+        }
+        // Send Enter to execute
+        if withReturn {
+            "\r".withCString { ptr in
+                var keyEvent = ghostty_input_key_s()
+                keyEvent.action = GHOSTTY_ACTION_PRESS
+                keyEvent.keycode = 36  // Return key
+                keyEvent.mods = GHOSTTY_MODS_NONE
+                keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+                keyEvent.text = ptr
+                keyEvent.composing = false
+                _ = ghostty_surface_key(surface, keyEvent)
+            }
+        }
+    }
+
     // Prevents NSBeep for unimplemented actions from interpretKeyEvents
     override func doCommand(by selector: Selector) {
         // Intentionally empty - prevents system beep on unhandled key commands
@@ -3532,6 +3561,8 @@ extension Notification.Name {
     static let ghosttySearchFocus = Notification.Name("ghosttySearchFocus")
     static let ghosttyConfigDidReload = Notification.Name("ghosttyConfigDidReload")
     static let ghosttyDefaultBackgroundDidChange = Notification.Name("ghosttyDefaultBackgroundDidChange")
+    static let termMeshToggleIMEInputBar = Notification.Name("termMeshToggleIMEInputBar")
+    static let termMeshBroadcastIMEText = Notification.Name("termMeshBroadcastIMEText")
 }
 
 // MARK: - Scroll View Wrapper (Ghostty-style scrollbar)
@@ -3579,6 +3610,7 @@ final class GhosttySurfaceScrollView: NSView {
     private let flashOverlayView: GhosttyFlashOverlayView
     private let flashLayer: CAShapeLayer
     private var searchOverlayHostingView: NSHostingView<SurfaceSearchOverlay>?
+    private var imeInputBarHostingView: NSHostingView<IMEInputBar>?
     private var observers: [NSObjectProtocol] = []
 	    private var windowObservers: [NSObjectProtocol] = []
 	    private var isLiveScrolling = false
@@ -3826,6 +3858,17 @@ final class GhosttySurfaceScrollView: NSView {
         ) { [weak self] _ in
             self?.synchronizeScrollView()
         })
+
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .termMeshToggleIMEInputBar,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self,
+                  let surface = notification.object as? TerminalSurface,
+                  surface === self.surfaceView.terminalSurface else { return }
+            self.toggleIMEInputBar()
+        })
     }
 
     required init?(coder: NSCoder) {
@@ -4035,6 +4078,49 @@ final class GhosttySurfaceScrollView: NSView {
             overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         searchOverlayHostingView = overlay
+    }
+
+    // MARK: - IME Input Bar
+
+    func toggleIMEInputBar() {
+        if imeInputBarHostingView != nil {
+            dismissIMEInputBar()
+            return
+        }
+
+        let rootView = IMEInputBar(
+            onSubmit: { [weak self] text in
+                guard let self = self else { return }
+                self.surfaceView.sendIMEText(text)
+            },
+            onBroadcast: { text in
+                NotificationCenter.default.post(
+                    name: .termMeshBroadcastIMEText,
+                    object: nil,
+                    userInfo: ["text": text]
+                )
+            },
+            onClose: { [weak self] in
+                self?.dismissIMEInputBar()
+            }
+        )
+
+        let overlay = NSHostingView(rootView: rootView)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        imeInputBarHostingView = overlay
+    }
+
+    private func dismissIMEInputBar() {
+        imeInputBarHostingView?.removeFromSuperview()
+        imeInputBarHostingView = nil
+        moveFocus()
     }
 
     private func dropZoneOverlayFrame(for zone: DropZone, in size: CGSize) -> CGRect {

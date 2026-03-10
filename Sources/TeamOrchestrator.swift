@@ -89,6 +89,20 @@ final class TeamOrchestrator {
     private let staleTaskThreshold: TimeInterval = 10 * 60
     private let staleHeartbeatThreshold: TimeInterval = 5 * 60
 
+    // MARK: - Balanced Split Layout
+
+    /// Compute the split orientation for agent at the given index in the balanced binary tree.
+    /// Left children (odd index) alternate from parent; right children (even index) keep parent's.
+    private func agentSplitOrientation(at index: Int) -> SplitOrientation {
+        if index == 0 { return .horizontal }
+        let parentIndex = (index - 1) / 2
+        let parentOrientation = agentSplitOrientation(at: parentIndex)
+        let isLeftChild = (index % 2 == 1)
+        return isLeftChild
+            ? (parentOrientation == .horizontal ? .vertical : .horizontal)
+            : parentOrientation
+    }
+
     // MARK: - Agent CLI Binaries
 
     /// Resolve the binary path for a given CLI type ("claude", "kiro", "codex", "gemini").
@@ -395,37 +409,48 @@ final class TeamOrchestrator {
             // Select the right environment: non-claude agents don't need CLAUDECODE
             let paneEnv = agentCli == "claude" ? claudeAgentEnv : kiroAgentEnv
 
-            let panelId: UUID
+            // Balanced binary tree with alternating H/V orientations for grid layout.
+            // Agent i splits from agent floor((i-1)/2). Left children alternate
+            // orientation from parent, right children keep parent's orientation.
+            // Example for 4 agents → clean 2×2 grid:
+            //   A0: H from leader, A1: V from A0, A2: H from A0, A3: H from A1
+            //   | Leader | A0 | A2 |
+            //   |        |----|----|
+            //   |        | A1 | A3 |
+            let splitFrom: UUID
+            let orientation: SplitOrientation
+
             if index == 0 {
-                // First agent: split horizontally from leader (right side)
-                guard let panel = workspace.newTerminalSplit(
-                    from: leaderPanelId,
-                    orientation: .horizontal,
-                    focus: false,
-                    workingDirectory: agentWorkDir,
-                    command: shellCommand,
-                    environment: paneEnv
-                ) else {
+                orientation = .horizontal
+                splitFrom = leaderPanelId
+            } else {
+                let parentIndex = (index - 1) / 2
+                splitFrom = members[parentIndex].panelId
+                // Compute orientation: walk up the tree to determine parent's orientation,
+                // then alternate for left child (odd index), keep for right child (even index).
+                let parentOrientation = agentSplitOrientation(at: parentIndex)
+                let isLeftChild = (index % 2 == 1)
+                orientation = isLeftChild
+                    ? (parentOrientation == .horizontal ? .vertical : .horizontal)
+                    : parentOrientation
+            }
+
+            guard let panel = workspace.newTerminalSplit(
+                from: splitFrom,
+                orientation: orientation,
+                focus: false,
+                workingDirectory: agentWorkDir,
+                command: shellCommand,
+                environment: paneEnv
+            ) else {
+                if index == 0 {
                     print("[team] failed to create first agent split pane")
                     return nil
                 }
-                panelId = panel.id
-            } else {
-                // Stack agents vertically on the right side
-                let splitFrom = members[index - 1].panelId
-                guard let panel = workspace.newTerminalSplit(
-                    from: splitFrom,
-                    orientation: .vertical,
-                    focus: false,
-                    workingDirectory: agentWorkDir,
-                    command: shellCommand,
-                    environment: paneEnv
-                ) else {
-                    print("[team] failed to create split pane for agent '\(agent.name)'")
-                    continue
-                }
-                panelId = panel.id
+                print("[team] failed to create split pane for agent '\(agent.name)'")
+                continue
             }
+            let panelId = panel.id
 
             // Set agent name as pane title (include branch if worktree)
             let colorEmoji = Self.colorEmoji(agentColor)

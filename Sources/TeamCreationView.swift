@@ -25,6 +25,7 @@ struct TeamCreationView: View {
     @State private var showSaveTemplate = false
     @State private var saveTemplateName = ""
     @State private var selectedWorkflowName: String?
+    @State private var hoveredAgentId: UUID?
 
     private let models = ["sonnet", "opus", "haiku"]
 
@@ -35,8 +36,11 @@ struct TeamCreationView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     teamSettings
+                    Divider().padding(.vertical, 2)
                     workflowButtons
+                    Divider().padding(.vertical, 2)
                     agentList
+                    Divider().padding(.vertical, 2)
                     presetButtons
                 }
                 .padding(20)
@@ -44,7 +48,7 @@ struct TeamCreationView: View {
             Divider()
             footer
         }
-        .frame(width: 560, height: 640)
+        .frame(width: 560, height: 700)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             leaderMode = defaultLeaderMode
@@ -68,21 +72,11 @@ struct TeamCreationView: View {
                 .font(.headline)
             Spacer()
 
-            // Save current config as template
-            Button(action: {
-                saveTemplateName = teamName
-                showSaveTemplate = true
-            }) {
-                Label("Save", systemImage: "square.and.arrow.down")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Save current configuration as template")
-            .disabled(agents.isEmpty)
-
             // Load saved template
-            if !templateManager.templates.isEmpty {
-                Menu {
+            Menu {
+                if templateManager.templates.isEmpty {
+                    Text("No saved templates").foregroundStyle(.secondary)
+                } else {
                     ForEach(templateManager.templates) { template in
                         Button(action: { loadTemplate(template) }) {
                             Text("\(template.name) (\(template.agents.count) agents)")
@@ -96,14 +90,21 @@ struct TeamCreationView: View {
                             }
                         }
                     }
-                } label: {
-                    Label("Load", systemImage: "folder")
-                        .font(.caption)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Load saved team template")
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                    Text("Load")
+                    if !templateManager.templates.isEmpty {
+                        Text("(\(templateManager.templates.count))")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Load saved team template")
 
             Button(action: { showPresetEditor = true }) {
                 Label("Manage Presets", systemImage: "slider.horizontal.3")
@@ -190,12 +191,28 @@ struct TeamCreationView: View {
     }
 
     private func agentCard(index: Int, agent: TeamAgentRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        let isCustomized = !agent.customInstructions.isEmpty &&
+            agent.customInstructions != agent.preset.instructions
+        let isHovered = hoveredAgentId == agent.id
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                // Drag handle
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14)
+
+                // Agent number badge
+                Text("#\(index + 1)")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+
                 // Color dot
                 Circle()
                     .fill(agentColor(agent.preset.color))
-                    .frame(width: 10, height: 10)
+                    .frame(width: 8, height: 8)
 
                 // Role picker
                 Picker("", selection: Binding(
@@ -211,7 +228,7 @@ struct TeamCreationView: View {
                         Text(preset.displayName).tag(preset.id)
                     }
                 }
-                .frame(width: 130)
+                .frame(width: 120)
 
                 // CLI picker
                 Picker("", selection: Binding(
@@ -222,7 +239,7 @@ struct TeamCreationView: View {
                         Text(cli).tag(cli)
                     }
                 }
-                .frame(width: 95)
+                .frame(width: 90)
 
                 // Model picker
                 Picker("", selection: Binding(
@@ -233,7 +250,7 @@ struct TeamCreationView: View {
                         Text(m).tag(m)
                     }
                 }
-                .frame(width: 90)
+                .frame(width: 85)
 
                 Spacer()
 
@@ -247,27 +264,69 @@ struct TeamCreationView: View {
             }
 
             // Custom instructions (collapsible)
-            DisclosureGroup("Instructions") {
-                TextEditor(text: Binding(
-                    get: {
-                        agent.customInstructions.isEmpty
-                            ? agent.preset.instructions
-                            : agent.customInstructions
-                    },
-                    set: { agents[index].customInstructions = $0 }
-                ))
-                .font(.system(.caption, design: .monospaced))
-                .frame(height: 60)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 4) {
+                    ZStack(alignment: .topLeading) {
+                        if (agent.customInstructions.isEmpty ? agent.preset.instructions : agent.customInstructions).isEmpty {
+                            Text("Enter custom instructions…")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 4)
+                                .padding(.leading, 4)
+                                .allowsHitTesting(false)
+                        }
+                        TextEditor(text: Binding(
+                            get: {
+                                agent.customInstructions.isEmpty
+                                    ? agent.preset.instructions
+                                    : agent.customInstructions
+                            },
+                            set: { agents[index].customInstructions = $0 }
+                        ))
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(height: 80)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    if isCustomized {
+                        Button(action: {
+                            agents[index].customInstructions = ""
+                        }) {
+                            Label("Reset to default", systemImage: "arrow.counterclockwise")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Instructions")
+                    if isCustomized {
+                        Text("(customized)")
+                            .foregroundStyle(.orange.opacity(0.8))
+                    }
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.5)))
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.quaternary.opacity(isHovered ? 0.8 : 0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isHovered ? Color.secondary.opacity(0.2) : Color.clear, lineWidth: 1)
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                hoveredAgentId = hovering ? agent.id : nil
+            }
+        }
     }
 
     // MARK: - Quick Presets
@@ -377,6 +436,17 @@ struct TeamCreationView: View {
 
     private var footer: some View {
         HStack {
+            Button(action: {
+                saveTemplateName = teamName
+                showSaveTemplate = true
+            }) {
+                Label("Save as Template", systemImage: "square.and.arrow.down")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Save current configuration as template")
+            .disabled(agents.isEmpty)
+
             Spacer()
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)

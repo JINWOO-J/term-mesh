@@ -76,7 +76,8 @@ struct WelcomeView: View {
             }
             .toggleStyle(.checkbox)
         }
-        .padding(40)
+        .padding(.horizontal, 60)
+        .padding(.vertical, 48)
         .background(Color.white)
     }
 }

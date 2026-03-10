@@ -238,6 +238,10 @@ struct TermMeshApp: App {
                 Button("About term-mesh") {
                     showAboutPanel()
                 }
+                Button("Welcome Screen") {
+                    UserDefaults.standard.set(false, forKey: "hideWelcomeScreen")
+                }
+                Divider()
                 Button("Ghostty Settings…") {
                     GhosttyApp.shared.openConfigurationInTextEdit()
                 }

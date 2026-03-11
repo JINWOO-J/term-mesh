@@ -9,6 +9,13 @@
 		/* Begin PBXBuildFile section */
 			A5001001 /* TermMeshApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001011 /* TermMeshApp.swift */; };
 			A5001002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001012 /* ContentView.swift */; };
+			CVB00001 /* WindowGlassEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00001 /* WindowGlassEffect.swift */; };
+			CVB00002 /* CommandPaletteSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00002 /* CommandPaletteSearch.swift */; };
+			CVB00003 /* CommandPaletteOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00003 /* CommandPaletteOverlay.swift */; };
+			CVB00004 /* FileDropOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00004 /* FileDropOverlay.swift */; };
+			CVB00005 /* SidebarDragDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00005 /* SidebarDragDrop.swift */; };
+			CVB00006 /* SidebarTabItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00006 /* SidebarTabItem.swift */; };
+			CVB00007 /* SidebarViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00007 /* SidebarViews.swift */; };
 			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
 			B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */; };
 			A5001003 /* TabManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001013 /* TabManager.swift */; };
@@ -155,6 +162,13 @@
 			7E7E6EF344A568AC7FEE3715 /* termMeshUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = termMeshUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 			A5001011 /* TermMeshApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TermMeshApp.swift; sourceTree = "<group>"; };
 			A5001012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+			CVS00001 /* WindowGlassEffect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowGlassEffect.swift; sourceTree = "<group>"; };
+			CVS00002 /* CommandPaletteSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteSearch.swift; sourceTree = "<group>"; };
+			CVS00003 /* CommandPaletteOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteOverlay.swift; sourceTree = "<group>"; };
+			CVS00004 /* FileDropOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDropOverlay.swift; sourceTree = "<group>"; };
+			CVS00005 /* SidebarDragDrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarDragDrop.swift; sourceTree = "<group>"; };
+			CVS00006 /* SidebarTabItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarTabItem.swift; sourceTree = "<group>"; };
+			CVS00007 /* SidebarViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViews.swift; sourceTree = "<group>"; };
 			9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelectionState.swift; sourceTree = "<group>"; };
 			B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDragHandleView.swift; sourceTree = "<group>"; };
 			A5001013 /* TabManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabManager.swift; sourceTree = "<group>"; };
@@ -349,6 +363,13 @@
 				children = (
 					A5001011 /* TermMeshApp.swift */,
 					A5001012 /* ContentView.swift */,
+					CVS00001 /* WindowGlassEffect.swift */,
+					CVS00002 /* CommandPaletteSearch.swift */,
+					CVS00003 /* CommandPaletteOverlay.swift */,
+					CVS00004 /* FileDropOverlay.swift */,
+					CVS00005 /* SidebarDragDrop.swift */,
+					CVS00006 /* SidebarTabItem.swift */,
+					CVS00007 /* SidebarViews.swift */,
 					9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */,
 					B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */,
 					A50012F0 /* Backport.swift */,
@@ -599,6 +620,13 @@
 				files = (
 					A5001001 /* TermMeshApp.swift in Sources */,
 					A5001002 /* ContentView.swift in Sources */,
+					CVB00001 /* WindowGlassEffect.swift in Sources */,
+					CVB00002 /* CommandPaletteSearch.swift in Sources */,
+					CVB00003 /* CommandPaletteOverlay.swift in Sources */,
+					CVB00004 /* FileDropOverlay.swift in Sources */,
+					CVB00005 /* SidebarDragDrop.swift in Sources */,
+					CVB00006 /* SidebarTabItem.swift in Sources */,
+					CVB00007 /* SidebarViews.swift in Sources */,
 					E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
 					B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */,
 					A50012F1 /* Backport.swift in Sources */,

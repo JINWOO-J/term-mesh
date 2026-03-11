@@ -845,7 +845,7 @@ extension TerminalController {
 	    }
 
     func activateApp() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.unhide(nil)
             let hasMainTerminalWindow = NSApp.windows.contains { window in
@@ -1621,7 +1621,7 @@ extension TerminalController {
     }
 
     func clearNotifications() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             TerminalNotificationStore.shared.clearAll()
         }
         return "OK"
@@ -1645,7 +1645,7 @@ extension TerminalController {
     }
 
     func simulateAppDidBecomeActive() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             AppDelegate.shared?.applicationDidBecomeActive(
                 Notification(name: NSApplication.didBecomeActiveNotification)
             )
@@ -1700,7 +1700,7 @@ extension TerminalController {
     }
 
     func resetFlashCounts() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             GhosttySurfaceScrollView.resetFlashCounts()
         }
         return "OK"

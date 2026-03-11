@@ -77,7 +77,7 @@ extension TerminalController {
     }
 
     func clearDragPasteboard() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             _ = NSPasteboard(name: .drag).clearContents()
         }
         return "OK"

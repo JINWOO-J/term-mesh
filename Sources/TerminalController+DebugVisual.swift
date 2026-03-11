@@ -402,7 +402,7 @@ extension TerminalController {
     }
 
     func resetEmptyPanelCount() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
             DebugUIEventCounters.resetEmptyPanelAppearCount()
         }
         return "OK"
@@ -421,7 +421,7 @@ extension TerminalController {
     }
 
     func resetBonsplitUnderflowCount() -> String {
-        DispatchQueue.main.sync {
+        DispatchQueue.main.async {
 #if DEBUG
             BonsplitDebugCounters.reset()
 #endif

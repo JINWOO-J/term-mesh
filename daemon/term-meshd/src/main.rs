@@ -63,9 +63,13 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async { Ok(()) })
     } else {
         let http_addr: SocketAddr = std::env::var("TERM_MESH_HTTP_ADDR")
-            .unwrap_or_else(|_| "0.0.0.0:9876".to_string())
+            .unwrap_or_else(|_| "127.0.0.1:9876".to_string())
             .parse()
-            .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 9876)));
+            .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 9876)));
+
+        let http_password = std::env::var("TERM_MESH_HTTP_PASSWORD")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         tokio::spawn(http::serve(
             http_addr,
@@ -76,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
             team_state.clone(),
             usage_tracker.clone(),
             agent_manager.clone(),
+            http_password,
             shutdown_rx.clone(),
         ))
     };

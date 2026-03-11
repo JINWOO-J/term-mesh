@@ -2991,8 +2991,9 @@ struct SettingsView: View {
     @AppStorage("imeBarFontSize") private var imeBarFontSize = IMEInputBarSettings.defaultFontSize
     @AppStorage("imeBarHeight") private var imeBarHeight = IMEInputBarSettings.defaultHeight
     @AppStorage(TermMeshDaemon.dashboardEnabledKey) private var dashboardEnabled = true
-    @AppStorage(TermMeshDaemon.dashboardLocalhostOnlyKey) private var dashboardLocalhostOnly = false
+    @AppStorage(TermMeshDaemon.dashboardLocalhostOnlyKey) private var dashboardLocalhostOnly = true
     @AppStorage(TermMeshDaemon.dashboardPortKey) private var dashboardPort = 9876
+    @AppStorage(TermMeshDaemon.dashboardPasswordKey) private var dashboardPassword = ""
 
     @State private var shortcutResetToken = UUID()
     @State private var topBlurOpacity: Double = 0
@@ -3613,6 +3614,7 @@ struct SettingsView: View {
                             "HTTP Dashboard",
                             subtitle: dashboardEnabled
                                 ? "Web dashboard at \(dashboardLocalhostOnly ? "localhost" : "0.0.0.0"):\(dashboardPort)"
+                                    + (dashboardPassword.isEmpty ? "" : " 🔒")
                                 : "Dashboard is disabled. Daemon runs without HTTP server."
                         ) {
                             Toggle("", isOn: $dashboardEnabled)
@@ -3626,8 +3628,8 @@ struct SettingsView: View {
                             SettingsCardRow(
                                 "Bind Address",
                                 subtitle: dashboardLocalhostOnly
-                                    ? "Only accessible from this Mac."
-                                    : "Accessible from local network. Use with caution.",
+                                    ? "Only accessible from this Mac (127.0.0.1)."
+                                    : "⚠️ Accessible from any network interface (0.0.0.0). Set a password for security.",
                                 controlWidth: pickerColumnWidth
                             ) {
                                 Picker("", selection: $dashboardLocalhostOnly) {
@@ -3642,6 +3644,14 @@ struct SettingsView: View {
 
                             SettingsCardRow("Port", subtitle: "HTTP port for the dashboard.", controlWidth: pickerColumnWidth) {
                                 TextField("", value: $dashboardPort, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                                    .multilineTextAlignment(.trailing)
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsCardRow("Password", subtitle: "Require a password to access the dashboard. Leave empty to disable auth.", controlWidth: pickerColumnWidth) {
+                                SecureField("Optional", text: $dashboardPassword)
                                     .textFieldStyle(.roundedBorder)
                                     .multilineTextAlignment(.trailing)
                             }

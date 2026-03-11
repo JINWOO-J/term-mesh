@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
+    middleware,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
     Router,
@@ -35,6 +36,7 @@ pub struct HttpState {
     pub agent_manager: Arc<AgentSessionManager>,
     pub dashboard_dir: Option<PathBuf>,
     pub brand_icon_path: Option<PathBuf>,
+    pub auth_password: Option<String>,
 }
 
 pub async fn serve(
@@ -46,10 +48,15 @@ pub async fn serve(
     team_state: TeamStateStore,
     usage_tracker: UsageTracker,
     agent_manager: Arc<AgentSessionManager>,
+    auth_password: Option<String>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     let dashboard_dir = find_dashboard_dir();
     let brand_icon_path = find_brand_icon_path();
+
+    if auth_password.is_some() {
+        tracing::info!("HTTP dashboard authentication enabled");
+    }
 
     let state = Arc::new(HttpState {
         monitor_rx,
@@ -61,13 +68,18 @@ pub async fn serve(
         agent_manager,
         dashboard_dir,
         brand_icon_path,
+        auth_password,
     });
 
-    let app = Router::new()
+    // Public routes (no auth required)
+    let public_routes = Router::new()
         .route("/", get(index_handler))
         .route("/api/health", get(health_handler))
         .route("/api/version", get(version_handler))
-        .route("/api/brand-icon", get(brand_icon_handler))
+        .route("/api/brand-icon", get(brand_icon_handler));
+
+    // Protected routes (auth required when password is set)
+    let protected_routes = Router::new()
         .route("/api/sessions", get(sessions_handler))
         .route("/api/team", get(team_handler))
         .route("/api/team/create", post(team_create_handler))
@@ -97,7 +109,26 @@ pub async fn serve(
         .route("/api/messages", post(messages_send_handler))
         .route("/api/messages/ack", post(messages_ack_handler))
         .route("/api/messages/{agent_id}", get(messages_list_handler))
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+
+    let app = public_routes
+        .merge(protected_routes)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin, _| {
+                    let host = origin.to_str().unwrap_or("");
+                    host.starts_with("http://127.0.0.1")
+                        || host.starts_with("http://localhost")
+                        || host.starts_with("http://[::1]")
+                }))
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PATCH,
+                    axum::http::Method::DELETE,
+                ])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -110,6 +141,90 @@ pub async fn serve(
         })
         .await?;
     Ok(())
+}
+
+/// Authentication middleware: checks Bearer token or ?token= query parameter.
+/// Passes through if no password is configured.
+async fn auth_middleware(
+    State(state): State<Arc<HttpState>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> impl IntoResponse {
+    let password = match &state.auth_password {
+        Some(p) if !p.is_empty() => p,
+        _ => return next.run(req).await.into_response(),
+    };
+
+    // Check Authorization: Bearer <token>
+    if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
+        if let Ok(value) = auth_header.to_str() {
+            if let Some(token) = value.strip_prefix("Bearer ") {
+                if constant_time_eq(token.as_bytes(), password.as_bytes()) {
+                    return next.run(req).await.into_response();
+                }
+            }
+        }
+    }
+
+    // Check ?token=<password> query parameter
+    if let Some(query) = req.uri().query() {
+        for pair in query.split('&') {
+            if let Some(token) = pair.strip_prefix("token=") {
+                let decoded = urlencoding_decode(token);
+                if constant_time_eq(decoded.as_bytes(), password.as_bytes()) {
+                    return next.run(req).await.into_response();
+                }
+            }
+        }
+    }
+
+    (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
+        "error": "Authentication required. Use Authorization: Bearer <password> header or ?token=<password> query parameter."
+    }))).into_response()
+}
+
+/// Constant-time byte comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
+/// Simple percent-decoding for query parameter values.
+fn urlencoding_decode(input: &str) -> String {
+    let mut result = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                result.push(hi << 4 | lo);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            result.push(b' ');
+        } else {
+            result.push(bytes[i]);
+        }
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|_| input.to_string())
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 async fn index_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
@@ -911,8 +1026,6 @@ fn find_dashboard_dir() -> Option<PathBuf> {
             }
         }
     }
-    let dev_path = PathBuf::from("/Users/jinwoo/work/project/cmux/Resources/dashboard");
-    if dev_path.exists() { return Some(dev_path); }
     None
 }
 
@@ -933,8 +1046,6 @@ fn find_brand_icon_path() -> Option<PathBuf> {
             }
         }
     }
-    let dev_path = PathBuf::from("/Users/jinwoo/work/project/cmux/Assets.xcassets/AppIcon.appiconset/128.png");
-    if dev_path.exists() { return Some(dev_path); }
     None
 }
 

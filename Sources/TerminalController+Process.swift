@@ -2,6 +2,40 @@ import AppKit
 import Foundation
 
 extension TerminalController {
+    // MARK: - Auth Rate Limiting
+
+    /// Rate limiting for password auth attempts
+    static let authFailureLock = NSLock()
+    static var authFailureCount: Int = 0
+    static var authLockoutUntil: Date?
+    static let maxAuthAttempts = 5
+    static let lockoutDuration: TimeInterval = 30  // 30초 잠금
+
+    /// Check and update rate limit state. Returns error string if locked out, nil if allowed.
+    static func checkAndUpdateAuthRateLimit(success: Bool) -> String? {
+        authFailureLock.lock()
+        defer { authFailureLock.unlock() }
+
+        if success {
+            authFailureCount = 0
+            authLockoutUntil = nil
+            return nil
+        }
+
+        // Check existing lockout
+        if let lockout = authLockoutUntil, Date() < lockout {
+            let remaining = Int(lockout.timeIntervalSinceNow) + 1
+            return "Too many failed attempts. Try again in \(remaining)s"
+        }
+
+        authFailureCount += 1
+        if authFailureCount >= maxAuthAttempts {
+            authLockoutUntil = Date().addingTimeInterval(lockoutDuration)
+            authFailureCount = 0
+        }
+        return nil
+    }
+
     // MARK: - Process Ancestry Check
 
     /// Get the peer PID of a connected Unix domain socket using LOCAL_PEERPID.
@@ -192,9 +226,31 @@ extension TerminalController {
         guard !provided.isEmpty else {
             return "ERROR: Missing password. Usage: auth <password>"
         }
+
+        // Rate limit check
+        Self.authFailureLock.lock()
+        if let lockout = Self.authLockoutUntil, Date() < lockout {
+            let remaining = Int(lockout.timeIntervalSinceNow) + 1
+            Self.authFailureLock.unlock()
+            return "ERROR: Too many failed attempts. Try again in \(remaining)s"
+        }
+        Self.authFailureLock.unlock()
+
         guard SocketControlPasswordStore.verify(password: provided) else {
+            Self.authFailureLock.lock()
+            Self.authFailureCount += 1
+            if Self.authFailureCount >= Self.maxAuthAttempts {
+                Self.authLockoutUntil = Date().addingTimeInterval(Self.lockoutDuration)
+                Self.authFailureCount = 0
+            }
+            Self.authFailureLock.unlock()
             return "ERROR: Invalid password"
         }
+        // Success — reset counter
+        Self.authFailureLock.lock()
+        Self.authFailureCount = 0
+        Self.authLockoutUntil = nil
+        Self.authFailureLock.unlock()
         authenticated = true
         return "OK: Authenticated"
     }
@@ -224,9 +280,30 @@ extension TerminalController {
             )
         }
 
+        // Rate limit check
+        Self.authFailureLock.lock()
+        if let lockout = Self.authLockoutUntil, Date() < lockout {
+            let remaining = Int(lockout.timeIntervalSinceNow) + 1
+            Self.authFailureLock.unlock()
+            return v2Error(id: id, code: "rate_limited", message: "Too many failed attempts. Try again in \(remaining)s")
+        }
+        Self.authFailureLock.unlock()
+
         guard SocketControlPasswordStore.verify(password: provided) else {
+            Self.authFailureLock.lock()
+            Self.authFailureCount += 1
+            if Self.authFailureCount >= Self.maxAuthAttempts {
+                Self.authLockoutUntil = Date().addingTimeInterval(Self.lockoutDuration)
+                Self.authFailureCount = 0
+            }
+            Self.authFailureLock.unlock()
             return v2Error(id: id, code: "auth_failed", message: "Invalid password")
         }
+        // Success — reset counter
+        Self.authFailureLock.lock()
+        Self.authFailureCount = 0
+        Self.authLockoutUntil = nil
+        Self.authFailureLock.unlock()
         authenticated = true
         return v2Ok(id: id, result: ["authenticated": true])
     }

@@ -92,7 +92,15 @@ enum SocketControlPasswordStore {
         guard let expected = configuredPassword(environment: environment), !expected.isEmpty else {
             return false
         }
-        return expected == candidate
+        // Constant-time comparison to prevent timing side-channel attacks
+        let expectedBytes = Array(expected.utf8)
+        let candidateBytes = Array(candidate.utf8)
+        guard expectedBytes.count == candidateBytes.count else { return false }
+        var result: UInt8 = 0
+        for (a, b) in zip(expectedBytes, candidateBytes) {
+            result |= a ^ b
+        }
+        return result == 0
     }
 
     static func loadPassword() throws -> String? {

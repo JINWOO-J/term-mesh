@@ -15,6 +15,8 @@ class TerminalController {
     nonisolated(unsafe) var isRunning = false
     nonisolated(unsafe) var acceptLoopAlive = false
     private var clientHandlers: [Int32: Thread] = [:]
+    /// Injected notification service (defaults to singleton for backward compatibility).
+    var notifications: any NotificationService = TerminalNotificationStore.shared
     var tabManager: TabManager?
     var accessMode: SocketControlMode = .termMeshOnly
     let myPid = getpid()
@@ -2511,7 +2513,7 @@ class TerminalController {
                 return
             }
             let surfaceId = ws.focusedPanelId
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: ws.id,
                 surfaceId: surfaceId,
                 title: title,
@@ -2545,7 +2547,7 @@ class TerminalController {
                 result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": surfaceId.uuidString])
                 return
             }
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: ws.id,
                 surfaceId: surfaceId,
                 title: title,
@@ -2582,7 +2584,7 @@ class TerminalController {
                 result = .err(code: "not_found", message: "Surface not found", data: ["surface_id": surfaceId.uuidString])
                 return
             }
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: ws.id,
                 surfaceId: surfaceId,
                 title: title,
@@ -2597,7 +2599,7 @@ class TerminalController {
     private func v2NotificationList() -> [String: Any] {
         var items: [[String: Any]] = []
         DispatchQueue.main.sync {
-            items = TerminalNotificationStore.shared.notifications.map { n in
+            items = notifications.notifications.map { n in
                 return [
                     "id": n.id.uuidString,
                     "workspace_id": n.tabId.uuidString,
@@ -2614,7 +2616,7 @@ class TerminalController {
 
     private func v2NotificationClear() -> V2CallResult {
         DispatchQueue.main.sync {
-            TerminalNotificationStore.shared.clearAll()
+            notifications.clearAll()
         }
         return .ok([:])
     }

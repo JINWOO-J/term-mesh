@@ -8,6 +8,9 @@ import os
 
 @MainActor
 class TabManager: ObservableObject {
+    /// Injected daemon service (defaults to singleton for backward compatibility).
+    var daemon: any DaemonService = TermMeshDaemon.shared
+
     @Published var tabs: [Workspace] = []
     @Published private(set) var isWorkspaceCycleHot: Bool = false
 
@@ -245,9 +248,9 @@ class TabManager: ObservableObject {
         // term-mesh: Create worktree sandbox if enabled and CWD is a git repo
         var worktreeInfo: WorktreeInfo?
         var gitRepoRoot: String?  // git root for worktree cleanup
-        if TermMeshDaemon.shared.worktreeEnabled, let cwd = workingDirectory {
-            gitRepoRoot = TermMeshDaemon.shared.findGitRoot(from: cwd)
-            let result = TermMeshDaemon.shared.createWorktreeWithError(repoPath: cwd)
+        if daemon.worktreeEnabled, let cwd = workingDirectory {
+            gitRepoRoot = daemon.findGitRoot(from: cwd)
+            let result = daemon.createWorktreeWithError(repoPath: cwd)
             switch result {
             case .success(let info):
                 workingDirectory = info.path
@@ -295,7 +298,7 @@ class TabManager: ObservableObject {
         // term-mesh: Auto-watch the working directory for file heatmap
         if let cwd = workingDirectory, !cwd.isEmpty {
             DispatchQueue.global(qos: .utility).async {
-                TermMeshDaemon.shared.watchPath(cwd)
+                daemon.watchPath(cwd)
             }
         }
 
@@ -610,7 +613,7 @@ class TabManager: ObservableObject {
         // term-mesh: Clean up worktree sandbox if this tab was using one
         if let name = workspace.worktreeName, let repoPath = workspace.worktreeRepoPath {
             DispatchQueue.global(qos: .utility).async {
-                let success = TermMeshDaemon.shared.removeWorktree(repoPath: repoPath, name: name)
+                let success = daemon.removeWorktree(repoPath: repoPath, name: name)
                 Logger.app.info("worktree cleanup \(name, privacy: .public): \(success ? "ok" : "failed", privacy: .public)")
             }
         }
@@ -1408,7 +1411,7 @@ class TabManager: ObservableObject {
         // Determine repo path from the focused terminal panel's directory
         let focusedDir = tab.panelDirectories[focusedPanelId] ?? ""
         let currentDir = focusedDir.isEmpty ? tab.currentDirectory : focusedDir
-        guard let repoPath = TermMeshDaemon.shared.findGitRoot(from: currentDir), !repoPath.isEmpty else {
+        guard let repoPath = daemon.findGitRoot(from: currentDir), !repoPath.isEmpty else {
             let alert = NSAlert()
             alert.messageText = "Spawn Agents"
             alert.informativeText = "Current directory is not inside a git repository."
@@ -1423,7 +1426,7 @@ class TabManager: ObservableObject {
 
         // Spawn agent sessions via daemon (background to avoid blocking UI)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let sessions = TermMeshDaemon.shared.spawnAgents(repoPath: repoPath, count: count, command: command)
+            let sessions = daemon.spawnAgents(repoPath: repoPath, count: count, command: command)
             guard !sessions.isEmpty else {
                 DispatchQueue.main.async {
                     self?.titlebarProgress = nil
@@ -1474,7 +1477,7 @@ class TabManager: ObservableObject {
                         color: .green
                     )
                     DispatchQueue.global(qos: .utility).async {
-                        let _ = TermMeshDaemon.shared.bindAgentPanel(
+                        let _ = daemon.bindAgentPanel(
                             sessionId: session.id,
                             panelId: panelId.uuidString
                         )
@@ -1745,7 +1748,7 @@ class TabManager: ObservableObject {
               let focusedPanelId = tab.focusedPanelId else { return }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let session = TermMeshDaemon.shared.getAgent(id: sessionId) else {
+            guard let session = daemon.getAgent(id: sessionId) else {
                 DispatchQueue.main.async {
                     let alert = NSAlert()
                     alert.messageText = "Reconnect Agent"
@@ -1774,7 +1777,7 @@ class TabManager: ObservableObject {
                         panel.updateTitle("🔀 [\(session.worktreeBranch)] \(session.name)")
                     }
                     DispatchQueue.global(qos: .utility).async {
-                        let _ = TermMeshDaemon.shared.bindAgentPanel(
+                        let _ = daemon.bindAgentPanel(
                             sessionId: session.id,
                             panelId: panelId.uuidString
                         )

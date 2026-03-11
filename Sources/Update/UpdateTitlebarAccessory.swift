@@ -965,6 +965,8 @@ private struct NotificationPopoverRow: View {
 }
 
 final class UpdateTitlebarAccessoryController {
+    /// Injected notification store for titlebar controls (defaults to singleton for backward compatibility).
+    var notificationStore: TerminalNotificationStore = .shared
     private weak var updateViewModel: UpdateViewModel?
     private var didStart = false
     private let attachedWindows = NSHashTable<NSWindow>.weakObjects()
@@ -1074,7 +1076,7 @@ final class UpdateTitlebarAccessoryController {
 
         if !window.titlebarAccessoryViewControllers.contains(where: { $0.view.identifier == controlsIdentifier }) {
             let controls = TitlebarControlsAccessoryViewController(
-                notificationStore: TerminalNotificationStore.shared
+                notificationStore: notificationStore
             )
             controls.layoutAttribute = .left
             controls.view.identifier = controlsIdentifier

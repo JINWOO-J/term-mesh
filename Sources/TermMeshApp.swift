@@ -175,6 +175,8 @@ struct TermMeshApp: App {
                 .environmentObject(sidebarState)
                 .environmentObject(sidebarSelectionState)
                 .environment(\.ghosttyTheme, ghosttyTheme)
+                .environment(\.daemonService, TermMeshDaemon.shared)
+                .environment(\.notificationService, notificationStore)
                 .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
                     ghosttyTheme = .current
                 }
@@ -270,15 +272,15 @@ struct TermMeshApp: App {
                     openDashboardSplit()
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
-                Button(TermMeshDaemon.shared.worktreeEnabled
+                Button(termMeshDaemon.worktreeEnabled
                     ? "✓ Worktree Sandbox"
                     : "  Worktree Sandbox"
                 ) {
-                    let newValue = !TermMeshDaemon.shared.worktreeEnabled
-                    TermMeshDaemon.shared.worktreeEnabled = newValue
+                    let newValue = !termMeshDaemon.worktreeEnabled
+                    termMeshDaemon.worktreeEnabled = newValue
                     if newValue {
-                        DispatchQueue.global(qos: .utility).async {
-                            let connected = TermMeshDaemon.shared.ping()
+                        DispatchQueue.global(qos: .utility).async { [daemon = self.termMeshDaemon] in
+                            let connected = daemon.ping()
                             if !connected {
                                 DispatchQueue.main.async {
                                     let alert = NSAlert()
@@ -992,7 +994,7 @@ struct TermMeshApp: App {
     }
 
     private func showReconnectAgentDialog() {
-        let agents = TermMeshDaemon.shared.listAgents(includeTerminated: false)
+        let agents = termMeshDaemon.listAgents(includeTerminated: false)
         let detached = agents.filter { $0.status != "terminated" && $0.panelId == nil }
 
         guard !detached.isEmpty else {

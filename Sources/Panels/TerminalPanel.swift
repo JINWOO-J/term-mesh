@@ -24,6 +24,9 @@ final class TerminalPanel: Panel, ObservableObject {
     /// Agent session ID bound to this panel (F-06). nil = plain terminal.
     var agentSessionId: String?
 
+    /// Injected daemon service (defaults to singleton for backward compatibility).
+    var daemon: any DaemonService = TermMeshDaemon.shared
+
     /// Search state for find functionality
     @Published var searchState: TerminalSurface.SearchState? {
         didSet {
@@ -144,7 +147,7 @@ final class TerminalPanel: Panel, ObservableObject {
         // Unbind agent session if bound (session stays alive in daemon)
         if let sessionId = agentSessionId {
             DispatchQueue.global(qos: .utility).async {
-                let _ = TermMeshDaemon.shared.unbindAgentPanel(sessionId: sessionId)
+                let _ = daemon.unbindAgentPanel(sessionId: sessionId)
             }
         }
         // The surface will be cleaned up by its deinit

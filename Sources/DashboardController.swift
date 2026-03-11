@@ -11,6 +11,11 @@ import os
 final class DashboardController: NSObject, WKNavigationDelegate {
     static let shared = DashboardController()
 
+    /// Injected daemon service (defaults to singleton for backward compatibility).
+    var daemon: any DaemonService = TermMeshDaemon.shared
+    /// Injected notification service (defaults to singleton for backward compatibility).
+    var notifications: any NotificationService = TerminalNotificationStore.shared
+
     private var window: NSWindow?
     private var webView: WKWebView?
     private var uiTimer: Timer?
@@ -140,7 +145,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     private func syncSessionsToDaemon() {
         guard let tabManager else { return }
 
-        let notificationStore = TerminalNotificationStore.shared
+        let notificationStore = self.notifications
         var sessions: [[String: Any]] = []
         for workspace in tabManager.tabs {
             let cwd = workspace.currentDirectory
@@ -169,14 +174,14 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         }
 
         DispatchQueue.global(qos: .utility).async {
-            TermMeshDaemon.shared.syncSessions(sessions)
+            daemon.syncSessions(sessions)
         }
     }
 
     private func syncTeamsToDaemon() {
         let payload = currentTeamPayload()
         DispatchQueue.global(qos: .utility).async {
-            TermMeshDaemon.shared.syncTeams(payload)
+            daemon.syncTeams(payload)
         }
     }
 
@@ -199,8 +204,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     private func pollAlerts() {
         requestNotificationPermission()
 
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let daemon = TermMeshDaemon.shared
+        DispatchQueue.global(qos: .utility).async { [weak self, daemon = self.daemon] in
             guard let response = daemon.rpcCallRaw(method: "monitor.snapshot", params: [:]),
                   let data = response.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -258,8 +262,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     /// Poll the daemon for pending inputs and deliver them to the appropriate terminal panels.
     private func deliverPendingInputs() {
         guard let tabManager else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let daemon = TermMeshDaemon.shared
+        DispatchQueue.global(qos: .utility).async { [weak self, daemon = self.daemon] in
             guard let json = daemon.rpcCallRaw(method: "input.poll", params: [:] as [String: Any]),
                   let data = json.data(using: .utf8),
                   let inputs = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
@@ -349,7 +352,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
 
     /// Reconcile tracked PIDs with discovered descendants. Must be called on @MainActor.
     private func reconcileTrackedPIDs(_ allDescendants: Set<Int32>) {
-        let daemon = TermMeshDaemon.shared
+        let daemon = self.daemon
 
         let newPIDs = allDescendants.subtracting(trackedPIDs)
         for pid in newPIDs {
@@ -390,7 +393,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
             currentTabProjects[workspace.id] = projectRoot
         }
 
-        let daemon = TermMeshDaemon.shared
+        let daemon = self.daemon
 
         // Watch new projects
         for (tabId, projectRoot) in currentTabProjects {
@@ -461,7 +464,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         guard let webView else { return }
 
         DispatchQueue.global(qos: .utility).async {
-            let daemon = TermMeshDaemon.shared
+            let daemon = self.daemon
             let monitorData = daemon.rpcCallRaw(method: "monitor.snapshot", params: [:])
             let watcherData = daemon.rpcCallRaw(method: "watcher.snapshot", params: [:])
             let sessionData = daemon.rpcCallRaw(method: "session.list", params: [:])
@@ -650,7 +653,7 @@ private class DashboardMessageHandler: NSObject, WKScriptMessageHandler {
 
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage) {
-        let daemon = TermMeshDaemon.shared
+        let daemon = self.daemon
         switch message.name {
         case "stopProcess":
             if let pid = message.body as? Int {

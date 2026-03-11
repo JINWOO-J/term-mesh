@@ -903,6 +903,24 @@ class termmesh:
         raise termmeshError(f"Timed out waiting for webview focus: {panel_id}")
 
     # ---------------------------------------------------------------------
+    # Sidebar state
+    # ---------------------------------------------------------------------
+
+    def sidebar_state(self, workspace: Union[str, int, None] = None) -> str:
+        """Dump sidebar metadata for a workspace as key=value text."""
+        params: Dict[str, Any] = {}
+        if workspace is not None:
+            wsid = self._resolve_workspace_id(workspace)
+            params["workspace_id"] = wsid
+        res = self._call("workspace.sidebar_state", params) or {}
+        lines = []
+        for k, v in res.items():
+            if isinstance(v, list):
+                v = ",".join(str(x) for x in v)
+            lines.append(f"{k}={v}")
+        return "\n".join(lines)
+
+    # ---------------------------------------------------------------------
     # Debug / test-only
     # ---------------------------------------------------------------------
 
@@ -918,6 +936,56 @@ class termmesh:
 
     def activate_app(self) -> None:
         self._call("debug.app.activate")
+
+    # ------------------------------------------------------------------
+    # Drag / drop debug probes
+    # ------------------------------------------------------------------
+
+    def simulate_file_drop(self, surface: Union[str, int], paths: Union[str, List[str]]) -> None:
+        """Simulate dropping file path(s) onto a terminal surface (debug builds only)."""
+        sid = self._resolve_surface_id(surface)
+        payload = paths if isinstance(paths, str) else "|".join(paths)
+        self._call("debug.drag.simulate_file_drop", {"surface_id": sid, "paths": payload})
+
+    def seed_drag_pasteboard_fileurl(self) -> None:
+        self._call("debug.drag.seed_pasteboard", {"type": "fileurl"})
+
+    def seed_drag_pasteboard_tabtransfer(self) -> None:
+        self._call("debug.drag.seed_pasteboard", {"type": "tabtransfer"})
+
+    def seed_drag_pasteboard_sidebar_reorder(self) -> None:
+        self._call("debug.drag.seed_pasteboard", {"type": "sidebarreorder"})
+
+    def seed_drag_pasteboard_types(self, types: List[str]) -> None:
+        self._call("debug.drag.seed_pasteboard", {"types": ",".join(t.strip() for t in types if t.strip())})
+
+    def clear_drag_pasteboard(self) -> None:
+        self._call("debug.drag.clear_pasteboard")
+
+    def overlay_hit_gate(self, event_type: str) -> bool:
+        res = self._call("debug.drag.overlay_hit_gate", {"event_type": event_type}) or {}
+        return bool(res.get("captured"))
+
+    def overlay_drop_gate(self, source: str = "external") -> bool:
+        res = self._call("debug.drag.overlay_drop_gate", {"source": source}) or {}
+        return bool(res.get("captured"))
+
+    def portal_hit_gate(self, event_type: str) -> bool:
+        res = self._call("debug.drag.portal_hit_gate", {"event_type": event_type}) or {}
+        return bool(res.get("pass_through"))
+
+    def sidebar_overlay_gate(self, state: str = "active") -> bool:
+        res = self._call("debug.drag.sidebar_overlay_gate", {"state": state}) or {}
+        return bool(res.get("captured"))
+
+    def drop_hit_test(self, x: float, y: float) -> Optional[str]:
+        res = self._call("debug.drag.drop_hit_test", {"x": x, "y": y}) or {}
+        val = res.get("surface_id")
+        return None if not val or val == "none" else str(val)
+
+    def drag_hit_chain(self, x: float, y: float) -> str:
+        res = self._call("debug.drag.drag_hit_chain", {"x": x, "y": y}) or {}
+        return str(res.get("chain") or "none")
 
     def open_command_palette_rename_tab_input(self, window_id: Optional[str] = None) -> None:
         params: Dict[str, Any] = {}

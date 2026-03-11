@@ -14,6 +14,10 @@ use tokio::net::UnixStream;
 use tokio::sync::watch;
 use tower_http::cors::CorsLayer;
 
+/// Dashboard HTML embedded at compile time so it's always available in the binary,
+/// even when the filesystem path cannot be resolved (e.g. deployed app bundle).
+const EMBEDDED_DASHBOARD_HTML: &str = include_str!("../../../Resources/dashboard/index.html");
+
 use crate::agent::AgentSessionManager;
 use crate::monitor::{MonitorHandle, SystemSnapshot};
 use crate::socket::{SessionStore, TeamStateStore};
@@ -109,6 +113,7 @@ pub async fn serve(
 }
 
 async fn index_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
+    // Try filesystem first (allows live-editing during development)
     if let Some(dir) = &state.dashboard_dir {
         let index_path = dir.join("index.html");
         if let Ok(html) = tokio::fs::read_to_string(&index_path).await {
@@ -116,7 +121,9 @@ async fn index_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse
             return Html(injected);
         }
     }
-    Html(FALLBACK_HTML.to_string())
+    // Fall back to compile-time embedded dashboard (always available in binary)
+    let injected = EMBEDDED_DASHBOARD_HTML.replace("</body>", &format!("{}\n</body>", HTTP_POLL_SCRIPT));
+    Html(injected)
 }
 
 static START_TIME: std::sync::LazyLock<std::time::Instant> =
@@ -893,8 +900,15 @@ fn find_dashboard_dir() -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
+            // Direct sibling: <dir>/Resources/dashboard (dev layout)
             let path = parent.join("Resources/dashboard");
             if path.exists() { return Some(path); }
+            // Deployed app bundle: binary is at Contents/Resources/bin/term-meshd,
+            // dashboard is at Contents/Resources/dashboard
+            if let Some(grandparent) = parent.parent() {
+                let path = grandparent.join("dashboard");
+                if path.exists() { return Some(path); }
+            }
         }
     }
     let dev_path = PathBuf::from("/Users/jinwoo/work/project/cmux/Resources/dashboard");
@@ -911,6 +925,12 @@ fn find_brand_icon_path() -> Option<PathBuf> {
         if let Some(parent) = exe.parent() {
             let path = parent.join("AppIcon.png");
             if path.exists() { return Some(path); }
+            // Deployed app bundle: binary at Contents/Resources/bin/,
+            // icon at Contents/Resources/AppIcon.png
+            if let Some(grandparent) = parent.parent() {
+                let path = grandparent.join("AppIcon.png");
+                if path.exists() { return Some(path); }
+            }
         }
     }
     let dev_path = PathBuf::from("/Users/jinwoo/work/project/cmux/Assets.xcassets/AppIcon.appiconset/128.png");
@@ -1070,12 +1090,3 @@ const HTTP_POLL_SCRIPT: &str = r#"<script>
 })();
 </script>"#;
 
-const FALLBACK_HTML: &str = r#"<!DOCTYPE html>
-<html><head><title>term-mesh Dashboard</title></head>
-<body style="background:#1a1a2e;color:#e0e0e0;font-family:sans-serif;padding:40px;text-align:center">
-<h1 style="color:#00adb5">term-mesh Dashboard</h1>
-<p>Dashboard HTML not found.</p>
-<p>API: <a href="/api/sessions" style="color:#00adb5">/api/sessions</a>
- | <a href="/api/monitor" style="color:#00adb5">/api/monitor</a>
- | <a href="/api/watcher" style="color:#00adb5">/api/watcher</a></p>
-</body></html>"#;

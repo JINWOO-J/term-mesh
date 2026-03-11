@@ -530,15 +530,21 @@ final class TeamOrchestrator {
     /// Find the leader script for the given mode.
     private func leaderScriptPath(mode: String, workingDirectory: String? = nil) -> String? {
         let filename = mode == "claude" ? "team-leader-claude.sh" : "team-leader.sh"
-        // Look relative to the working directory (project root)
+        // 1) App bundle Resources/scripts/ (works in Release builds)
+        if let bundled = Bundle.main.resourceURL?
+            .appendingPathComponent("scripts/\(filename)").path,
+           FileManager.default.fileExists(atPath: bundled) {
+            return bundled
+        }
+        // 2) Look relative to the working directory (project root)
         if let wd = workingDirectory {
             let wdPath = (wd as NSString).appendingPathComponent("scripts/\(filename)")
             if FileManager.default.fileExists(atPath: wdPath) { return wdPath }
         }
-        // Fallback: relative to app CWD (legacy dev mode)
+        // 3) Fallback: relative to app CWD (legacy dev mode)
         let devPath = "scripts/\(filename)"
         if FileManager.default.fileExists(atPath: devPath) { return devPath }
-        // Try absolute from known project locations
+        // 4) Try absolute from known project locations
         let home = NSHomeDirectory()
         for projectDir in ["cmux-term-mesh", "project/cmux", "project/term-mesh"] {
             let projectPath = "\(home)/work/\(projectDir)/scripts/\(filename)"
@@ -549,13 +555,18 @@ final class TeamOrchestrator {
 
     /// Find the scripts/ directory (for team.py path in leader prompts).
     private static func findScriptsDir(workingDirectory: String) -> String {
-        // Check relative to working directory first (the project root)
+        // 1) App bundle Resources/scripts/ (works in Release builds)
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("scripts").path,
+           FileManager.default.fileExists(atPath: bundled) {
+            return bundled
+        }
+        // 2) Check relative to working directory (project root, dev mode)
         let wdPath = (workingDirectory as NSString).appendingPathComponent("scripts")
         if FileManager.default.fileExists(atPath: wdPath) { return wdPath }
-        // Fallback: relative to app CWD (legacy dev mode)
+        // 3) Fallback: relative to app CWD (legacy dev mode)
         let devPath = "scripts"
         if FileManager.default.fileExists(atPath: devPath) { return devPath }
-        // Fallback: known project locations
+        // 4) Fallback: known project locations
         let home = NSHomeDirectory()
         for projectDir in ["cmux-term-mesh", "project/cmux", "project/term-mesh"] {
             let projectPath = "\(home)/work/\(projectDir)/scripts"

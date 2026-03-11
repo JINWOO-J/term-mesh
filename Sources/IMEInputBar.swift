@@ -57,7 +57,10 @@ struct IMEInputBar: View {
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
     @State private var isComposing: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isFieldFocused: Bool
+
+    private var isDark: Bool { colorScheme == .dark }
 
     // MARK: - Actions
 
@@ -140,7 +143,7 @@ struct IMEInputBar: View {
             // Input row
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "keyboard")
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.primary.opacity(0.6))
                     .font(.system(size: 11))
                     .padding(.top, 5)
 
@@ -181,7 +184,7 @@ struct IMEInputBar: View {
             .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.75))
+        .background(isDark ? Color.black.opacity(0.75) : Color(nsColor: .controlBackgroundColor))
         .overlay(alignment: .top) {
             Divider()
         }
@@ -225,9 +228,9 @@ struct IMEInputBar: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.primary.opacity(0.7))
                     .frame(width: 22, height: 22)
-                    .background(Color.white.opacity(0.15))
+                    .background(Color.primary.opacity(0.15))
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
@@ -250,7 +253,7 @@ struct IMEInputBar: View {
     private func hintLabel(_ text: String) -> some View {
         Text(text)
             .font(.caption2)
-            .foregroundColor(.white.opacity(0.5))
+            .foregroundColor(.primary.opacity(0.5))
     }
 }
 
@@ -265,6 +268,7 @@ struct IMETextEditor: NSViewRepresentable {
     let onHistoryDown: () -> Void
     var onHistorySearch: (() -> Void)? = nil
     var onComposingChanged: ((Bool) -> Void)? = nil
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -281,10 +285,10 @@ struct IMETextEditor: NSViewRepresentable {
         let textView = IMETextView()
         textView.delegate = context.coordinator
         textView.font = NSFont.monospacedSystemFont(ofSize: IMEInputBarSettings.fontSize, weight: .regular)
-        textView.textColor = NSColor.white
-        textView.backgroundColor = NSColor.black.withAlphaComponent(0.3)
+        textView.textColor = NSColor.textColor
+        textView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.3)
         textView.drawsBackground = true
-        textView.insertionPointColor = NSColor.white
+        textView.insertionPointColor = NSColor.textColor
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
@@ -319,6 +323,11 @@ struct IMETextEditor: NSViewRepresentable {
             textView.string = text
             textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
         }
+        // Update colors when appearance changes
+        textView.textColor = NSColor.textColor
+        textView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.3)
+        textView.insertionPointColor = NSColor.textColor
+
         textView.submitHandler = onSubmit
         textView.cancelHandler = onCancel
         textView.ctrlCHandler = onCtrlC

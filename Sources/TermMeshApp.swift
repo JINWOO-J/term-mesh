@@ -191,6 +191,9 @@ struct TermMeshApp: App {
                 }
                 .onChange(of: appearanceMode) { _ in
                     applyAppearance()
+                    // Write terminal color override and reload Ghostty config
+                    TerminalThemeOverride.write(for: appearanceMode)
+                    GhosttyApp.shared.reloadConfiguration(source: "appearance.toggle")
                 }
                 .onChange(of: socketControlMode) { _ in
                     updateSocketController()
@@ -2812,6 +2815,91 @@ enum AppearanceSettings {
         }
         return resolved
     }
+}
+
+// MARK: - Terminal Theme Override
+
+/// Manages a ghostty config override file that sets terminal colors
+/// when the user explicitly toggles light/dark mode via the titlebar button.
+/// When appearance is "system", the override is removed and ghostty's own config applies.
+enum TerminalThemeOverride {
+    static let overrideFileName = "terminal-theme.config"
+
+    static func overrideURL() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("term-mesh", isDirectory: true)
+            .appendingPathComponent(overrideFileName)
+    }
+
+    /// Write (or remove) the theme override file based on the current appearance mode.
+    static func write(for rawMode: String) {
+        let mode = AppearanceMode(rawValue: rawMode) ?? .system
+        let fm = FileManager.default
+        guard let url = overrideURL() else { return }
+
+        switch mode {
+        case .light:
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? lightConfig.write(to: url, atomically: true, encoding: .utf8)
+        case .dark:
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? darkConfig.write(to: url, atomically: true, encoding: .utf8)
+        case .system, .auto:
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    // GitHub Dark — deep, high-contrast dark theme
+    static let darkConfig = """
+    # Term-Mesh dark theme override (auto-generated)
+    background = #0d1117
+    foreground = #e6edf3
+    cursor-color = #58a6ff
+    selection-background = #264f78
+    selection-foreground = #e6edf3
+    palette = 0=#0d1117
+    palette = 1=#ff7b72
+    palette = 2=#3fb950
+    palette = 3=#d29922
+    palette = 4=#58a6ff
+    palette = 5=#bc8cff
+    palette = 6=#39d2c0
+    palette = 7=#c9d1d9
+    palette = 8=#484f58
+    palette = 9=#ff7b72
+    palette = 10=#3fb950
+    palette = 11=#d29922
+    palette = 12=#58a6ff
+    palette = 13=#bc8cff
+    palette = 14=#39d2c0
+    palette = 15=#f0f6fc
+    """
+
+    // Xcode-style light theme — clean white with readable contrast
+    static let lightConfig = """
+    # Term-Mesh light theme override (auto-generated)
+    background = #ffffff
+    foreground = #1e1e1e
+    cursor-color = #333333
+    selection-background = #b4d5fe
+    selection-foreground = #1e1e1e
+    palette = 0=#000000
+    palette = 1=#c41a16
+    palette = 2=#007400
+    palette = 3=#826b28
+    palette = 4=#0000ff
+    palette = 5=#a90d91
+    palette = 6=#3e8a87
+    palette = 7=#c0c0c0
+    palette = 8=#808080
+    palette = 9=#c41a16
+    palette = 10=#007400
+    palette = 11=#826b28
+    palette = 12=#0000ff
+    palette = 13=#a90d91
+    palette = 14=#3e8a87
+    palette = 15=#ffffff
+    """
 }
 
 enum QuitWarningSettings {

@@ -1702,6 +1702,7 @@ struct ContentView: View {
     @AppStorage("sidebarBlendMode") private var sidebarBlendMode = SidebarBlendModeOption.withinWindow.rawValue
     @AppStorage("hideWelcomeScreen") private var hideWelcomeScreen: Bool = false
     @AppStorage("showStatusBar") private var showStatusBar: Bool = true
+    @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
 
     // Background glass settings
     @AppStorage("bgGlassTintHex") private var bgGlassTintHex = "#000000"
@@ -1725,6 +1726,13 @@ struct ContentView: View {
         return ghosttyBackground.isLightColor
             ? Color.black.opacity(0.78)
             : Color.white.opacity(0.82)
+    }
+
+    /// Adaptive titlebar text color based on actual terminal background, not color scheme.
+    private func titlebarColor(opacity: Double) -> Color {
+        _ = titlebarThemeGeneration
+        let isLight = GhosttyApp.shared.defaultBackgroundColor.isLightColor
+        return isLight ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
     }
     private var fullscreenControls: some View {
         TitlebarControlsView(
@@ -1790,10 +1798,10 @@ struct ContentView: View {
             if !titlebarGitBranch.isEmpty {
                 Image(systemName: "arrow.triangle.branch")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(titlebarColor(opacity: 0.7))
                 Text(titlebarGitBranch)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(titlebarColor(opacity: 0.85))
                 if titlebarGitDirty {
                     Text(titlebarGitDirtyCount > 0 ? "±\(titlebarGitDirtyCount)" : "±")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -1804,11 +1812,11 @@ struct ContentView: View {
                 if !titlebarGitBranch.isEmpty {
                     Text("·")
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(titlebarColor(opacity: 0.4))
                 }
                 Text(titlebarDirBasename)
                     .font(.system(size: 11, weight: .regular))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(titlebarColor(opacity: 0.6))
             }
         }
         .lineLimit(1)
@@ -1817,7 +1825,7 @@ struct ContentView: View {
     private var titlebarInfoSeparator: some View {
         Text("|")
             .font(.system(size: 10))
-            .foregroundColor(.white.opacity(0.15))
+            .foregroundColor(titlebarColor(opacity: 0.15))
     }
 
     private var titlebarRightInfo: some View {
@@ -1838,7 +1846,7 @@ struct ContentView: View {
                 } else {
                     Image(systemName: "bookmark")
                         .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.3))
+                        .foregroundColor(titlebarColor(opacity: 0.3))
                 }
             }
             .buttonStyle(.plain)
@@ -1869,7 +1877,7 @@ struct ContentView: View {
                         Text(verbatim: "\(host):\(port)")
                             .font(.system(size: 11, design: .monospaced))
                     }
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(titlebarColor(opacity: 0.45))
                 }
                 .buttonStyle(.plain)
                 .help("Open Dashboard")
@@ -1903,14 +1911,37 @@ struct ContentView: View {
                 .help("Manage Worktrees")
             }
 
+            // Theme toggle (sun/moon)
+            titlebarInfoSeparator
+            Button(action: {
+                let isDark = Self.isEffectivelyDark(appearanceMode)
+                appearanceMode = isDark ? AppearanceMode.light.rawValue : AppearanceMode.dark.rawValue
+            }) {
+                Image(systemName: Self.isEffectivelyDark(appearanceMode) ? "sun.max.fill" : "moon.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(Self.isEffectivelyDark(appearanceMode) ? .yellow.opacity(0.8) : .indigo.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help(Self.isEffectivelyDark(appearanceMode) ? "Switch to light theme" : "Switch to dark theme")
+
             if let start = titlebarSessionStart {
                 titlebarInfoSeparator
                 Text(Self.formatDuration(since: start))
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(titlebarColor(opacity: 0.5))
             }
         }
         .lineLimit(1)
+    }
+
+    private static func isEffectivelyDark(_ rawMode: String) -> Bool {
+        let mode = AppearanceMode(rawValue: rawMode) ?? .system
+        switch mode {
+        case .dark: return true
+        case .light: return false
+        case .system, .auto:
+            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
     }
 
     @MainActor
@@ -8368,7 +8399,15 @@ private struct SidebarBackdrop: View {
         let materialOption = SidebarMaterialOption(rawValue: sidebarMaterial)
         let blendingMode = SidebarBlendModeOption(rawValue: sidebarBlendMode)?.mode ?? .behindWindow
         let state = SidebarStateOption(rawValue: sidebarState)?.state ?? .active
-        let tintColor = (NSColor(hex: sidebarTintHex) ?? .black).withAlphaComponent(sidebarTintOpacity)
+        // In dark mode, use a deep dark tint instead of the user-configured (typically white) tint
+        let effectiveTintColor: NSColor = {
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            if isDark {
+                return (NSColor(hex: "#0a0e14") ?? .black).withAlphaComponent(0.85)
+            }
+            return (NSColor(hex: sidebarTintHex) ?? .black).withAlphaComponent(sidebarTintOpacity)
+        }()
+        let tintColor = effectiveTintColor
         let cornerRadius = CGFloat(max(0, sidebarCornerRadius))
         let useLiquidGlass = materialOption?.usesLiquidGlass ?? false
         let useWindowLevelGlass = useLiquidGlass && blendingMode == .behindWindow

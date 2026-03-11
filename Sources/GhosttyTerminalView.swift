@@ -412,6 +412,12 @@ class GhosttyApp {
         if getenv("NO_COLOR") != nil {
             unsetenv("NO_COLOR")
         }
+        // Clear CLAUDECODE so terminals spawned by term-mesh don't inherit it
+        // from a parent Claude Code session (Claude Code refuses to start
+        // inside another CLAUDECODE session).
+        if getenv("CLAUDECODE") != nil {
+            unsetenv("CLAUDECODE")
+        }
 
         // Initialize Ghostty library first
         let result = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
@@ -596,7 +602,21 @@ class GhosttyApp {
     private func loadDefaultConfigFilesWithLegacyFallback(_ config: ghostty_config_t) {
         ghostty_config_load_default_files(config)
         loadLegacyGhosttyConfigIfNeeded(config)
+        loadTermMeshThemeOverride(config)
         ghostty_config_finalize(config)
+    }
+
+    /// Load the term-mesh terminal theme override file (if present).
+    /// This file is written by TerminalThemeOverride when the user toggles light/dark mode.
+    private func loadTermMeshThemeOverride(_ config: ghostty_config_t) {
+        guard let url = TerminalThemeOverride.overrideURL(),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        url.path.withCString { path in
+            ghostty_config_load_file(config, path)
+        }
+        #if DEBUG
+        Self.initLog("loaded term-mesh theme override: \(url.path)")
+        #endif
     }
 
     static func shouldLoadLegacyGhosttyConfig(

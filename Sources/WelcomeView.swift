@@ -27,10 +27,10 @@ struct WelcomeView: View {
             VStack(spacing: 6) {
                 Text("Term-Mesh")
                     .font(.system(size: 32, weight: .semibold, design: .default))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 Text("Terminal Multiplexer for macOS")
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary)
             }
 
             Divider()
@@ -40,7 +40,7 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Keyboard Shortcuts")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary)
                     .textCase(.uppercase)
                     .tracking(0.5)
 
@@ -73,13 +73,13 @@ struct WelcomeView: View {
             Toggle(isOn: $hideWelcomeScreen) {
                 Text("Don't show again")
                     .font(.system(size: 12))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary)
             }
             .toggleStyle(.checkbox)
         }
         .padding(.horizontal, 64)
         .padding(.vertical, 56)
-        .background(Color.white)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -91,7 +91,7 @@ private struct ShortcutRow: View {
         HStack(spacing: 8) {
             Text(key)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.black)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(
@@ -100,7 +100,7 @@ private struct ShortcutRow: View {
                 )
             Text(description)
                 .font(.system(size: 12))
-                .foregroundColor(.gray)
+                .foregroundColor(.secondary)
             Spacer()
         }
     }

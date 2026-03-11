@@ -28,6 +28,9 @@
 			CVB00020 /* Workspace+BonsplitDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00020 /* Workspace+BonsplitDelegate.swift */; };
 			CVB00027 /* AppDelegate+Shortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00027 /* AppDelegate+Shortcuts.swift */; };
 			CVB00028 /* AppDelegate+Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00028 /* AppDelegate+Notifications.swift */; };
+			CVB00029 /* ContentViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00029 /* ContentViewModels.swift */; };
+			CVB00030 /* ContentViewUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00030 /* ContentViewUtilities.swift */; };
+			CVB00031 /* TabManager+Browser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00031 /* TabManager+Browser.swift */; };
 			E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */; };
 			B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */; };
 			A5001003 /* TabManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001013 /* TabManager.swift */; };
@@ -202,6 +205,9 @@
 			CVS00020 /* Workspace+BonsplitDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Workspace+BonsplitDelegate.swift"; sourceTree = "<group>"; };
 			CVS00027 /* AppDelegate+Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Shortcuts.swift"; sourceTree = "<group>"; };
 			CVS00028 /* AppDelegate+Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+Notifications.swift"; sourceTree = "<group>"; };
+			CVS00029 /* ContentViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewModels.swift; sourceTree = "<group>"; };
+			CVS00030 /* ContentViewUtilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentViewUtilities.swift; sourceTree = "<group>"; };
+			CVS00031 /* TabManager+Browser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TabManager+Browser.swift"; sourceTree = "<group>"; };
 			9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSelectionState.swift; sourceTree = "<group>"; };
 			B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDragHandleView.swift; sourceTree = "<group>"; };
 			A5001013 /* TabManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabManager.swift; sourceTree = "<group>"; };
@@ -424,6 +430,9 @@
 					CVS00020 /* Workspace+BonsplitDelegate.swift */,
 					CVS00027 /* AppDelegate+Shortcuts.swift */,
 					CVS00028 /* AppDelegate+Notifications.swift */,
+					CVS00029 /* ContentViewModels.swift */,
+					CVS00030 /* ContentViewUtilities.swift */,
+					CVS00031 /* TabManager+Browser.swift */,
 					9AD52285508B1D6A9875E7B3 /* SidebarSelectionState.swift */,
 					B9000017A1B2C3D4E5F60719 /* WindowDragHandleView.swift */,
 					A50012F0 /* Backport.swift */,
@@ -702,6 +711,9 @@
 					CVB00020 /* Workspace+BonsplitDelegate.swift in Sources */,
 					CVB00027 /* AppDelegate+Shortcuts.swift in Sources */,
 					CVB00028 /* AppDelegate+Notifications.swift in Sources */,
+					CVB00029 /* ContentViewModels.swift in Sources */,
+					CVB00030 /* ContentViewUtilities.swift in Sources */,
+					CVB00031 /* TabManager+Browser.swift in Sources */,
 					E62155868BB29FEB5DAAAF25 /* SidebarSelectionState.swift in Sources */,
 					B9000018A1B2C3D4E5F60719 /* WindowDragHandleView.swift in Sources */,
 					A50012F1 /* Backport.swift in Sources */,

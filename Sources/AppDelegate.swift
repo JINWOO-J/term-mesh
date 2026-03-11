@@ -12,7 +12,7 @@ import ObjectiveC.runtime
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation {
     static var shared: AppDelegate?
 
-    private func isRunningUnderXCTest(_ env: [String: String]) -> Bool {
+    func isRunningUnderXCTest(_ env: [String: String]) -> Bool {
         // On some macOS/Xcode setups, the app-under-test process doesn't get
         // `XCTestConfigurationFilePath`. Use a broader set of signals so UI tests
         // can reliably skip heavyweight startup work and bring up a window.
@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    private final class MainWindowContext {
+    final class MainWindowContext {
         let windowId: UUID
         let tabManager: TabManager
         let sidebarState: SidebarState
@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private final class MainWindowController: NSWindowController, NSWindowDelegate {
+    final class MainWindowController: NSWindowController, NSWindowDelegate {
         var onClose: (() -> Void)?
 
         func windowWillClose(_ notification: Notification) {
@@ -61,29 +61,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     weak var sidebarState: SidebarState?
     weak var fullscreenControlsViewModel: TitlebarControlsViewModel?
     weak var sidebarSelectionState: SidebarSelectionState?
-    private var workspaceObserver: NSObjectProtocol?
-    private var windowKeyObserver: NSObjectProtocol?
-    private var shortcutMonitor: Any?
-    private var shortcutDefaultsObserver: NSObjectProtocol?
-    private var splitButtonTooltipRefreshScheduled = false
-    private var ghosttyConfigObserver: NSObjectProtocol?
-    private var ghosttyGotoSplitLeftShortcut: StoredShortcut?
-    private var ghosttyGotoSplitRightShortcut: StoredShortcut?
-    private var ghosttyGotoSplitUpShortcut: StoredShortcut?
-    private var ghosttyGotoSplitDownShortcut: StoredShortcut?
-    private var browserAddressBarFocusedPanelId: UUID?
-    private var browserOmnibarRepeatStartWorkItem: DispatchWorkItem?
-    private var browserOmnibarRepeatTickWorkItem: DispatchWorkItem?
-    private var browserOmnibarRepeatKeyCode: UInt16?
-    private var browserOmnibarRepeatDelta: Int = 0
-    private var browserAddressBarFocusObserver: NSObjectProtocol?
-    private var browserAddressBarBlurObserver: NSObjectProtocol?
-    private let updateController = UpdateController()
+    var workspaceObserver: NSObjectProtocol?
+    var windowKeyObserver: NSObjectProtocol?
+    var shortcutMonitor: Any?
+    var shortcutDefaultsObserver: NSObjectProtocol?
+    var splitButtonTooltipRefreshScheduled = false
+    var ghosttyConfigObserver: NSObjectProtocol?
+    var ghosttyGotoSplitLeftShortcut: StoredShortcut?
+    var ghosttyGotoSplitRightShortcut: StoredShortcut?
+    var ghosttyGotoSplitUpShortcut: StoredShortcut?
+    var ghosttyGotoSplitDownShortcut: StoredShortcut?
+    var browserAddressBarFocusedPanelId: UUID?
+    var browserOmnibarRepeatStartWorkItem: DispatchWorkItem?
+    var browserOmnibarRepeatTickWorkItem: DispatchWorkItem?
+    var browserOmnibarRepeatKeyCode: UInt16?
+    var browserOmnibarRepeatDelta: Int = 0
+    var browserAddressBarFocusObserver: NSObjectProtocol?
+    var browserAddressBarBlurObserver: NSObjectProtocol?
+    let updateController = UpdateController()
     private lazy var titlebarAccessoryController = UpdateTitlebarAccessoryController(viewModel: updateViewModel)
-    private let windowDecorationsController = WindowDecorationsController()
-    private var menuBarExtraController: MenuBarExtraController?
-    private static let serviceErrorNoPath = NSString(string: "Could not load any folder path from the clipboard.")
-    private static let didInstallWindowKeyEquivalentSwizzle: Void = {
+    let windowDecorationsController = WindowDecorationsController()
+    var menuBarExtraController: MenuBarExtraController?
+    static let serviceErrorNoPath = NSString(string: "Could not load any folder path from the clipboard.")
+    static let didInstallWindowKeyEquivalentSwizzle: Void = {
         let targetClass: AnyClass = NSWindow.self
         let originalSelector = #selector(NSWindow.performKeyEquivalent(with:))
         let swizzledSelector = #selector(NSWindow.termMesh_performKeyEquivalent(with:))
@@ -93,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         method_exchangeImplementations(originalMethod, swizzledMethod)
     }()
-    private static let didInstallWindowFirstResponderSwizzle: Void = {
+    static let didInstallWindowFirstResponderSwizzle: Void = {
         let targetClass: AnyClass = NSWindow.self
         let originalSelector = #selector(NSWindow.makeFirstResponder(_:))
         let swizzledSelector = #selector(NSWindow.termMesh_makeFirstResponder(_:))
@@ -103,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         method_exchangeImplementations(originalMethod, swizzledMethod)
     }()
-    private static let didInstallWindowSendEventSwizzle: Void = {
+    static let didInstallWindowSendEventSwizzle: Void = {
         let targetClass: AnyClass = NSWindow.self
         let originalSelector = #selector(NSWindow.sendEvent(_:))
         let swizzledSelector = #selector(NSWindow.termMesh_sendEvent(_:))
@@ -115,14 +115,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }()
 
 #if DEBUG
-    private var didSetupJumpUnreadUITest = false
-    private var jumpUnreadFocusExpectation: (tabId: UUID, surfaceId: UUID)?
-    private var jumpUnreadFocusObserver: NSObjectProtocol?
-    private var didSetupGotoSplitUITest = false
-    private var gotoSplitUITestObservers: [NSObjectProtocol] = []
-    private var didSetupMultiWindowNotificationsUITest = false
+    var didSetupJumpUnreadUITest = false
+    var jumpUnreadFocusExpectation: (tabId: UUID, surfaceId: UUID)?
+    var jumpUnreadFocusObserver: NSObjectProtocol?
+    var didSetupGotoSplitUITest = false
+    var gotoSplitUITestObservers: [NSObjectProtocol] = []
+    var didSetupMultiWindowNotificationsUITest = false
 
-    private func childExitKeyboardProbePath() -> String? {
+    func childExitKeyboardProbePath() -> String? {
         let env = ProcessInfo.processInfo.environment
         guard (env["TERMMESH_UI_TEST_CHILD_EXIT_KEYBOARD_SETUP"] ?? env["CMUX_UI_TEST_CHILD_EXIT_KEYBOARD_SETUP"]) == "1",
               let path = (env["TERMMESH_UI_TEST_CHILD_EXIT_KEYBOARD_PATH"] ?? env["CMUX_UI_TEST_CHILD_EXIT_KEYBOARD_PATH"]),
@@ -132,14 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return path
     }
 
-    private func childExitKeyboardProbeHex(_ value: String?) -> String {
+    func childExitKeyboardProbeHex(_ value: String?) -> String {
         guard let value else { return "" }
         return value.unicodeScalars
             .map { String(format: "%04X", $0.value) }
             .joined(separator: ",")
     }
 
-    private func writeChildExitKeyboardProbe(_ updates: [String: String], increments: [String: Int] = [:]) {
+    func writeChildExitKeyboardProbe(_ updates: [String: String], increments: [String: Int] = [:]) {
         guard let path = childExitKeyboardProbePath() else { return }
         var payload: [String: String] = {
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
@@ -160,11 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 #endif
 
-    private var mainWindowContexts: [ObjectIdentifier: MainWindowContext] = [:]
-    private var mainWindowControllers: [MainWindowController] = []
-    private var commandPaletteVisibilityByWindowId: [UUID: Bool] = [:]
-    private var commandPaletteSelectionByWindowId: [UUID: Int] = [:]
-    private var commandPaletteSnapshotByWindowId: [UUID: CommandPaletteDebugSnapshot] = [:]
+    var mainWindowContexts: [ObjectIdentifier: MainWindowContext] = [:]
+    var mainWindowControllers: [MainWindowController] = []
+    var commandPaletteVisibilityByWindowId: [UUID: Bool] = [:]
+    var commandPaletteSelectionByWindowId: [UUID: Int] = [:]
+    var commandPaletteSnapshotByWindowId: [UUID: CommandPaletteDebugSnapshot] = [:]
 
     var updateViewModel: UpdateViewModel {
         updateController.viewModel
@@ -298,7 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
 #if DEBUG
-    private func writeUITestDiagnosticsIfNeeded(stage: String) {
+    func writeUITestDiagnosticsIfNeeded(stage: String) {
         let env = ProcessInfo.processInfo.environment
         guard let path = (env["TERMMESH_UI_TEST_DIAGNOSTICS_PATH"] ?? env["CMUX_UI_TEST_DIAGNOSTICS_PATH"]), !path.isEmpty else { return }
 
@@ -321,7 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    private func loadUITestDiagnostics(at path: String) -> [String: String] {
+    func loadUITestDiagnostics(at path: String) -> [String: String] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return [:]
@@ -476,6 +476,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         mainWindowContexts.values.first(where: { $0.windowId == windowId })?.tabManager
     }
 
+    func tabManagerFor(tabId: UUID) -> TabManager? {
+        mainWindowContexts.values.first(where: { ctx in
+            ctx.tabManager.tabs.contains(where: { $0.id == tabId })
+        })?.tabManager
+    }
+
     func windowId(for tabManager: TabManager) -> UUID? {
         mainWindowContexts.values.first(where: { $0.tabManager === tabManager })?.windowId
     }
@@ -526,7 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return isFocusStealingResponderWhileCommandPaletteVisible(responder)
     }
 
-    private func isCommandPaletteResponder(_ responder: NSResponder) -> Bool {
+    func isCommandPaletteResponder(_ responder: NSResponder) -> Bool {
         if let textView = responder as? NSTextView, textView.isFieldEditor {
             if let delegateView = textView.delegate as? NSView {
                 return isInsideCommandPaletteOverlay(delegateView)
@@ -542,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    private func isFocusStealingResponderWhileCommandPaletteVisible(_ responder: NSResponder) -> Bool {
+    func isFocusStealingResponderWhileCommandPaletteVisible(_ responder: NSResponder) -> Bool {
         if responder is GhosttyNSView || responder is WKWebView {
             return true
         }
@@ -560,7 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    private func isTerminalOrBrowserView(_ view: NSView) -> Bool {
+    func isTerminalOrBrowserView(_ view: NSView) -> Bool {
         if view is GhosttyNSView || view is WKWebView {
             return true
         }
@@ -574,7 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    private func isInsideCommandPaletteOverlay(_ view: NSView) -> Bool {
+    func isInsideCommandPaletteOverlay(_ view: NSView) -> Bool {
         var current: NSView? = view
         while let candidate = current {
             if candidate.identifier == commandPaletteOverlayContainerIdentifier {
@@ -633,7 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return true
     }
 
-    private func windowForMainWindowId(_ windowId: UUID) -> NSWindow? {
+    func windowForMainWindowId(_ windowId: UUID) -> NSWindow? {
         if let ctx = mainWindowContexts.values.first(where: { $0.windowId == windowId }),
            let window = ctx.window {
             return window
@@ -642,7 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return NSApp.windows.first(where: { $0.identifier?.rawValue == expectedIdentifier })
     }
 
-    private func mainWindowId(for window: NSWindow) -> UUID? {
+    func mainWindowId(for window: NSWindow) -> UUID? {
         if let context = mainWindowContexts[ObjectIdentifier(window)] {
             return context.windowId
         }
@@ -652,7 +658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return UUID(uuidString: idPart)
     }
 
-    private func activeCommandPaletteWindow() -> NSWindow? {
+    func activeCommandPaletteWindow() -> NSWindow? {
         if let keyWindow = NSApp.keyWindow,
            let windowId = mainWindowId(for: keyWindow),
            commandPaletteVisibilityByWindowId[windowId] == true {
@@ -669,18 +675,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return nil
     }
 
-    private func contextForMainWindow(_ window: NSWindow?) -> MainWindowContext? {
+    func contextForMainWindow(_ window: NSWindow?) -> MainWindowContext? {
         guard let window, isMainTerminalWindow(window) else { return nil }
         return mainWindowContexts[ObjectIdentifier(window)]
     }
 
 #if DEBUG
-    private func debugManagerToken(_ manager: TabManager?) -> String {
+    func debugManagerToken(_ manager: TabManager?) -> String {
         guard let manager else { return "nil" }
         return String(describing: Unmanaged.passUnretained(manager).toOpaque())
     }
 
-    private func debugWindowToken(_ window: NSWindow?) -> String {
+    func debugWindowToken(_ window: NSWindow?) -> String {
         guard let window else { return "nil" }
         let id = mainWindowId(for: window).map { String($0.uuidString.prefix(8)) } ?? "none"
         let ident = window.identifier?.rawValue ?? "nil"
@@ -693,14 +699,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return "num=\(window.windowNumber) id=\(id) ident=\(shortIdent) key=\(window.isKeyWindow ? 1 : 0) main=\(window.isMainWindow ? 1 : 0)"
     }
 
-    private func debugContextToken(_ context: MainWindowContext?) -> String {
+    func debugContextToken(_ context: MainWindowContext?) -> String {
         guard let context else { return "nil" }
         let selected = context.tabManager.selectedTabId.map { String($0.uuidString.prefix(5)) } ?? "nil"
         let hasWindow = (context.window != nil || windowForMainWindowId(context.windowId) != nil) ? 1 : 0
         return "id=\(String(context.windowId.uuidString.prefix(8))) mgr=\(debugManagerToken(context.tabManager)) tabs=\(context.tabManager.tabs.count) selected=\(selected) hasWindow=\(hasWindow)"
     }
 
-    private func debugShortcutRouteSnapshot(event: NSEvent? = nil) -> String {
+    func debugShortcutRouteSnapshot(event: NSEvent? = nil) -> String {
         let activeManager = tabManager
         let activeWindowId = activeManager.flatMap { windowId(for: $0) }.map { String($0.uuidString.prefix(8)) } ?? "nil"
         let selectedWorkspace = activeManager?.selectedTabId.map { String($0.uuidString.prefix(5)) } ?? "nil"
@@ -721,7 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 #endif
 
-    private func mainWindowForShortcutEvent(_ event: NSEvent) -> NSWindow? {
+    func mainWindowForShortcutEvent(_ event: NSEvent) -> NSWindow? {
         if let window = event.window, isMainTerminalWindow(window) {
             return window
         }
@@ -785,7 +791,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return context.tabManager
     }
 
-    private func preferredMainWindowContextForShortcuts(event: NSEvent) -> MainWindowContext? {
+    func preferredMainWindowContextForShortcuts(event: NSEvent) -> MainWindowContext? {
         if let context = contextForMainWindow(event.window) {
             return context
         }
@@ -802,7 +808,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return mainWindowContexts.values.first
     }
 
-    private func activateMainWindowContextForShortcutEvent(_ event: NSEvent) {
+    func activateMainWindowContextForShortcutEvent(_ event: NSEvent) {
         let preferredWindow = mainWindowForShortcutEvent(event)
 #if DEBUG
         dlog(
@@ -879,12 +885,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         openFromServicePasteboard(pasteboard, target: .workspace, error: error)
     }
 
-    private enum ServiceOpenTarget {
+    enum ServiceOpenTarget {
         case window
         case workspace
     }
 
-    private func openFromServicePasteboard(
+    func openFromServicePasteboard(
         _ pasteboard: NSPasteboard,
         target: ServiceOpenTarget,
         error: AutoreleasingUnsafeMutablePointer<NSString>
@@ -911,7 +917,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func servicePathURLs(from pasteboard: NSPasteboard) -> [URL] {
+    func servicePathURLs(from pasteboard: NSPasteboard) -> [URL] {
         if let pathURLs = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL], !pathURLs.isEmpty {
             return pathURLs
         }
@@ -939,7 +945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return []
     }
 
-    private func openWorkspaceFromService(workingDirectory: String) {
+    func openWorkspaceFromService(workingDirectory: String) {
         if let context = preferredMainWindowContextForServiceWorkspace(),
            let window = context.window ?? windowForMainWindowId(context.windowId) {
             setActiveMainWindow(window)
@@ -950,7 +956,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ = createMainWindow(initialWorkingDirectory: workingDirectory)
     }
 
-    private func preferredMainWindowContextForServiceWorkspace() -> MainWindowContext? {
+    func preferredMainWindowContextForServiceWorkspace() -> MainWindowContext? {
         if let keyWindow = NSApp.keyWindow,
            isMainTerminalWindow(keyWindow),
            let context = mainWindowContexts[ObjectIdentifier(keyWindow)] {
@@ -1042,7 +1048,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         updateController.attemptUpdate()
     }
 
-    private func setupMenuBarExtra() {
+    func setupMenuBarExtra() {
         let store = TerminalNotificationStore.shared
         menuBarExtraController = MenuBarExtraController(
             notificationStore: store,
@@ -1158,7 +1164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
 #if DEBUG
-    private let debugColorWorkspaceTitlePrefix = "Debug Color - "
+    let debugColorWorkspaceTitlePrefix = "Debug Color - "
 
     @objc func openDebugScrollbackTab(_ sender: Any?) {
         guard let tabManager else { return }
@@ -1209,7 +1215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func sendTextWhenReady(_ text: String, to tab: Tab, attempt: Int = 0) {
+    func sendTextWhenReady(_ text: String, to tab: Tab, attempt: Int = 0) {
         let maxAttempts = 60
         if let terminalPanel = tab.focusedTerminalPanel, terminalPanel.surface.surface != nil {
             terminalPanel.sendText(text)
@@ -1230,7 +1236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
 #if DEBUG
-    private func setupJumpUnreadUITestIfNeeded() {
+    func setupJumpUnreadUITestIfNeeded() {
         guard !didSetupJumpUnreadUITest else { return }
         didSetupJumpUnreadUITest = true
         let env = ProcessInfo.processInfo.environment
@@ -1320,7 +1326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func installJumpUnreadFocusObserverIfNeeded() {
+    func installJumpUnreadFocusObserverIfNeeded() {
         guard jumpUnreadFocusObserver == nil else { return }
         jumpUnreadFocusObserver = NotificationCenter.default.addObserver(
             forName: .ghosttyDidFocusSurface,
@@ -1334,7 +1340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func writeJumpUnreadTestData(_ updates: [String: String]) {
+    func writeJumpUnreadTestData(_ updates: [String: String]) {
         let env = ProcessInfo.processInfo.environment
         guard let path = (env["TERMMESH_UI_TEST_JUMP_UNREAD_PATH"] ?? env["CMUX_UI_TEST_JUMP_UNREAD_PATH"]), !path.isEmpty else { return }
         var payload = loadJumpUnreadTestData(at: path)
@@ -1345,7 +1351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    private func loadJumpUnreadTestData(at path: String) -> [String: String] {
+    func loadJumpUnreadTestData(at path: String) -> [String: String] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return [:]
@@ -1353,7 +1359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return object
     }
 
-    private func setupGotoSplitUITestIfNeeded() {
+    func setupGotoSplitUITestIfNeeded() {
         guard !didSetupGotoSplitUITest else { return }
         didSetupGotoSplitUITest = true
         let env = ProcessInfo.processInfo.environment
@@ -1426,7 +1432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func focusWebViewForGotoSplitUITest(tab: Workspace, browserPanelId: UUID, attempt: Int = 0) {
+    func focusWebViewForGotoSplitUITest(tab: Workspace, browserPanelId: UUID, attempt: Int = 0) {
         let maxAttempts = 120
         guard attempt < maxAttempts else {
             writeGotoSplitTestData([
@@ -1472,13 +1478,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func isWebViewFocused(_ panel: BrowserPanel) -> Bool {
+    func isWebViewFocused(_ panel: BrowserPanel) -> Bool {
         guard let window = panel.webView.window else { return false }
         guard let fr = window.firstResponder as? NSView else { return false }
         return fr.isDescendant(of: panel.webView)
     }
 
-    private func paneIdsForGotoSplitUITest(tab: Workspace, browserPanelId: UUID) -> (browser: PaneID, terminal: PaneID)? {
+    func paneIdsForGotoSplitUITest(tab: Workspace, browserPanelId: UUID) -> (browser: PaneID, terminal: PaneID)? {
         let paneIds = tab.bonsplitController.allPaneIds
         guard paneIds.count >= 2 else { return nil }
 
@@ -1498,7 +1504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return (browserPane, terminalPane)
     }
 
-    private func installGotoSplitUITestFocusObserversIfNeeded() {
+    func installGotoSplitUITestFocusObserversIfNeeded() {
         guard gotoSplitUITestObservers.isEmpty else { return }
 
         gotoSplitUITestObservers.append(NotificationCenter.default.addObserver(
@@ -1522,12 +1528,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         })
     }
 
-    private func recordGotoSplitUITestWebViewFocus(panelId: UUID, key: String) {
+    func recordGotoSplitUITestWebViewFocus(panelId: UUID, key: String) {
         // Give the responder chain time to settle, retrying for slow environments (e.g. VM).
         recordGotoSplitUITestWebViewFocusRetry(panelId: panelId, key: key, attempt: 0)
     }
 
-    private func recordGotoSplitUITestWebViewFocusRetry(panelId: UUID, key: String, attempt: Int) {
+    func recordGotoSplitUITestWebViewFocusRetry(panelId: UUID, key: String, attempt: Int) {
         let delays: [Double] = [0.05, 0.1, 0.25, 0.5]
         let delay = attempt < delays.count ? delays[attempt] : delays.last!
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -1546,7 +1552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func recordGotoSplitMoveIfNeeded(direction: NavigationDirection) {
+    func recordGotoSplitMoveIfNeeded(direction: NavigationDirection) {
         let env = ProcessInfo.processInfo.environment
         guard (env["TERMMESH_UI_TEST_GOTO_SPLIT_SETUP"] ?? env["CMUX_UI_TEST_GOTO_SPLIT_SETUP"]) == "1" else { return }
         guard let tabManager,
@@ -1570,7 +1576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ])
     }
 
-    private func recordGotoSplitSplitIfNeeded(direction: SplitDirection) {
+    func recordGotoSplitSplitIfNeeded(direction: SplitDirection) {
         let env = ProcessInfo.processInfo.environment
         guard (env["TERMMESH_UI_TEST_GOTO_SPLIT_SETUP"] ?? env["CMUX_UI_TEST_GOTO_SPLIT_SETUP"]) == "1" else { return }
         guard let workspace = tabManager?.selectedWorkspace else { return }
@@ -1594,7 +1600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ])
     }
 
-    private func writeGotoSplitTestData(_ updates: [String: String]) {
+    func writeGotoSplitTestData(_ updates: [String: String]) {
         let env = ProcessInfo.processInfo.environment
         guard let path = (env["TERMMESH_UI_TEST_GOTO_SPLIT_PATH"] ?? env["CMUX_UI_TEST_GOTO_SPLIT_PATH"]), !path.isEmpty else { return }
         var payload = loadGotoSplitTestData(at: path)
@@ -1605,7 +1611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    private func loadGotoSplitTestData(at path: String) -> [String: String] {
+    func loadGotoSplitTestData(at path: String) -> [String: String] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return [:]
@@ -1613,7 +1619,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return object
     }
 
-    private func setupMultiWindowNotificationsUITestIfNeeded() {
+    func setupMultiWindowNotificationsUITestIfNeeded() {
         guard !didSetupMultiWindowNotificationsUITest else { return }
         didSetupMultiWindowNotificationsUITest = true
 
@@ -1682,7 +1688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func writeMultiWindowNotificationTestData(_ updates: [String: String], at path: String) {
+    func writeMultiWindowNotificationTestData(_ updates: [String: String], at path: String) {
         var payload = loadMultiWindowNotificationTestData(at: path)
         for (key, value) in updates {
             payload[key] = value
@@ -1691,7 +1697,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
-    private func loadMultiWindowNotificationTestData(at path: String) -> [String: String] {
+    func loadMultiWindowNotificationTestData(at path: String) -> [String: String] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return [:]
@@ -1699,7 +1705,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return object
     }
 
-    private func recordMultiWindowNotificationFocusIfNeeded(
+    func recordMultiWindowNotificationFocusIfNeeded(
         windowId: UUID,
         tabId: UUID,
         surfaceId: UUID?,
@@ -1774,13 +1780,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 #endif
 
-    private func installWindowResponderSwizzles() {
+    func installWindowResponderSwizzles() {
         _ = Self.didInstallWindowKeyEquivalentSwizzle
         _ = Self.didInstallWindowFirstResponderSwizzle
         _ = Self.didInstallWindowSendEventSwizzle
     }
 
-    private func installShortcutMonitor() {
+    func installShortcutMonitor() {
         // Local monitor only receives events when app is active (not global)
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             guard let self else { return event }
@@ -1818,7 +1824,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func installShortcutDefaultsObserver() {
+    func installShortcutDefaultsObserver() {
         guard shortcutDefaultsObserver == nil else { return }
         shortcutDefaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
@@ -1831,7 +1837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Coalesce shortcut-default changes and refresh on the next runloop turn to
     /// avoid mutating Bonsplit/SwiftUI-observed state during an active update pass.
-    private func scheduleSplitButtonTooltipRefreshAcrossWorkspaces() {
+    func scheduleSplitButtonTooltipRefreshAcrossWorkspaces() {
         guard !splitButtonTooltipRefreshScheduled else { return }
         splitButtonTooltipRefreshScheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -1841,7 +1847,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func refreshSplitButtonTooltipsAcrossWorkspaces() {
+    func refreshSplitButtonTooltipsAcrossWorkspaces() {
         var refreshedManagers: Set<ObjectIdentifier> = []
         if let manager = tabManager {
             manager.refreshSplitButtonTooltips()
@@ -1855,7 +1861,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func installGhosttyConfigObserver() {
+    func installGhosttyConfigObserver() {
         guard ghosttyConfigObserver == nil else { return }
         ghosttyConfigObserver = NotificationCenter.default.addObserver(
             forName: .ghosttyConfigDidReload,
@@ -1866,7 +1872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    private func refreshGhosttyGotoSplitShortcuts() {
+    func refreshGhosttyGotoSplitShortcuts() {
         guard let config = GhosttyApp.shared.config else {
             ghosttyGotoSplitLeftShortcut = nil
             ghosttyGotoSplitRightShortcut = nil
@@ -1889,7 +1895,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
     }
 
-    private func storedShortcutFromGhosttyTrigger(_ trigger: ghostty_input_trigger_s) -> StoredShortcut? {
+    func storedShortcutFromGhosttyTrigger(_ trigger: ghostty_input_trigger_s) -> StoredShortcut? {
         let key: String
         switch trigger.tag {
         case GHOSTTY_TRIGGER_PHYSICAL:
@@ -1975,7 +1981,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return StoredShortcut(key: key, command: command, shift: shift, option: option, control: control)
     }
 
-    private func handleQuitShortcutWarning() -> Bool {
+    func handleQuitShortcutWarning() -> Bool {
         if !QuitWarningSettings.isEnabled() {
             NSApp.terminate(nil)
             return true
@@ -2031,7 +2037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return true
     }
 
-    private func handleCustomShortcut(event: NSEvent) -> Bool {
+    func handleCustomShortcut(event: NSEvent) -> Bool {
         // `charactersIgnoringModifiers` can be nil for some synthetic NSEvents and certain special keys.
         // Most shortcuts below use keyCode fallbacks, so treat nil as "" rather than bailing out.
         let chars = (event.charactersIgnoringModifiers ?? "").lowercased()
@@ -2561,7 +2567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return false
     }
 
-    private func shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: SplitDirection) -> Bool {
+    func shouldSuppressSplitShortcutForTransientTerminalFocusState(direction: SplitDirection) -> Bool {
         guard let tabManager,
               let workspace = tabManager.selectedWorkspace,
               let focusedPanelId = workspace.focusedPanelId,
@@ -2605,7 +2611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
 #if DEBUG
-    private func logBrowserZoomShortcutTrace(
+    func logBrowserZoomShortcutTrace(
         stage: String,
         event: NSEvent,
         flags: NSEvent.ModifierFlags,
@@ -2636,7 +2642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
     @discardableResult
-    private func focusBrowserAddressBar(panelId: UUID) -> Bool {
+    func focusBrowserAddressBar(panelId: UUID) -> Bool {
         guard let tabManager,
               let workspace = tabManager.selectedWorkspace,
               let panel = workspace.browserPanel(for: panelId) else {
@@ -2647,975 +2653,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return true
     }
 
-    private func focusBrowserAddressBar(in panel: BrowserPanel) {
-        _ = panel.requestAddressBarFocus()
-        browserAddressBarFocusedPanelId = panel.id
-        NotificationCenter.default.post(name: .browserFocusAddressBar, object: panel.id)
-    }
-
-    private func shouldBypassAppShortcutForFocusedBrowserAddressBar(
-        flags: NSEvent.ModifierFlags,
-        chars: String
-    ) -> Bool {
-        guard browserAddressBarFocusedPanelId != nil else { return false }
-        let normalizedFlags = browserOmnibarNormalizedModifierFlags(flags)
-        let isCommandOrControlOnly = normalizedFlags == [.command] || normalizedFlags == [.control]
-        guard isCommandOrControlOnly else { return false }
-        return chars == "n" || chars == "p"
-    }
-
-    private func commandOmnibarSelectionDelta(
-        flags: NSEvent.ModifierFlags,
-        chars: String
-    ) -> Int? {
-        browserOmnibarSelectionDeltaForCommandNavigation(
-            hasFocusedAddressBar: browserAddressBarFocusedPanelId != nil,
-            flags: flags,
-            chars: chars
-        )
-    }
-
-    private func dispatchBrowserOmnibarSelectionMove(delta: Int) {
-        guard delta != 0 else { return }
-        guard let panelId = browserAddressBarFocusedPanelId else { return }
-        NotificationCenter.default.post(
-            name: .browserMoveOmnibarSelection,
-            object: panelId,
-            userInfo: ["delta": delta]
-        )
-    }
-
-    private func startBrowserOmnibarSelectionRepeatIfNeeded(keyCode: UInt16, delta: Int) {
-        guard delta != 0 else { return }
-        guard browserAddressBarFocusedPanelId != nil else { return }
-
-        if browserOmnibarRepeatKeyCode == keyCode, browserOmnibarRepeatDelta == delta {
-            return
-        }
-
-        stopBrowserOmnibarSelectionRepeat()
-        browserOmnibarRepeatKeyCode = keyCode
-        browserOmnibarRepeatDelta = delta
-
-        let start = DispatchWorkItem { [weak self] in
-            self?.scheduleBrowserOmnibarSelectionRepeatTick()
-        }
-        browserOmnibarRepeatStartWorkItem = start
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: start)
-    }
-
-    private func scheduleBrowserOmnibarSelectionRepeatTick() {
-        browserOmnibarRepeatStartWorkItem = nil
-        guard browserAddressBarFocusedPanelId != nil else {
-            stopBrowserOmnibarSelectionRepeat()
-            return
-        }
-        guard browserOmnibarRepeatKeyCode != nil else { return }
-
-        dispatchBrowserOmnibarSelectionMove(delta: browserOmnibarRepeatDelta)
-
-        let tick = DispatchWorkItem { [weak self] in
-            self?.scheduleBrowserOmnibarSelectionRepeatTick()
-        }
-        browserOmnibarRepeatTickWorkItem = tick
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.055, execute: tick)
-    }
-
-    private func stopBrowserOmnibarSelectionRepeat() {
-        browserOmnibarRepeatStartWorkItem?.cancel()
-        browserOmnibarRepeatTickWorkItem?.cancel()
-        browserOmnibarRepeatStartWorkItem = nil
-        browserOmnibarRepeatTickWorkItem = nil
-        browserOmnibarRepeatKeyCode = nil
-        browserOmnibarRepeatDelta = 0
-    }
-
-    private func handleBrowserOmnibarSelectionRepeatLifecycleEvent(_ event: NSEvent) {
-        guard browserOmnibarRepeatKeyCode != nil else { return }
-
-        switch event.type {
-        case .keyUp:
-            if event.keyCode == browserOmnibarRepeatKeyCode {
-                stopBrowserOmnibarSelectionRepeat()
-            }
-        case .flagsChanged:
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if !flags.contains(.command) {
-                stopBrowserOmnibarSelectionRepeat()
-            }
-        default:
-            break
-        }
-    }
-
-    private func isLikelyWebInspectorResponder(_ responder: NSResponder?) -> Bool {
-        guard let responder else { return false }
-        let responderType = String(describing: type(of: responder))
-        if responderType.contains("WKInspector") {
-            return true
-        }
-        guard let view = responder as? NSView else { return false }
-        var node: NSView? = view
-        var hops = 0
-        while let current = node, hops < 64 {
-            if String(describing: type(of: current)).contains("WKInspector") {
-                return true
-            }
-            node = current.superview
-            hops += 1
-        }
-        return false
-    }
-
-#if DEBUG
-    private func developerToolsShortcutProbeKind(event: NSEvent) -> String? {
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleBrowserDeveloperTools)) {
-            return "toggle.configured"
-        }
-        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .showBrowserJavaScriptConsole)) {
-            return "console.configured"
-        }
-
-        let chars = (event.charactersIgnoringModifiers ?? "").lowercased()
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if flags == [.command, .option] {
-            if chars == "i" || event.keyCode == 34 {
-                return "toggle.literal"
-            }
-            if chars == "c" || event.keyCode == 8 {
-                return "console.literal"
-            }
-        }
-        return nil
-    }
-
-    private func logDeveloperToolsShortcutSnapshot(
-        phase: String,
-        event: NSEvent? = nil,
-        didHandle: Bool? = nil
-    ) {
-        let keyWindow = NSApp.keyWindow
-        let firstResponder = keyWindow?.firstResponder
-        let firstResponderType = firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-        let firstResponderPtr = firstResponder.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-        let eventDescription = event.map(NSWindow.keyDescription) ?? "none"
-        if let browser = tabManager?.focusedBrowserPanel {
-            var line =
-                "browser.devtools shortcut=\(phase) panel=\(browser.id.uuidString.prefix(5)) " +
-                "\(browser.debugDeveloperToolsStateSummary()) \(browser.debugDeveloperToolsGeometrySummary()) " +
-                "keyWin=\(keyWindow?.windowNumber ?? -1) fr=\(firstResponderType)@\(firstResponderPtr) event=\(eventDescription)"
-            if let didHandle {
-                line += " handled=\(didHandle ? 1 : 0)"
-            }
-            dlog(line)
-            return
-        }
-        var line =
-            "browser.devtools shortcut=\(phase) panel=nil keyWin=\(keyWindow?.windowNumber ?? -1) " +
-            "fr=\(firstResponderType)@\(firstResponderPtr) event=\(eventDescription)"
-        if let didHandle {
-            line += " handled=\(didHandle ? 1 : 0)"
-        }
-        dlog(line)
-    }
-#endif
-
-    private func prepareFocusedBrowserDevToolsForSplit(directionLabel: String) {
-        guard let browser = tabManager?.focusedBrowserPanel else { return }
-        guard browser.shouldPreserveWebViewAttachmentDuringTransientHide() else { return }
-        guard let keyWindow = NSApp.keyWindow else { return }
-        guard isLikelyWebInspectorResponder(keyWindow.firstResponder) else { return }
-
-        let beforeResponder = keyWindow.firstResponder
-        let movedToWebView = keyWindow.makeFirstResponder(browser.webView)
-        let movedToNil = movedToWebView ? false : keyWindow.makeFirstResponder(nil)
-
-        #if DEBUG
-        let beforeType = beforeResponder.map { String(describing: type(of: $0)) } ?? "nil"
-        let beforePtr = beforeResponder.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-        let afterResponder = keyWindow.firstResponder
-        let afterType = afterResponder.map { String(describing: type(of: $0)) } ?? "nil"
-        let afterPtr = afterResponder.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-        dlog(
-            "split.shortcut inspector.preflight dir=\(directionLabel) panel=\(browser.id.uuidString.prefix(5)) " +
-            "before=\(beforeType)@\(beforePtr) after=\(afterType)@\(afterPtr) " +
-            "moveWeb=\(movedToWebView ? 1 : 0) moveNil=\(movedToNil ? 1 : 0) \(browser.debugDeveloperToolsStateSummary())"
-        )
-        #endif
-    }
-
-    @discardableResult
-    func performSplitShortcut(direction: SplitDirection) -> Bool {
-        _ = synchronizeActiveMainWindowContext(preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow)
-
-        let directionLabel: String
-        switch direction {
-        case .left: directionLabel = "left"
-        case .right: directionLabel = "right"
-        case .up: directionLabel = "up"
-        case .down: directionLabel = "down"
-        }
-
-        #if DEBUG
-        let keyWindow = NSApp.keyWindow
-        let firstResponder = keyWindow?.firstResponder
-        let firstResponderType = firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-        let firstResponderPtr = firstResponder.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-        let firstResponderWindow: Int = {
-            if let v = firstResponder as? NSView {
-                return v.window?.windowNumber ?? -1
-            }
-            if let w = firstResponder as? NSWindow {
-                return w.windowNumber
-            }
-            return -1
-        }()
-        let splitContext = "keyWin=\(keyWindow?.windowNumber ?? -1) mainWin=\(NSApp.mainWindow?.windowNumber ?? -1) fr=\(firstResponderType)@\(firstResponderPtr) frWin=\(firstResponderWindow)"
-        if let browser = tabManager?.focusedBrowserPanel {
-            let webWindow = browser.webView.window?.windowNumber ?? -1
-            let webSuperview = browser.webView.superview.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-            dlog("split.shortcut dir=\(directionLabel) pre panel=\(browser.id.uuidString.prefix(5)) \(browser.debugDeveloperToolsStateSummary()) webWin=\(webWindow) webSuper=\(webSuperview) \(splitContext)")
-        } else {
-            dlog("split.shortcut dir=\(directionLabel) pre panel=nil \(splitContext)")
-        }
-        #endif
-
-        prepareFocusedBrowserDevToolsForSplit(directionLabel: directionLabel)
-        tabManager?.createSplit(direction: direction)
-#if DEBUG
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            let keyWindow = NSApp.keyWindow
-            let firstResponder = keyWindow?.firstResponder
-            let firstResponderType = firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-            let firstResponderPtr = firstResponder.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-            let firstResponderWindow: Int = {
-                if let v = firstResponder as? NSView {
-                    return v.window?.windowNumber ?? -1
-                }
-                if let w = firstResponder as? NSWindow {
-                    return w.windowNumber
-                }
-                return -1
-            }()
-            let splitContext = "keyWin=\(keyWindow?.windowNumber ?? -1) mainWin=\(NSApp.mainWindow?.windowNumber ?? -1) fr=\(firstResponderType)@\(firstResponderPtr) frWin=\(firstResponderWindow)"
-            if let browser = self?.tabManager?.focusedBrowserPanel {
-                let webWindow = browser.webView.window?.windowNumber ?? -1
-                let webSuperview = browser.webView.superview.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil"
-                dlog("split.shortcut dir=\(directionLabel) post panel=\(browser.id.uuidString.prefix(5)) \(browser.debugDeveloperToolsStateSummary()) webWin=\(webWindow) webSuper=\(webSuperview) \(splitContext)")
-            } else {
-                dlog("split.shortcut dir=\(directionLabel) post panel=nil \(splitContext)")
-            }
-        }
-        recordGotoSplitSplitIfNeeded(direction: direction)
-#endif
-        return true
-    }
-
-    @discardableResult
-    func performBrowserSplitShortcut(direction: SplitDirection) -> Bool {
-        _ = synchronizeActiveMainWindowContext(preferredWindow: NSApp.keyWindow ?? NSApp.mainWindow)
-
-        guard let panelId = tabManager?.createBrowserSplit(direction: direction) else { return false }
-        _ = focusBrowserAddressBar(panelId: panelId)
-        return true
-    }
-
-    /// Allow AppKit-backed browser surfaces (WKWebView) to route non-menu shortcuts
-    /// through the same app-level shortcut handler used by the local key monitor.
-    @discardableResult
-    func handleBrowserSurfaceKeyEquivalent(_ event: NSEvent) -> Bool {
-        handleCustomShortcut(event: event)
-    }
-
-#if DEBUG
-    // Debug/test hook: allow socket-driven shortcut simulation to reuse the same shortcut routing
-    // logic as the local NSEvent monitor, without relying on AppKit event monitor behavior for
-    // synthetic NSEvents.
-    func debugHandleCustomShortcut(event: NSEvent) -> Bool {
-        handleCustomShortcut(event: event)
-    }
-#endif
-
-    private func findButton(in view: NSView, titled title: String) -> NSButton? {
-        if let button = view as? NSButton, button.title == title {
-            return button
-        }
-        for subview in view.subviews {
-            if let found = findButton(in: subview, titled: title) {
-                return found
-            }
-        }
-        return nil
-    }
-
-    private func findStaticText(in view: NSView, equals text: String) -> Bool {
-        if let field = view as? NSTextField, field.stringValue == text {
-            return true
-        }
-        for subview in view.subviews {
-            if findStaticText(in: subview, equals: text) {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Match a shortcut against an event, handling normal keys
-    private func matchShortcut(event: NSEvent, shortcut: StoredShortcut) -> Bool {
-        // Some keys can include extra flags (e.g. .function) depending on the responder chain.
-        // Strip those for consistent matching across first responders (terminal, WebKit, etc).
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            .subtracting([.numericPad, .function])
-        guard flags == shortcut.modifierFlags else { return false }
-
-        // NSEvent.charactersIgnoringModifiers preserves Shift for some symbol keys
-        // (e.g. Shift+] can yield "}" instead of "]"), so match brackets by keyCode.
-        let shortcutKey = shortcut.key.lowercased()
-        if shortcutKey == "[" || shortcutKey == "]" {
-            switch event.keyCode {
-            case 33: // kVK_ANSI_LeftBracket
-                return shortcutKey == "["
-            case 30: // kVK_ANSI_RightBracket
-                return shortcutKey == "]"
-            default:
-                return false
-            }
-        }
-
-        // Control-key combos can produce control characters (e.g. Ctrl+H => backspace),
-        // so fall back to keyCode matching for common printable keys.
-        if let chars = event.charactersIgnoringModifiers?.lowercased(), chars == shortcutKey {
-            return true
-        }
-        if let expectedKeyCode = keyCodeForShortcutKey(shortcutKey) {
-            return event.keyCode == expectedKeyCode
-        }
-        return false
-    }
-
-    private func keyCodeForShortcutKey(_ key: String) -> UInt16? {
-        // Matches macOS ANSI key codes. This is intentionally limited to keys we
-        // support in StoredShortcut/ghostty trigger translation.
-        switch key {
-        case "a": return 0   // kVK_ANSI_A
-        case "s": return 1   // kVK_ANSI_S
-        case "d": return 2   // kVK_ANSI_D
-        case "f": return 3   // kVK_ANSI_F
-        case "h": return 4   // kVK_ANSI_H
-        case "g": return 5   // kVK_ANSI_G
-        case "z": return 6   // kVK_ANSI_Z
-        case "x": return 7   // kVK_ANSI_X
-        case "c": return 8   // kVK_ANSI_C
-        case "v": return 9   // kVK_ANSI_V
-        case "b": return 11  // kVK_ANSI_B
-        case "q": return 12  // kVK_ANSI_Q
-        case "w": return 13  // kVK_ANSI_W
-        case "e": return 14  // kVK_ANSI_E
-        case "r": return 15  // kVK_ANSI_R
-        case "y": return 16  // kVK_ANSI_Y
-        case "t": return 17  // kVK_ANSI_T
-        case "1": return 18  // kVK_ANSI_1
-        case "2": return 19  // kVK_ANSI_2
-        case "3": return 20  // kVK_ANSI_3
-        case "4": return 21  // kVK_ANSI_4
-        case "6": return 22  // kVK_ANSI_6
-        case "5": return 23  // kVK_ANSI_5
-        case "=": return 24  // kVK_ANSI_Equal
-        case "9": return 25  // kVK_ANSI_9
-        case "7": return 26  // kVK_ANSI_7
-        case "-": return 27  // kVK_ANSI_Minus
-        case "8": return 28  // kVK_ANSI_8
-        case "0": return 29  // kVK_ANSI_0
-        case "o": return 31  // kVK_ANSI_O
-        case "u": return 32  // kVK_ANSI_U
-        case "i": return 34  // kVK_ANSI_I
-        case "p": return 35  // kVK_ANSI_P
-        case "l": return 37  // kVK_ANSI_L
-        case "j": return 38  // kVK_ANSI_J
-        case "'": return 39  // kVK_ANSI_Quote
-        case "k": return 40  // kVK_ANSI_K
-        case ";": return 41  // kVK_ANSI_Semicolon
-        case "\\": return 42 // kVK_ANSI_Backslash
-        case ",": return 43  // kVK_ANSI_Comma
-        case "/": return 44  // kVK_ANSI_Slash
-        case "n": return 45  // kVK_ANSI_N
-        case "m": return 46  // kVK_ANSI_M
-        case ".": return 47  // kVK_ANSI_Period
-        case "`": return 50  // kVK_ANSI_Grave
-        case "↩": return 36  // kVK_Return
-        default:
-            return nil
-        }
-    }
-
-    /// Match arrow key shortcuts using keyCode
-    /// Arrow keys include .numericPad and .function in their modifierFlags, so strip those before comparing.
-    private func matchArrowShortcut(event: NSEvent, shortcut: StoredShortcut, keyCode: UInt16) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            .subtracting([.numericPad, .function])
-        return event.keyCode == keyCode && flags == shortcut.modifierFlags
-    }
-
-    /// Match tab key shortcuts using keyCode 48
-    private func matchTabShortcut(event: NSEvent, shortcut: StoredShortcut) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        return event.keyCode == 48 && flags == shortcut.modifierFlags
-    }
-
-    /// Directional shortcuts default to arrow keys, but the shortcut recorder only supports letter/number keys.
-    /// Support both so users can customize pane navigation (e.g. Cmd+Ctrl+H/J/K/L).
-    private func matchDirectionalShortcut(
-        event: NSEvent,
-        shortcut: StoredShortcut,
-        arrowGlyph: String,
-        arrowKeyCode: UInt16
-    ) -> Bool {
-        if shortcut.key == arrowGlyph {
-            return matchArrowShortcut(event: event, shortcut: shortcut, keyCode: arrowKeyCode)
-        }
-        return matchShortcut(event: event, shortcut: shortcut)
-    }
-
-    func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        updateController.validateMenuItem(item)
-    }
-
-
-    private func configureUserNotifications() {
-        let actions = [
-            UNNotificationAction(
-                identifier: TerminalNotificationStore.actionShowIdentifier,
-                title: "Show"
-            )
-        ]
-
-        let category = UNNotificationCategory(
-            identifier: TerminalNotificationStore.categoryIdentifier,
-            actions: actions,
-            intentIdentifiers: [],
-            options: [.customDismissAction]
-        )
-
-        let center = UNUserNotificationCenter.current()
-        center.setNotificationCategories([category])
-        center.delegate = self
-    }
-
-    private func disableNativeTabbingShortcut() {
-        guard let menu = NSApp.mainMenu else { return }
-        disableMenuItemShortcut(in: menu, action: #selector(NSWindow.toggleTabBar(_:)))
-    }
-
-    private func disableMenuItemShortcut(in menu: NSMenu, action: Selector) {
-        for item in menu.items {
-            if item.action == action {
-                item.keyEquivalent = ""
-                item.keyEquivalentModifierMask = []
-                item.isEnabled = false
-            }
-            if let submenu = item.submenu {
-                disableMenuItemShortcut(in: submenu, action: action)
-            }
-        }
-    }
-
-    private func ensureApplicationIcon() {
-        if let icon = NSImage(named: NSImage.applicationIconName) {
-            NSApplication.shared.applicationIconImage = icon
-        }
-    }
-
-    private func registerLaunchServicesBundle() {
-        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
-        let registerStatus = LSRegisterURL(bundleURL as CFURL, true)
-        if registerStatus != noErr {
-            NSLog("LaunchServices registration failed (status: \(registerStatus)) for \(bundleURL.path)")
-        }
-    }
-
-    private func enforceSingleInstance() {
-        guard let bundleId = Bundle.main.bundleIdentifier else { return }
-        let currentPid = ProcessInfo.processInfo.processIdentifier
-
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleId) {
-            guard app.processIdentifier != currentPid else { continue }
-            app.terminate()
-            if !app.isTerminated {
-                _ = app.forceTerminate()
-            }
-        }
-    }
-
-    private func observeDuplicateLaunches() {
-        guard let bundleId = Bundle.main.bundleIdentifier else { return }
-        let currentPid = ProcessInfo.processInfo.processIdentifier
-
-        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard self != nil else { return }
-            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-            guard app.bundleIdentifier == bundleId, app.processIdentifier != currentPid else { return }
-
-            app.terminate()
-            if !app.isTerminated {
-                _ = app.forceTerminate()
-            }
-            NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        }
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        handleNotificationResponse(response)
-        completionHandler()
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound, .list])
-    }
-
-    private func handleNotificationResponse(_ response: UNNotificationResponse) {
-        guard let tabIdString = response.notification.request.content.userInfo["tabId"] as? String,
-              let tabId = UUID(uuidString: tabIdString) else {
-            return
-        }
-        let surfaceId: UUID? = {
-            guard let surfaceIdString = response.notification.request.content.userInfo["surfaceId"] as? String else {
-                return nil
-            }
-            return UUID(uuidString: surfaceIdString)
-        }()
-
-        switch response.actionIdentifier {
-        case UNNotificationDefaultActionIdentifier, TerminalNotificationStore.actionShowIdentifier:
-            let notificationId: UUID? = {
-                if let id = UUID(uuidString: response.notification.request.identifier) {
-                    return id
-                }
-                if let idString = response.notification.request.content.userInfo["notificationId"] as? String,
-                   let id = UUID(uuidString: idString) {
-                    return id
-                }
-                return nil
-            }()
-            DispatchQueue.main.async {
-                _ = self.openNotification(tabId: tabId, surfaceId: surfaceId, notificationId: notificationId)
-            }
-        case UNNotificationDismissActionIdentifier:
-            DispatchQueue.main.async {
-                if let notificationId = UUID(uuidString: response.notification.request.identifier) {
-                    self.notificationStore?.markRead(id: notificationId)
-                } else if let notificationIdString = response.notification.request.content.userInfo["notificationId"] as? String,
-                          let notificationId = UUID(uuidString: notificationIdString) {
-                    self.notificationStore?.markRead(id: notificationId)
-                }
-            }
-        default:
-            break
-        }
-    }
-
-    private func installMainWindowKeyObserver() {
-        guard windowKeyObserver == nil else { return }
-        windowKeyObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self, let window = note.object as? NSWindow else { return }
-            self.setActiveMainWindow(window)
-        }
-    }
-
-    private func installBrowserAddressBarFocusObservers() {
-        guard browserAddressBarFocusObserver == nil, browserAddressBarBlurObserver == nil else { return }
-
-        browserAddressBarFocusObserver = NotificationCenter.default.addObserver(
-            forName: .browserDidFocusAddressBar,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self else { return }
-            guard let panelId = notification.object as? UUID else { return }
-            self.browserPanel(for: panelId)?.beginSuppressWebViewFocusForAddressBar()
-            self.browserAddressBarFocusedPanelId = panelId
-            self.stopBrowserOmnibarSelectionRepeat()
-#if DEBUG
-            dlog("addressBar FOCUS panelId=\(panelId.uuidString.prefix(8))")
-#endif
-        }
-
-        browserAddressBarBlurObserver = NotificationCenter.default.addObserver(
-            forName: .browserDidBlurAddressBar,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self else { return }
-            guard let panelId = notification.object as? UUID else { return }
-            self.browserPanel(for: panelId)?.endSuppressWebViewFocusForAddressBar()
-            if self.browserAddressBarFocusedPanelId == panelId {
-                self.browserAddressBarFocusedPanelId = nil
-                self.stopBrowserOmnibarSelectionRepeat()
-#if DEBUG
-                dlog("addressBar BLUR panelId=\(panelId.uuidString.prefix(8))")
-#endif
-            }
-        }
-    }
-
-    private func browserPanel(for panelId: UUID) -> BrowserPanel? {
-        return tabManager?.selectedWorkspace?.browserPanel(for: panelId)
-    }
-
-    private func setActiveMainWindow(_ window: NSWindow) {
-        guard isMainTerminalWindow(window) else { return }
-        guard let context = mainWindowContexts[ObjectIdentifier(window)] else { return }
-#if DEBUG
-        let beforeManagerToken = debugManagerToken(tabManager)
-#endif
-        tabManager = context.tabManager
-        sidebarState = context.sidebarState
-        sidebarSelectionState = context.sidebarSelectionState
-        TerminalController.shared.setActiveTabManager(context.tabManager)
-#if DEBUG
-        dlog(
-            "mainWindow.active window={\(debugWindowToken(window))} context={\(debugContextToken(context))} beforeMgr=\(beforeManagerToken) afterMgr=\(debugManagerToken(tabManager)) \(debugShortcutRouteSnapshot())"
-        )
-#endif
-    }
-
-    private func unregisterMainWindow(_ window: NSWindow) {
-        let key = ObjectIdentifier(window)
-        guard let removed = mainWindowContexts.removeValue(forKey: key) else { return }
-        commandPaletteVisibilityByWindowId.removeValue(forKey: removed.windowId)
-        commandPaletteSelectionByWindowId.removeValue(forKey: removed.windowId)
-        commandPaletteSnapshotByWindowId.removeValue(forKey: removed.windowId)
-
-        // Avoid stale notifications that can no longer be opened once the owning window is gone.
-        if let store = notificationStore {
-            for tab in removed.tabManager.tabs {
-                store.clearNotifications(forTabId: tab.id)
-            }
-        }
-
-        if tabManager === removed.tabManager {
-            // Repoint "active" pointers to any remaining main terminal window.
-            let nextContext: MainWindowContext? = {
-                if let keyWindow = NSApp.keyWindow,
-                   isMainTerminalWindow(keyWindow),
-                   let ctx = mainWindowContexts[ObjectIdentifier(keyWindow)] {
-                    return ctx
-                }
-                return mainWindowContexts.values.first
-            }()
-
-            if let nextContext {
-                tabManager = nextContext.tabManager
-                sidebarState = nextContext.sidebarState
-                sidebarSelectionState = nextContext.sidebarSelectionState
-                TerminalController.shared.setActiveTabManager(nextContext.tabManager)
-            } else {
-                tabManager = nil
-                sidebarState = nil
-                sidebarSelectionState = nil
-                TerminalController.shared.setActiveTabManager(nil)
-            }
-        }
-    }
-
-    private func isMainTerminalWindow(_ window: NSWindow) -> Bool {
-        if mainWindowContexts[ObjectIdentifier(window)] != nil {
-            return true
-        }
-        guard let raw = window.identifier?.rawValue else { return false }
-        return raw == "term-mesh.main" || raw.hasPrefix("term-mesh.main.")
-    }
-
-    private func contextContainingTabId(_ tabId: UUID) -> MainWindowContext? {
-        for context in mainWindowContexts.values {
-            if context.tabManager.tabs.contains(where: { $0.id == tabId }) {
-                return context
-            }
-        }
-        return nil
-    }
-
-    /// Returns the `TabManager` that owns `tabId`, if any.
-    func tabManagerFor(tabId: UUID) -> TabManager? {
-        contextContainingTabId(tabId)?.tabManager
-    }
-
-    func closeMainWindowContainingTabId(_ tabId: UUID) {
-        guard let context = contextContainingTabId(tabId) else { return }
-        let expectedIdentifier = "term-mesh.main.\(context.windowId.uuidString)"
-        let window: NSWindow? = context.window ?? NSApp.windows.first(where: { $0.identifier?.rawValue == expectedIdentifier })
-        window?.performClose(nil)
-    }
-
-    @discardableResult
-    func openNotification(tabId: UUID, surfaceId: UUID?, notificationId: UUID?) -> Bool {
-#if DEBUG
-        let isJumpUnreadUITest = termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1"
-        if isJumpUnreadUITest {
-            writeJumpUnreadTestData([
-                "jumpUnreadOpenCalled": "1",
-                "jumpUnreadOpenTabId": tabId.uuidString,
-                "jumpUnreadOpenSurfaceId": surfaceId?.uuidString ?? "",
-            ])
-        }
-#endif
-        guard let context = contextContainingTabId(tabId) else {
-#if DEBUG
-            recordMultiWindowNotificationOpenFailureIfNeeded(
-                tabId: tabId,
-                surfaceId: surfaceId,
-                notificationId: notificationId,
-                reason: "missing_context"
-            )
-#endif
-#if DEBUG
-            if isJumpUnreadUITest {
-                writeJumpUnreadTestData(["jumpUnreadOpenContextFound": "0", "jumpUnreadOpenUsedFallback": "1"])
-            }
-#endif
-            let ok = openNotificationFallback(tabId: tabId, surfaceId: surfaceId, notificationId: notificationId)
-#if DEBUG
-            if isJumpUnreadUITest {
-                writeJumpUnreadTestData(["jumpUnreadOpenResult": ok ? "1" : "0"])
-            }
-#endif
-            return ok
-        }
-#if DEBUG
-        if isJumpUnreadUITest {
-            writeJumpUnreadTestData(["jumpUnreadOpenContextFound": "1", "jumpUnreadOpenUsedFallback": "0"])
-        }
-#endif
-        return openNotificationInContext(context, tabId: tabId, surfaceId: surfaceId, notificationId: notificationId)
-    }
-
-    private func openNotificationInContext(_ context: MainWindowContext, tabId: UUID, surfaceId: UUID?, notificationId: UUID?) -> Bool {
-        let expectedIdentifier = "term-mesh.main.\(context.windowId.uuidString)"
-        let window: NSWindow? = context.window ?? NSApp.windows.first(where: { $0.identifier?.rawValue == expectedIdentifier })
-        guard let window else {
-#if DEBUG
-            recordMultiWindowNotificationOpenFailureIfNeeded(
-                tabId: tabId,
-                surfaceId: surfaceId,
-                notificationId: notificationId,
-                reason: "missing_window expectedIdentifier=\(expectedIdentifier)"
-            )
-#endif
-            return false
-        }
-
-        context.sidebarSelectionState.selection = .tabs
-        bringToFront(window)
-        context.tabManager.focusTabFromNotification(tabId, surfaceId: surfaceId)
-
-#if DEBUG
-        // UI test support: Jump-to-unread asserts that the correct workspace/panel is focused.
-        // Recording via first-responder can be flaky on the VM, so verify focus via the model.
-        recordJumpUnreadFocusFromModelIfNeeded(
-            tabManager: context.tabManager,
-            tabId: tabId,
-            expectedSurfaceId: surfaceId
-        )
-#endif
-
-        if let notificationId, let store = notificationStore {
-            markReadIfFocused(
-                notificationId: notificationId,
-                tabId: tabId,
-                surfaceId: surfaceId,
-                tabManager: context.tabManager,
-                notificationStore: store
-            )
-        }
-
-#if DEBUG
-        recordMultiWindowNotificationFocusIfNeeded(
-            windowId: context.windowId,
-            tabId: tabId,
-            surfaceId: surfaceId,
-            sidebarSelection: context.sidebarSelectionState.selection
-        )
-        if termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1" {
-            writeJumpUnreadTestData(["jumpUnreadOpenInContext": "1", "jumpUnreadOpenResult": "1"])
-        }
-#endif
-        return true
-    }
-
-    private func openNotificationFallback(tabId: UUID, surfaceId: UUID?, notificationId: UUID?) -> Bool {
-        // If the owning window context hasn't been registered yet, fall back to the "active" window.
-        guard let tabManager else {
-#if DEBUG
-            if termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1" {
-                writeJumpUnreadTestData(["jumpUnreadFallbackFail": "missing_tabManager"])
-            }
-#endif
-            return false
-        }
-        guard tabManager.tabs.contains(where: { $0.id == tabId }) else {
-#if DEBUG
-            if termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1" {
-                writeJumpUnreadTestData(["jumpUnreadFallbackFail": "tab_not_in_active_manager"])
-            }
-#endif
-            return false
-        }
-        guard let window = (NSApp.keyWindow ?? NSApp.windows.first(where: { isMainTerminalWindow($0) })) else {
-#if DEBUG
-            if termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1" {
-                writeJumpUnreadTestData(["jumpUnreadFallbackFail": "missing_window"])
-            }
-#endif
-            return false
-        }
-
-        sidebarSelectionState?.selection = .tabs
-        bringToFront(window)
-        tabManager.focusTabFromNotification(tabId, surfaceId: surfaceId)
-
-#if DEBUG
-        recordJumpUnreadFocusFromModelIfNeeded(
-            tabManager: tabManager,
-            tabId: tabId,
-            expectedSurfaceId: surfaceId
-        )
-#endif
-
-        if let notificationId, let store = notificationStore {
-            markReadIfFocused(
-                notificationId: notificationId,
-                tabId: tabId,
-                surfaceId: surfaceId,
-                tabManager: tabManager,
-                notificationStore: store
-            )
-        }
-#if DEBUG
-        if termMeshEnv("UI_TEST_JUMP_UNREAD_SETUP") == "1" {
-            writeJumpUnreadTestData(["jumpUnreadOpenInFallback": "1", "jumpUnreadOpenResult": "1"])
-        }
-#endif
-        return true
-    }
-
-#if DEBUG
-    private func recordJumpUnreadFocusFromModelIfNeeded(
-        tabManager: TabManager,
-        tabId: UUID,
-        expectedSurfaceId: UUID?,
-        attempt: Int = 0
-    ) {
-        let env = ProcessInfo.processInfo.environment
-        guard (env["TERMMESH_UI_TEST_JUMP_UNREAD_SETUP"] ?? env["CMUX_UI_TEST_JUMP_UNREAD_SETUP"]) == "1" else { return }
-        guard let expectedSurfaceId else { return }
-
-        // Ensure the expectation is armed even if the view doesn't become first responder.
-        armJumpUnreadFocusRecord(tabId: tabId, surfaceId: expectedSurfaceId)
-
-        let maxAttempts = 40
-        guard attempt < maxAttempts else { return }
-
-        let isSelected = tabManager.selectedTabId == tabId
-        let focused = tabManager.focusedSurfaceId(for: tabId)
-        if isSelected, focused == expectedSurfaceId {
-            recordJumpUnreadFocusIfExpected(tabId: tabId, surfaceId: expectedSurfaceId)
-            return
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.recordJumpUnreadFocusFromModelIfNeeded(
-                tabManager: tabManager,
-                tabId: tabId,
-                expectedSurfaceId: expectedSurfaceId,
-                attempt: attempt + 1
-            )
-        }
-    }
-#endif
-
-    func tabTitle(for tabId: UUID) -> String? {
-        if let context = contextContainingTabId(tabId) {
-            return context.tabManager.tabs.first(where: { $0.id == tabId })?.title
-        }
-        return tabManager?.tabs.first(where: { $0.id == tabId })?.title
-    }
-
-    private func bringToFront(_ window: NSWindow) {
-        if window.isMiniaturized {
-            window.deminiaturize(nil)
-        }
-        window.makeKeyAndOrderFront(nil)
-        // Improve reliability across Spaces / when other helper panels are key.
-        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-    }
-
-    private func markReadIfFocused(
-        notificationId: UUID,
-        tabId: UUID,
-        surfaceId: UUID?,
-        tabManager: TabManager,
-        notificationStore: TerminalNotificationStore
-    ) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            guard tabManager.selectedTabId == tabId else { return }
-            if let surfaceId {
-                guard tabManager.focusedSurfaceId(for: tabId) == surfaceId else { return }
-            }
-            notificationStore.markRead(id: notificationId)
-        }
-    }
-
-#if DEBUG
-    private func recordMultiWindowNotificationOpenFailureIfNeeded(
-        tabId: UUID,
-        surfaceId: UUID?,
-        notificationId: UUID?,
-        reason: String
-    ) {
-        let env = ProcessInfo.processInfo.environment
-        guard let path = (env["TERMMESH_UI_TEST_MULTI_WINDOW_NOTIF_PATH"] ?? env["CMUX_UI_TEST_MULTI_WINDOW_NOTIF_PATH"]), !path.isEmpty else { return }
-
-        let contextSummaries: [String] = mainWindowContexts.values.map { ctx in
-            let tabIds = ctx.tabManager.tabs.map { $0.id.uuidString }.joined(separator: ",")
-            let hasWindow = (ctx.window != nil) ? "1" : "0"
-            return "windowId=\(ctx.windowId.uuidString) hasWindow=\(hasWindow) tabs=[\(tabIds)]"
-        }
-
-        writeMultiWindowNotificationTestData([
-            "focusToken": UUID().uuidString,
-            "openFailureTabId": tabId.uuidString,
-            "openFailureSurfaceId": surfaceId?.uuidString ?? "",
-            "openFailureNotificationId": notificationId?.uuidString ?? "",
-            "openFailureReason": reason,
-            "openFailureContexts": contextSummaries.joined(separator: "; "),
-        ], at: path)
-    }
-#endif
-
 }
 
 
 #if DEBUG
-private var termMeshFirstResponderGuardCurrentEventOverride: NSEvent?
-private var termMeshFirstResponderGuardHitViewOverride: NSView?
+var termMeshFirstResponderGuardCurrentEventOverride: NSEvent?
+var termMeshFirstResponderGuardHitViewOverride: NSView?
 #endif
 
-private extension NSWindow {
+extension NSWindow {
     @objc func termMesh_makeFirstResponder(_ responder: NSResponder?) -> Bool {
         if AppDelegate.shared?.shouldBlockFirstResponderChangeWhileCommandPaletteVisible(
             window: self,
@@ -3807,7 +2853,7 @@ private extension NSWindow {
         return result
     }
 
-    static func keyDescription(_ event: NSEvent) -> String {
+    internal static func keyDescription(_ event: NSEvent) -> String {
         var parts: [String] = []
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if flags.contains(.command) { parts.append("Cmd") }
@@ -3819,7 +2865,7 @@ private extension NSWindow {
         return parts.joined(separator: "+")
     }
 
-    private static func termMeshOwningWebView(for responder: NSResponder) -> TermMeshWebView? {
+    static func termMeshOwningWebView(for responder: NSResponder) -> TermMeshWebView? {
         if let webView = responder as? TermMeshWebView {
             return webView
         }
@@ -3850,7 +2896,7 @@ private extension NSWindow {
         return nil
     }
 
-    private static func termMeshOwningWebView(for view: NSView) -> TermMeshWebView? {
+    static func termMeshOwningWebView(for view: NSView) -> TermMeshWebView? {
         if let webView = view as? TermMeshWebView {
             return webView
         }
@@ -3866,7 +2912,7 @@ private extension NSWindow {
         return nil
     }
 
-    private static func termMeshCurrentEvent(for _: NSWindow) -> NSEvent? {
+    static func termMeshCurrentEvent(for _: NSWindow) -> NSEvent? {
 #if DEBUG
         if let override = termMeshFirstResponderGuardCurrentEventOverride {
             return override
@@ -3875,7 +2921,7 @@ private extension NSWindow {
         return NSApp.currentEvent
     }
 
-    private static func termMeshHitViewForCurrentEvent(in window: NSWindow, event: NSEvent) -> NSView? {
+    static func termMeshHitViewForCurrentEvent(in window: NSWindow, event: NSEvent) -> NSView? {
 #if DEBUG
         if let override = termMeshFirstResponderGuardHitViewOverride {
             return override
@@ -3884,7 +2930,7 @@ private extension NSWindow {
         return window.contentView?.hitTest(event.locationInWindow)
     }
 
-    private static func termMeshShouldAllowPointerInitiatedWebViewFocus(
+    static func termMeshShouldAllowPointerInitiatedWebViewFocus(
         window: NSWindow,
         webView: TermMeshWebView,
         event: NSEvent?

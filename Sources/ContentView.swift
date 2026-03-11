@@ -1877,13 +1877,30 @@ struct ContentView: View {
 
             if titlebarWorktreeCount > 0 {
                 titlebarInfoSeparator
-                HStack(spacing: 3) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 9))
-                    Text(verbatim: "\(titlebarWorktreeCount)")
-                        .font(.system(size: 11, design: .monospaced))
+                Button(action: {
+                    guard let workspace = tabManager.selectedWorkspace else { return }
+                    let dir = workspace.currentDirectory
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        guard let repoPath = TermMeshDaemon.shared.findGitRoot(from: dir), !repoPath.isEmpty else {
+                            DispatchQueue.main.async { NSSound.beep() }
+                            return
+                        }
+                        let worktrees = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
+                        DispatchQueue.main.async {
+                            Self.showWorktreeManager(worktrees: worktrees, repoPath: repoPath)
+                        }
+                    }
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
+                        Text(verbatim: "\(titlebarWorktreeCount)")
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    .foregroundColor(.green.opacity(0.7))
                 }
-                .foregroundColor(.green.opacity(0.7))
+                .buttonStyle(.plain)
+                .help("Manage Worktrees")
             }
 
             if let start = titlebarSessionStart {

@@ -837,7 +837,7 @@ class TabManager: ObservableObject {
     }
 
     @discardableResult
-    func addWorkspace(workingDirectory overrideWorkingDirectory: String? = nil, select: Bool = true, environment: [String: String] = [:]) -> Workspace {
+    func addWorkspace(workingDirectory overrideWorkingDirectory: String? = nil, select: Bool = true, command: String? = nil, environment: [String: String] = [:]) -> Workspace {
         sentryBreadcrumb("workspace.create", data: ["tabCount": tabs.count + 1])
         var workingDirectory = normalizedWorkingDirectory(overrideWorkingDirectory) ?? preferredWorkingDirectoryForNewTab()
 
@@ -882,6 +882,7 @@ class TabManager: ObservableObject {
             workingDirectory: workingDirectory,
             portOrdinal: ordinal,
             configTemplate: inheritedConfig,
+            command: command,
             environment: environment
         )
         // term-mesh: Store worktree metadata for auto-cleanup on tab close
@@ -2180,20 +2181,12 @@ class TabManager: ObservableObject {
         let rootPanelId: UUID
 
         if newWorkspace {
-            // Create a new workspace tab with CLI panes filling the entire space
-            let ws = addWorkspace(select: true, environment: spawnEnv)
+            // Create a new workspace tab with CLI panes filling the entire space.
+            // Pass command directly so the shell executes it on startup (no sendText timing issues).
+            let ws = addWorkspace(select: true, command: command, environment: spawnEnv)
             tab = ws
             guard let firstPanel = ws.focusedPanelId else { return }
             rootPanelId = firstPanel
-            // Title the initial pane as CLI 1; if command given, run it
-            if let command {
-                // Send command to the initial panel's terminal
-                if let panel = ws.panels[firstPanel] as? TerminalPanel {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        panel.sendText(command + "\n")
-                    }
-                }
-            }
             ws.setPanelCustomTitle(panelId: firstPanel, title: "CLI 1")
         } else {
             guard let selectedTabId,

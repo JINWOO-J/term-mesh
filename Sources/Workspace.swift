@@ -453,6 +453,7 @@ final class Workspace: Identifiable, ObservableObject {
         workingDirectory: String? = nil,
         portOrdinal: Int = 0,
         configTemplate: ghostty_surface_config_s? = nil,
+        command: String? = nil,
         environment: [String: String] = [:]
     ) {
         self.id = UUID()
@@ -495,6 +496,7 @@ final class Workspace: Identifiable, ObservableObject {
             configTemplate: configTemplate,
             workingDirectory: hasWorkingDirectory ? trimmedWorkingDirectory : nil,
             portOrdinal: portOrdinal,
+            command: command,
             environment: environment
         )
         panels[terminalPanel.id] = terminalPanel

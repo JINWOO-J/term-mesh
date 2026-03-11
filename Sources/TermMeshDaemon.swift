@@ -21,6 +21,8 @@ final class TermMeshDaemon: ObservableObject {
     static let dashboardLocalhostOnlyKey = "termMeshDashboardLocalhostOnly"
     /// Dashboard port.
     static let dashboardPortKey = "termMeshDashboardPort"
+    /// Dashboard password (empty = no auth).
+    static let dashboardPasswordKey = "termMeshDashboardPassword"
 
     var isDashboardEnabled: Bool {
         get {
@@ -31,7 +33,11 @@ final class TermMeshDaemon: ObservableObject {
     }
 
     var isLocalhostOnly: Bool {
-        get { UserDefaults.standard.bool(forKey: Self.dashboardLocalhostOnlyKey) }
+        get {
+            // Default to true (localhost only) for security — 0.0.0.0 requires explicit opt-in
+            if UserDefaults.standard.object(forKey: Self.dashboardLocalhostOnlyKey) == nil { return true }
+            return UserDefaults.standard.bool(forKey: Self.dashboardLocalhostOnlyKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: Self.dashboardLocalhostOnlyKey) }
     }
 
@@ -41,6 +47,11 @@ final class TermMeshDaemon: ObservableObject {
             return port > 0 ? port : 9876
         }
         set { UserDefaults.standard.set(newValue, forKey: Self.dashboardPortKey) }
+    }
+
+    var dashboardPassword: String {
+        get { UserDefaults.standard.string(forKey: Self.dashboardPasswordKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Self.dashboardPasswordKey) }
     }
 
     // MARK: - Worktree Settings (UserDefaults)
@@ -109,6 +120,12 @@ final class TermMeshDaemon: ObservableObject {
             } else {
                 let host = self.isLocalhostOnly ? "127.0.0.1" : "0.0.0.0"
                 env["TERM_MESH_HTTP_ADDR"] = "\(host):\(self.dashboardPort)"
+            }
+
+            // Dashboard password (Bearer token auth)
+            let dashPwd = self.dashboardPassword
+            if !dashPwd.isEmpty {
+                env["TERM_MESH_HTTP_PASSWORD"] = dashPwd
             }
 
             process.environment = env

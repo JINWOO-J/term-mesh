@@ -212,11 +212,13 @@ final class TeamOrchestrator {
         let kiroAgentEnv = baseEnv
 
         // Leader env: Claude leader needs no CLAUDECODE (runs its own instance).
-        // Non-claude CLI leaders (kiro, codex, gemini) also use baseEnv (no CLAUDECODE needed).
+        // Explicitly clear CLAUDECODE to prevent inheritance from parent process
+        // (Claude Code refuses to start inside another CLAUDECODE session).
+        // Non-claude CLI leaders (kiro, codex, gemini) also clear it.
         // REPL leader gets claudeAgentEnv so nested `claude` calls work.
         let leaderEnv = leaderMode == "repl"
             ? claudeAgentEnv
-            : baseEnv
+            : baseEnv.merging(["CLAUDECODE": ""]) { _, new in new }
 
         // First panel = leader console (left side)
         // Close the default panel and create a new one with the leader script as command
@@ -245,11 +247,10 @@ final class TeamOrchestrator {
                     teamPy: teamPy,
                     socketPath: socketPath
                 )
-                // Write to temp file to avoid shell escaping issues with multiline prompt
-                let promptFile = "/tmp/term-mesh-leader-\(name)-prompt.txt"
-                try? systemPrompt.write(toFile: promptFile, atomically: true, encoding: .utf8)
+                // Escape single quotes for shell, same approach as buildClaudeCommand
+                let escaped = systemPrompt.replacingOccurrences(of: "'", with: "'\\''")
                 let quotedPath = claudePath.contains(" ") ? "\"\(claudePath)\"" : claudePath
-                leaderCommand = "unset CLAUDECODE; \(quotedPath) --system-prompt \"$(cat '\(promptFile)')\" --dangerously-skip-permissions"
+                leaderCommand = "\(quotedPath) --system-prompt '\(escaped)' --dangerously-skip-permissions"
             } else {
                 leaderCommand = nil
             }
@@ -279,7 +280,7 @@ final class TeamOrchestrator {
             insertFirst: true,
             focus: true,
             workingDirectory: workingDirectory,
-            command: leaderCommand,
+            command: leaderCommand.map { "\($0); exec $SHELL" },
             environment: leaderEnv
         ) else {
             print("[team] failed to create leader panel")

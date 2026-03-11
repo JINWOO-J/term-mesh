@@ -387,7 +387,7 @@ struct IMETextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.font = NSFont.monospacedSystemFont(ofSize: IMEInputBarSettings.fontSize, weight: .regular)
         textView.textColor = NSColor.textColor
-        textView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.3)
+        textView.backgroundColor = .clear
         textView.drawsBackground = true
         textView.insertionPointColor = NSColor.textColor
         textView.isRichText = false
@@ -434,7 +434,7 @@ struct IMETextEditor: NSViewRepresentable {
         }
         // Update colors when appearance changes
         textView.textColor = NSColor.textColor
-        textView.backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.3)
+        textView.backgroundColor = .clear
         textView.insertionPointColor = NSColor.textColor
         textView.markedTextAttributes = [
             .foregroundColor: NSColor.textColor,

@@ -319,7 +319,7 @@ struct IMETextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? IMETextView else { return }
-        if textView.string != text {
+        if textView.string != text && !textView.hasMarkedText() {
             textView.string = text
             textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
         }

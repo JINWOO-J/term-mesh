@@ -74,7 +74,7 @@ struct StatusBarView: View {
         }
         .frame(height: 22)
         .frame(maxWidth: .infinity)
-        .background(Color.white.opacity(0.85))
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.85))
         .overlay(alignment: .top) {
             Divider()
         }

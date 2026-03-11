@@ -9,6 +9,7 @@ struct TermMeshApp: App {
     @StateObject private var sidebarState = SidebarState()
     @StateObject private var sidebarSelectionState = SidebarSelectionState()
     @ObservedObject private var termMeshDaemon = TermMeshDaemon.shared
+    private let configProvider: any GhosttyConfigProvider = GhosttyApp.shared
     private let primaryWindowId = UUID()
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
     @AppStorage("titlebarControlsStyle") private var titlebarControlsStyle = TitlebarControlsStyle.classic.rawValue
@@ -175,6 +176,7 @@ struct TermMeshApp: App {
                 .environmentObject(sidebarState)
                 .environmentObject(sidebarSelectionState)
                 .environment(\.ghosttyTheme, ghosttyTheme)
+                .environment(\.configProvider, GhosttyApp.shared)
                 .environment(\.daemonService, TermMeshDaemon.shared)
                 .environment(\.notificationService, notificationStore)
                 .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
@@ -200,7 +202,7 @@ struct TermMeshApp: App {
                     applyAppearance()
                     // Write terminal color override and reload Ghostty config
                     TerminalThemeOverride.write(for: appearanceMode)
-                    GhosttyApp.shared.reloadConfiguration(source: "appearance.toggle")
+                    configProvider.reloadConfiguration(source: "appearance.toggle")
                 }
                 .onChange(of: socketControlMode) { _ in
                     updateSocketController()
@@ -253,10 +255,10 @@ struct TermMeshApp: App {
                 }
                 Divider()
                 Button("Ghostty Settings…") {
-                    GhosttyApp.shared.openConfigurationInTextEdit()
+                    configProvider.openConfigurationInTextEdit()
                 }
                 Button("Reload Configuration") {
-                    GhosttyApp.shared.reloadConfiguration(source: "menu.reload_configuration")
+                    configProvider.reloadConfiguration(source: "menu.reload_configuration")
                 }
                 .keyboardShortcut(",", modifiers: [.command, .shift])
                 Divider()

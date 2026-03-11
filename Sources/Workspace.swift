@@ -15,6 +15,9 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var customTitle: String?
     @Published var isPinned: Bool = false
     @Published var customColor: String?  // hex string, e.g. "#C0392B"
+    /// Injected config provider (defaults to singleton for backward compatibility).
+    var configProvider: any GhosttyConfigProvider = GhosttyApp.shared
+
     @Published var currentDirectory: String
 
     /// Timestamp when this workspace was created (for session duration display)
@@ -158,7 +161,7 @@ final class Workspace: Identifiable, ObservableObject {
         let isNoOp = currentChromeColors.backgroundHex == nextChromeColors.backgroundHex &&
             currentChromeColors.borderHex == nextChromeColors.borderHex
 
-        GhosttyApp.shared.logBackgroundIfEnabled(
+        configProvider.logBackgroundIfEnabled(
             "theme apply workspace=\(id.uuidString) reason=\(reason) currentBg=\(currentChromeColors.backgroundHex ?? "nil") nextBg=\(nextChromeColors.backgroundHex ?? "nil") currentBorder=\(currentChromeColors.borderHex ?? "nil") nextBorder=\(nextChromeColors.borderHex ?? "nil") noop=\(isNoOp)"
         )
 
@@ -166,7 +169,7 @@ final class Workspace: Identifiable, ObservableObject {
             return
         }
         bonsplitController.configuration.appearance.chromeColors = nextChromeColors
-        GhosttyApp.shared.logBackgroundIfEnabled(
+        configProvider.logBackgroundIfEnabled(
             "theme applied workspace=\(id.uuidString) reason=\(reason) resultingBg=\(bonsplitController.configuration.appearance.chromeColors.backgroundHex ?? "nil") resultingBorder=\(bonsplitController.configuration.appearance.chromeColors.borderHex ?? "nil")"
         )
     }
@@ -195,7 +198,7 @@ final class Workspace: Identifiable, ObservableObject {
         // and keep split entry instantaneous.
         // Avoid re-reading/parsing Ghostty config on every new workspace; this hot path
         // runs for socket/CLI workspace creation and can cause visible typing lag.
-        let appearance = Self.bonsplitAppearance(from: GhosttyApp.shared.defaultBackgroundColor)
+        let appearance = Self.bonsplitAppearance(from: configProvider.defaultBackgroundColor)
         let config = BonsplitConfiguration(
             allowSplits: true,
             allowCloseTabs: true,

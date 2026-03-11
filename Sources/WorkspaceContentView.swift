@@ -18,6 +18,7 @@ struct WorkspaceContentView: View {
     @State private var config = WorkspaceContentView.resolveGhosttyAppearanceConfig(reason: "stateInit")
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var notificationStore: TerminalNotificationStore
+    @Environment(\.configProvider) private var configProvider
 
     var body: some View {
         let appearance = PanelAppearance.fromConfig(config)
@@ -113,10 +114,10 @@ struct WorkspaceContentView: View {
             let eventId = (notification.userInfo?[GhosttyNotificationKey.backgroundEventId] as? NSNumber)?.uint64Value
             let source = (notification.userInfo?[GhosttyNotificationKey.backgroundSource] as? String) ?? "nil"
             logTheme(
-                "theme notification workspace=\(workspace.id.uuidString) event=\(eventId.map(String.init) ?? "nil") source=\(source) payload=\(payloadHex) appBg=\(GhosttyApp.shared.defaultBackgroundColor.hexString()) appOpacity=\(String(format: "%.3f", GhosttyApp.shared.defaultBackgroundOpacity))"
+                "theme notification workspace=\(workspace.id.uuidString) event=\(eventId.map(String.init) ?? "nil") source=\(source) payload=\(payloadHex) appBg=\(configProvider?.defaultBackgroundColor.hexString() ?? "nil") appOpacity=\(String(format: "%.3f", configProvider?.defaultBackgroundOpacity ?? 0))"
             )
             // Payload ordering can lag across rapid config/theme updates.
-            // Resolve from GhosttyApp.shared.defaultBackgroundColor to keep tabs aligned
+            // Resolve from configProvider.defaultBackgroundColor to keep tabs aligned
             // with Ghostty's current runtime theme.
             refreshGhosttyAppearanceConfig(
                 reason: "ghosttyDefaultBackgroundDidChange",
@@ -178,7 +179,7 @@ struct WorkspaceContentView: View {
         }
 
         next.backgroundColor = resolvedBackground
-        GhosttyApp.shared.logBackgroundIfEnabled(
+        GhosttyApp.shared.logBackgroundIfEnabled(  // static context — configProvider not available
             "theme resolve reason=\(reason) loadedBg=\(loadedBackgroundHex) overrideBg=\(backgroundOverride?.hexString() ?? "nil") defaultBg=\(defaultBackgroundHex) finalBg=\(next.backgroundColor.hexString()) theme=\(next.theme ?? "nil")"
         )
         return next
@@ -242,7 +243,7 @@ struct WorkspaceContentView: View {
     }
 
     private func logTheme(_ message: String) {
-        GhosttyApp.shared.logBackgroundIfEnabled(message)
+        configProvider?.logBackgroundIfEnabled(message)
     }
 }
 

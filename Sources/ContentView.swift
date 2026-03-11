@@ -17,6 +17,7 @@ struct ContentView: View {
     @EnvironmentObject var sidebarSelectionState: SidebarSelectionState
     @Environment(\.ghosttyTheme) private var theme
     @Environment(\.daemonService) private var daemonService
+    @Environment(\.configProvider) private var configProvider
     @State private var sidebarWidth: CGFloat = 200
     @State private var hoveredResizerHandles: Set<SidebarResizerHandle> = []
     @State private var isResizerDragging = false
@@ -928,8 +929,8 @@ struct ContentView: View {
     ) {
         let previousGeneration = titlebarThemeGeneration
         titlebarThemeGeneration &+= 1
-        GhosttyApp.shared.logBackgroundIfEnabled(
-            "titlebar theme refresh scheduled reason=\(reason) event=\(backgroundEventId.map(String.init) ?? "nil") source=\(backgroundSource ?? "nil") payload=\(notificationPayloadHex ?? "nil") previousGeneration=\(previousGeneration) generation=\(titlebarThemeGeneration) appBg=\(GhosttyApp.shared.defaultBackgroundColor.hexString()) appOpacity=\(String(format: "%.3f", GhosttyApp.shared.defaultBackgroundOpacity))"
+        configProvider?.logBackgroundIfEnabled(
+            "titlebar theme refresh scheduled reason=\(reason) event=\(backgroundEventId.map(String.init) ?? "nil") source=\(backgroundSource ?? "nil") payload=\(notificationPayloadHex ?? "nil") previousGeneration=\(previousGeneration) generation=\(titlebarThemeGeneration) appBg=\(configProvider?.defaultBackgroundColor.hexString() ?? "nil") appOpacity=\(String(format: "%.3f", configProvider?.defaultBackgroundOpacity ?? 0))"
         )
     }
 
@@ -941,7 +942,7 @@ struct ContentView: View {
         notificationPayloadHex: String?
     ) {
         guard tabManager.selectedTabId == workspaceId else {
-            GhosttyApp.shared.logBackgroundIfEnabled(
+            configProvider?.logBackgroundIfEnabled(
                 "titlebar theme refresh skipped workspace=\(workspaceId.uuidString) selected=\(tabManager.selectedTabId?.uuidString ?? "nil") reason=\(reason)"
             )
             return
@@ -1111,9 +1112,9 @@ struct ContentView: View {
             updateTitlebarText()
         })
 
-        view = AnyView(view.onChange(of: titlebarThemeGeneration) { oldValue, newValue in
-            GhosttyApp.shared.logBackgroundIfEnabled(
-                "titlebar theme refresh applied oldGeneration=\(oldValue) generation=\(newValue) appBg=\(GhosttyApp.shared.defaultBackgroundColor.hexString()) appOpacity=\(String(format: "%.3f", GhosttyApp.shared.defaultBackgroundOpacity))"
+        view = AnyView(view.onChange(of: titlebarThemeGeneration) { [configProvider] oldValue, newValue in
+            configProvider?.logBackgroundIfEnabled(
+                "titlebar theme refresh applied oldGeneration=\(oldValue) generation=\(newValue) appBg=\(configProvider?.defaultBackgroundColor.hexString() ?? "nil") appOpacity=\(String(format: "%.3f", configProvider?.defaultBackgroundOpacity ?? 0))"
             )
         })
 

@@ -39,28 +39,35 @@
 | `NotificationService` | `NotificationService.swift` | `TerminalNotificationStore` | `develop` 9fdaf7a |
 | `BrowserHistoryService` | `BrowserHistoryService.swift` | `BrowserHistoryStore` | `develop` 9fdaf7a |
 
-## Phase 4: Singleton 참조 제거 — 진행 중 🔄
+## Phase 4: Singleton 참조 제거 — 완료 ✅
 
-### 4-A. GhosttyApp.shared (53→37, −30%)
+### 4-A. GhosttyApp.shared (53→17, −68% ✅)
 
 | 작업 | 상태 | 참조 감소 |
 |---|---|---|
 | `GhosttyTheme` SwiftUI Environment 도입 | ✅ 완료 | `develop` 6c3f1cb |
 | `logBackgroundIfEnabled` 편의 메서드 적용 (4파일) | ✅ 완료 | −8 refs |
 | `GhosttyTheme.current` AppKit 뷰 적용 (4파일) | ✅ 완료 | −8 refs |
+| `GhosttyConfigProviderKey` SwiftUI EnvironmentKey 도입 | ✅ 완료 | — |
+| `TermMeshApp` 루트에서 `.environment(\.configProvider)` 주입 | ✅ 완료 | — |
+| `ContentView` @Environment 적용 (5 refs) | ✅ 완료 | −5 refs |
+| `WorkspaceContentView` @Environment 적용 (3/4 refs, 1 static) | ✅ 완료 | −3 refs |
+| `TermMeshApp` configProvider 프로퍼티 적용 (3 refs) | ✅ 완료 | −3 refs |
+| `Workspace` configProvider 프로퍼티 적용 (3 refs) | ✅ 완료 | −3 refs |
+| `AppDelegate` configProvider 프로퍼티 적용 (1/2 refs, 1 C API) | ✅ 완료 | −1 ref |
+| `GhosttyTerminalView` configProvider 프로퍼티 적용 (10/12 refs) | ✅ 완료 | −10 refs |
 
-**남은 37개 참조:**
+**남은 17개 참조 (모두 제거 불필요 또는 불가):**
 
-| 파일 | 참조 수 | 주요 접근 패턴 | 난이도 |
+| 파일 | 참조 수 | 용도 | 분류 |
 |---|---|---|---|
-| `GhosttyTerminalView.swift` | 12 | `app`, `config`, `defaultBackgroundColor/Opacity`, `backgroundLogEnabled`, `markScrollActivity` | 🔴 높음 (AppKit, 깊은 의존) |
-| `GhosttyApp.swift` | 6 | 내부 self 참조 (`tick`, `handleAction`, `reloadConfiguration`) | ⚪ 불필요 (자기 참조) |
-| `ContentView.swift` | 5 | `backgroundLogEnabled`, `logBackground`, `defaultBackgroundColor/Opacity` | 🟡 중간 |
-| `WorkspaceContentView.swift` | 4 | `backgroundLogEnabled`, `logBackground` | 🟡 중간 |
-| `Workspace.swift` | 3 | `backgroundLogEnabled`, `logBackground`, `defaultBackgroundColor` | 🟢 낮음 |
-| `TermMeshApp.swift` | 3 | `reloadConfiguration`, `openConfigurationInTextEdit` | 🟡 중간 |
-| `AppDelegate.swift` | 2 | `config`, `reloadConfiguration` | 🟢 낮음 |
-| `GhosttyTheme.swift` | 2 | `defaultBackgroundColor/Opacity` (필수 — theme resolve 지점) | ⚪ 유지 |
+| `GhosttyApp.swift` | 6 | 내부 self 참조 (`tick`, `handleAction`, `reloadConfiguration`, `applyBackground`) | ⚪ 자기 참조 |
+| `GhosttyTerminalView.swift` | 3 | 1 프로퍼티 기본값 + 2 Ghostty C API (`app`, `config`) | ⚪ 기본값/C API |
+| `GhosttyTheme.swift` | 2 | Theme resolve 지점 (필수) | ⚪ 유지 |
+| `TermMeshApp.swift` | 2 | 1 프로퍼티 기본값 + 1 environment 주입점 | ⚪ 기본값/주입점 |
+| `AppDelegate.swift` | 2 | 1 프로퍼티 기본값 + 1 Ghostty C API (`config`) | ⚪ 기본값/C API |
+| `Workspace.swift` | 1 | 프로퍼티 기본값 | ⚪ 기본값 |
+| `WorkspaceContentView.swift` | 1 | static 컨텍스트 (인스턴스 접근 불가) | ⚪ static |
 
 ### 4-B. TermMeshDaemon.shared (54→8, −85% ✅)
 
@@ -81,16 +88,6 @@
 
 **남은 8개 참조:** 모두 프로퍼티 기본값 선언 또는 루트 주입점 (제거 불필요)
 
-| 파일 | 참조 수 | 용도 |
-|---|---|---|
-| `TermMeshApp.swift` | 2 | 루트 주입점 (`@ObservedObject`, `.environment()`) |
-| `DashboardController.swift` | 1 | 프로퍼티 기본값 |
-| `TabManager.swift` | 1 | 프로퍼티 기본값 |
-| `TeamOrchestrator.swift` | 1 | 프로퍼티 기본값 |
-| `AppDelegate.swift` | 1 | 프로퍼티 기본값 |
-| `TerminalPanel.swift` | 1 | 프로퍼티 기본값 |
-| `ContentViewUtilities.swift` | 1 | 생성자 기본값 |
-
 ### 4-C. TerminalNotificationStore.shared (18→6, −67% ✅)
 
 | 작업 | 상태 | 참조 감소 |
@@ -107,47 +104,38 @@
 
 **남은 6개 참조:** 모두 프로퍼티 기본값 선언 또는 루트 주입점
 
-| 파일 | 참조 수 | 용도 |
-|---|---|---|
-| `TermMeshApp.swift` | 1 | 루트 주입점 (`@StateObject`) |
-| `DashboardController.swift` | 1 | 프로퍼티 기본값 |
-| `TerminalController.swift` | 1 | 프로퍼티 기본값 |
-| `GhosttyApp.swift` | 1 | 프로퍼티 기본값 |
-| `AppDelegate.swift` | 2 | fallback (notificationStore가 nil일 때) |
-
 ---
 
 ## Phase 5: 미래 로드맵
 
 | 우선순위 | 작업 | 사이즈 | 설명 |
 |---|---|---|---|
-| P1 | Phase 4-A GhosttyApp.shared 남은 37개 참조 | L | ConfigProvider 프로토콜 활용하여 추가 제거 |
-| P2 | `ServiceContainer` 도입 | XL | 모든 서비스를 한 곳에서 생성·주입하는 DI 컨테이너 |
-| P2 | `TabManager` 생성자 주입 | M | daemon + notifications + config를 init 시 주입 |
+| P1 | `ServiceContainer` 도입 | XL | 모든 서비스를 한 곳에서 생성·주입하는 DI 컨테이너 |
+| P1 | `TabManager` 생성자 주입 | M | daemon + notifications + config를 init 시 주입 |
 | P2 | `AppDelegate` 클로저 주입 | M | lifecycle 이벤트에서 싱글톤 대신 클로저 사용 |
+| P2 | `BrowserHistoryService` 주입 전환 | M | BrowserHistoryStore.shared 참조 제거 |
 | P3 | 단위 테스트 인프라 | L | 프로토콜 mock 생성, XCTest 타겟 구성 |
-| P3 | `GhosttyTerminalView` 의존성 정리 | XL | 가장 복잡한 뷰 — 점진적 인터페이스 분리 |
-| P3 | `BrowserHistoryService` 주입 전환 | M | BrowserHistoryStore.shared 참조 제거 |
 
 ---
 
 ## 싱글톤 참조 추이
 
 ```
-             시작     이전     현재      목표
-GhosttyApp     53      37      37       ~5 (Theme resolve + 자기참조)
-TermMeshDaemon 54      54       8*       0
-Notification   18      18       6*       0
-BrowserHistory  ?       ?       ?        0
-──────────────────────────────────────────
-합계          125+    109+     51+      ~5
+             시작     Phase3   Phase4    잔여 분류
+GhosttyApp     53      37       17*      6 자기참조 + 2 theme + 3 C API + 4 기본값 + 1 static + 1 주입점
+TermMeshDaemon 54      54        8*      7 기본값 + 1 주입점
+Notification   18      18        6*      4 기본값 + 2 fallback
+BrowserHistory  ?       ?        ?       미착수
+────────────────────────────────────────────────────
+합계          125+    109+      31+
 
-* 남은 참조는 모두 프로퍼티 기본값/루트 주입점 (실질적 커플링 제거 완료)
+* 남은 참조는 모두 프로퍼티 기본값/루트 주입점/자기참조/C API (실질적 커플링 제거 완료)
 ```
 
 ## develop 브랜치 커밋 이력
 
 ```
+XXXXXXX refactor: Replace GhosttyApp.shared with ConfigProvider-based injection (37→17)
 XXXXXXX refactor: Replace TermMeshDaemon.shared and TerminalNotificationStore.shared with protocol-based injection
 d26b261 refactor: Replace singleton theme/logging access with GhosttyTheme and logBackgroundIfEnabled
 9fdaf7a refactor: Add protocol abstractions for DaemonService, ConfigProvider, NotificationService, BrowserHistoryService

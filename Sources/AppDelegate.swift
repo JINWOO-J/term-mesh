@@ -59,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     weak var tabManager: TabManager?
     /// Injected daemon service (defaults to singleton for backward compatibility).
     var daemon: any DaemonService = TermMeshDaemon.shared
+    /// Injected config provider (defaults to singleton for backward compatibility).
+    var configProvider: any GhosttyConfigProvider = GhosttyApp.shared
     weak var notificationStore: TerminalNotificationStore?
     weak var sidebarState: SidebarState?
     weak var fullscreenControlsViewModel: TitlebarControlsViewModel?
@@ -2125,7 +2127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         if normalizedFlags == [.command, .shift],
            (chars == "," || chars == "<" || event.keyCode == 43) {
-            GhosttyApp.shared.reloadConfiguration(source: "shortcut.cmd_shift_comma")
+            configProvider.reloadConfiguration(source: "shortcut.cmd_shift_comma")
             return true
         }
 

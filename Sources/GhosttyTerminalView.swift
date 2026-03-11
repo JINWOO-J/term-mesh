@@ -993,6 +993,9 @@ static func focusLog(_ message: String) {
         NSLog("[FOCUSDBG] %@", message)
     }
 
+    /// Injected config provider (defaults to singleton for backward compatibility).
+    var configProvider: any GhosttyConfigProvider = GhosttyApp.shared
+
     weak var terminalSurface: TerminalSurface?
     var scrollbar: GhosttyScrollbar?
     var cellSize: CGSize = .zero
@@ -1056,8 +1059,8 @@ static func focusLog(_ message: String) {
     }
 
     private func effectiveBackgroundColor() -> NSColor {
-        let base = backgroundColor ?? GhosttyApp.shared.defaultBackgroundColor
-        let opacity = GhosttyApp.shared.defaultBackgroundOpacity
+        let base = backgroundColor ?? configProvider.defaultBackgroundColor
+        let opacity = configProvider.defaultBackgroundOpacity
         return base.withAlphaComponent(opacity)
     }
 
@@ -1071,11 +1074,11 @@ static func focusLog(_ message: String) {
             CATransaction.commit()
         }
         terminalSurface?.hostedView.setBackgroundColor(color)
-        if GhosttyApp.shared.backgroundLogEnabled {
+        if configProvider.backgroundLogEnabled {
             let signature = "\(color.hexString()):\(String(format: "%.3f", color.alphaComponent))"
             if signature != lastLoggedSurfaceBackgroundSignature {
                 lastLoggedSurfaceBackgroundSignature = signature
-                GhosttyApp.shared.logBackground(
+                configProvider.logBackground(
                     "surface background applied tab=\(tabId?.uuidString ?? "unknown") surface=\(terminalSurface?.id.uuidString ?? "unknown") color=\(color.hexString()) opacity=\(String(format: "%.3f", color.alphaComponent))"
                 )
             }
@@ -1096,11 +1099,11 @@ static func focusLog(_ message: String) {
             window.backgroundColor = color
             window.isOpaque = color.alphaComponent >= 1.0
         }
-        if GhosttyApp.shared.backgroundLogEnabled {
+        if configProvider.backgroundLogEnabled {
             let signature = "\(termMeshShouldUseTransparentBackgroundWindow() ? "transparent" : color.hexString()):\(String(format: "%.3f", color.alphaComponent))"
             if signature != lastLoggedWindowBackgroundSignature {
                 lastLoggedWindowBackgroundSignature = signature
-                GhosttyApp.shared.logBackground(
+                configProvider.logBackground(
                     "window background applied tab=\(tabId?.uuidString ?? "unknown") surface=\(terminalSurface?.id.uuidString ?? "unknown") transparent=\(termMeshShouldUseTransparentBackgroundWindow()) color=\(color.hexString()) opacity=\(String(format: "%.3f", color.alphaComponent))"
                 )
             }
@@ -1189,7 +1192,7 @@ static func focusLog(_ message: String) {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        GhosttyApp.shared.logBackgroundIfEnabled(
+        configProvider.logBackgroundIfEnabled(
             "surface appearance changed tab=\(tabId?.uuidString ?? "nil") surface=\(terminalSurface?.id.uuidString ?? "nil") bestMatch=\(effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])?.rawValue ?? "nil")"
         )
         applySurfaceColorScheme()
@@ -1360,14 +1363,14 @@ func pushTargetSurfaceSize(_ size: CGSize) {
             ? GHOSTTY_COLOR_SCHEME_DARK
             : GHOSTTY_COLOR_SCHEME_LIGHT
         if !force, appliedColorScheme == scheme {
-            GhosttyApp.shared.logBackgroundIfEnabled(
+            configProvider.logBackgroundIfEnabled(
                 "surface color scheme tab=\(tabId?.uuidString ?? "nil") surface=\(terminalSurface?.id.uuidString ?? "nil") bestMatch=\(bestMatch?.rawValue ?? "nil") scheme=\(scheme == GHOSTTY_COLOR_SCHEME_DARK ? "dark" : "light") force=\(force) applied=false"
             )
             return
         }
         ghostty_surface_set_color_scheme(surface, scheme)
         appliedColorScheme = scheme
-        GhosttyApp.shared.logBackgroundIfEnabled(
+        configProvider.logBackgroundIfEnabled(
             "surface color scheme tab=\(tabId?.uuidString ?? "nil") surface=\(terminalSurface?.id.uuidString ?? "nil") bestMatch=\(bestMatch?.rawValue ?? "nil") scheme=\(scheme == GHOSTTY_COLOR_SCHEME_DARK ? "dark" : "light") force=\(force) applied=true"
         )
     }
@@ -2270,7 +2273,7 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         // Track scroll state for lag detection
         let hasMomentum = event.momentumPhase != [] && event.momentumPhase != .mayBegin
         let momentumEnded = event.momentumPhase == .ended || event.momentumPhase == .cancelled
-        GhosttyApp.shared.markScrollActivity(hasMomentum: hasMomentum, momentumEnded: momentumEnded)
+        configProvider.markScrollActivity(hasMomentum: hasMomentum, momentumEnded: momentumEnded)
 
         ghostty_surface_mouse_scroll(
             surface,

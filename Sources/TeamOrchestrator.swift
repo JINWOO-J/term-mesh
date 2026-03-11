@@ -84,6 +84,9 @@ final class TeamOrchestrator {
         var lastProgressAt: Date?
     }
 
+    /// Injected daemon service (defaults to singleton for backward compatibility).
+    var daemon: any DaemonService = TermMeshDaemon.shared
+
     private(set) var messages: [String: [TeamMessage]] = [:]   // team_name → messages
     private(set) var taskBoards: [String: [TeamTask]] = [:]    // team_name → tasks
     private var heartbeats: [String: [String: (at: Date, summary: String?)]] = [:]
@@ -305,8 +308,8 @@ final class TeamOrchestrator {
         workspace.closePanel(defaultPanelId)
 
         // Worktree isolation: create per-agent worktrees if enabled
-        let useWorktrees = TermMeshDaemon.shared.worktreeEnabled
-        let gitRepoRoot = useWorktrees ? TermMeshDaemon.shared.findGitRoot(from: workingDirectory) : nil
+        let useWorktrees = daemon.worktreeEnabled
+        let gitRepoRoot = useWorktrees ? daemon.findGitRoot(from: workingDirectory) : nil
 
         // Build agent panes with Claude running directly via command parameter
         // This bypasses shell init (.zshrc/.zprofile) entirely for reliable startup.
@@ -322,7 +325,7 @@ final class TeamOrchestrator {
 
             if useWorktrees, let repoRoot = gitRepoRoot {
                 let branchName = "team/\(name)/\(agent.name)"
-                let result = TermMeshDaemon.shared.createWorktreeWithError(repoPath: repoRoot, branch: branchName)
+                let result = daemon.createWorktreeWithError(repoPath: repoRoot, branch: branchName)
                 switch result {
                 case .success(let info):
                     agentWorkDir = info.path
@@ -1009,7 +1012,7 @@ final class TeamOrchestrator {
     private func syncTeamStateToDaemon() {
         let payload = daemonPayload()
         DispatchQueue.global(qos: .utility).async {
-            TermMeshDaemon.shared.syncTeams(payload)
+            daemon.syncTeams(payload)
         }
     }
 
@@ -1109,7 +1112,7 @@ final class TeamOrchestrator {
         guard let repoRoot = team.gitRepoRoot else { return }
         for agent in team.agents {
             guard let wtName = agent.worktreeName else { continue }
-            if TermMeshDaemon.shared.removeWorktree(repoPath: repoRoot, name: wtName) {
+            if daemon.removeWorktree(repoPath: repoRoot, name: wtName) {
                 Logger.team.info("removed worktree '\(wtName, privacy: .public)' for agent '\(agent.name, privacy: .public)'")
             } else {
                 Logger.team.error("failed to remove worktree '\(wtName, privacy: .public)' for agent '\(agent.name, privacy: .public)'")

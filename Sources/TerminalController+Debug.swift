@@ -1529,7 +1529,7 @@ extension TerminalController {
             }
             let surfaceId = tabManager.focusedSurfaceId(for: tabId)
             let (title, subtitle, body) = parseNotificationPayload(args)
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: tabId,
                 surfaceId: surfaceId,
                 title: title,
@@ -1561,7 +1561,7 @@ extension TerminalController {
                 return
             }
             let (title, subtitle, body) = parseNotificationPayload(payload)
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: tabId,
                 surfaceId: surfaceId,
                 title: title,
@@ -1596,7 +1596,7 @@ extension TerminalController {
                 return
             }
             let (title, subtitle, body) = parseNotificationPayload(payload)
-            TerminalNotificationStore.shared.addNotification(
+            notifications.addNotification(
                 tabId: tab.id,
                 surfaceId: panelId,
                 title: title,
@@ -1610,7 +1610,7 @@ extension TerminalController {
     func listNotifications() -> String {
         var result = ""
         DispatchQueue.main.sync {
-            let lines = TerminalNotificationStore.shared.notifications.enumerated().map { index, notification in
+            let lines = notifications.notifications.enumerated().map { index, notification in
                 let surfaceText = notification.surfaceId?.uuidString ?? "none"
                 let readText = notification.isRead ? "read" : "unread"
                 return "\(index):\(notification.id.uuidString)|\(notification.tabId.uuidString)|\(surfaceText)|\(readText)|\(notification.title)|\(notification.subtitle)|\(notification.body)"
@@ -1622,7 +1622,7 @@ extension TerminalController {
 
     func clearNotifications() -> String {
         DispatchQueue.main.async {
-            TerminalNotificationStore.shared.clearAll()
+            notifications.clearAll()
         }
         return "OK"
     }

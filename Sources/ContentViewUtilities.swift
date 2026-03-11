@@ -426,12 +426,14 @@ enum WorktreeAssocKeys {
 final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     private var worktrees: [WorktreeInfo]
     private let repoPath: String
+    private let daemon: any DaemonService
     weak var tableView: NSTableView?
     weak var panel: NSPanel?
 
-    init(worktrees: [WorktreeInfo], repoPath: String) {
+    init(worktrees: [WorktreeInfo], repoPath: String, daemon: any DaemonService = TermMeshDaemon.shared) {
         self.worktrees = worktrees
         self.repoPath = repoPath
+        self.daemon = daemon
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -495,7 +497,7 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
         let repoPath = self.repoPath
         let name = wt.name
         DispatchQueue.global(qos: .userInitiated).async {
-            let success = TermMeshDaemon.shared.removeWorktree(repoPath: repoPath, name: name)
+            let success = daemon.removeWorktree(repoPath: repoPath, name: name)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if success {
@@ -521,8 +523,8 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
     @objc func cleanupStale(_ sender: Any?) {
         let repoPath = self.repoPath
         DispatchQueue.global(qos: .userInitiated).async {
-            let removed = TermMeshDaemon.shared.cleanupStaleWorktrees(repoPath: repoPath)
-            let remaining = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
+            let removed = daemon.cleanupStaleWorktrees(repoPath: repoPath)
+            let remaining = daemon.listWorktrees(repoPath: repoPath)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.worktrees = remaining

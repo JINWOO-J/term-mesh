@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     weak var tabManager: TabManager?
+    /// Injected daemon service (defaults to singleton for backward compatibility).
+    var daemon: any DaemonService = TermMeshDaemon.shared
     weak var notificationStore: TerminalNotificationStore?
     weak var sidebarState: SidebarState?
     weak var fullscreenControlsViewModel: TitlebarControlsViewModel?
@@ -260,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         // term-mesh: Start the background daemon
         if !isRunningUnderXCTest {
-            TermMeshDaemon.shared.startDaemon()
+            daemon.startDaemon()
         }
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
@@ -355,12 +357,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         tabManager?.saveSessionState()
         TerminalController.shared.stop()
         // Auto-cleanup stale worktrees on quit
-        if TermMeshDaemon.shared.worktreeAutoCleanup {
+        if daemon.worktreeAutoCleanup {
             if let tabManager = tabManager {
                 for tab in tabManager.tabs {
                     let dir = tab.currentDirectory
-                    if let repoPath = TermMeshDaemon.shared.findGitRoot(from: dir), !repoPath.isEmpty {
-                        let removed = TermMeshDaemon.shared.cleanupStaleWorktrees(repoPath: repoPath)
+                    if let repoPath = daemon.findGitRoot(from: dir), !repoPath.isEmpty {
+                        let removed = daemon.cleanupStaleWorktrees(repoPath: repoPath)
                         if removed > 0 {
                             NSLog("Auto-cleaned \(removed) stale worktree(s) for \(repoPath)")
                         }
@@ -368,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
             }
         }
-        TermMeshDaemon.shared.stopDaemon()
+        daemon.stopDaemon()
         BrowserHistoryStore.shared.flushPendingSaves()
         PostHogAnalytics.shared.flush()
         notificationStore?.clearAll()
@@ -978,7 +980,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let tabManager = TabManager(initialWorkingDirectory: initialWorkingDirectory)
         let sidebarState = SidebarState()
         let sidebarSelectionState = SidebarSelectionState()
-        let notificationStore = TerminalNotificationStore.shared
+        let notificationStore = self.notificationStore ?? TerminalNotificationStore.shared
 
         let root = ContentView(updateViewModel: updateViewModel, windowId: windowId)
             .environmentObject(tabManager)
@@ -1049,7 +1051,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func setupMenuBarExtra() {
-        let store = TerminalNotificationStore.shared
+        let store = self.notificationStore ?? TerminalNotificationStore.shared
         menuBarExtraController = MenuBarExtraController(
             notificationStore: store,
             onShowNotifications: { [weak self] in

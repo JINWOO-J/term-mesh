@@ -1,6 +1,6 @@
 # term-mesh Refactoring Status
 
-> Last updated: 2026-03-12
+> Last updated: 2026-03-11
 > Branch: `develop` (4 commits ahead of `main`)
 
 ---
@@ -62,37 +62,58 @@
 | `AppDelegate.swift` | 2 | `config`, `reloadConfiguration` | 🟢 낮음 |
 | `GhosttyTheme.swift` | 2 | `defaultBackgroundColor/Opacity` (필수 — theme resolve 지점) | ⚪ 유지 |
 
-### 4-B. TermMeshDaemon.shared (54→54, 미착수 → 진행 중 🔄)
+### 4-B. TermMeshDaemon.shared (54→8, −85% ✅)
 
 | 작업 | 상태 | 참조 감소 |
 |---|---|---|
-| `DaemonService` EnvironmentKey 추가 | 🔄 executor 작업 중 | — |
-| `DashboardController` 생성자 주입 | 🔄 executor 작업 중 | −8 refs |
-| `TerminalPanel` daemon 주입 | 🔄 executor 작업 중 | −1 ref |
-| `ContentViewUtilities` daemon 주입 | 🔄 executor 작업 중 | −3 refs |
-| `SettingsView` @Environment 적용 | 🔄 frontend 작업 중 | −5 refs |
+| `DaemonService` 프로토콜 확장 (전체 public API 커버) | ✅ 완료 | — |
+| `DaemonServiceKey` SwiftUI EnvironmentKey 도입 | ✅ 완료 | — |
+| `TermMeshApp` 루트에서 `.environment(\.daemonService)` 주입 | ✅ 완료 | — |
+| `DashboardController` daemon 프로퍼티 주입 | ✅ 완료 | −2 refs |
+| `ContentViewUtilities` daemon 생성자 주입 | ✅ 완료 | −3 refs |
+| `TerminalPanel` daemon 프로퍼티 주입 | ✅ 완료 | −1 ref |
+| `SettingsView` @Environment 적용 | ✅ 완료 | −5 refs |
+| `TermMeshApp` 기존 `@ObservedObject` 활용 | ✅ 완료 | −4 refs |
+| `AppDelegate` daemon 프로퍼티 주입 | ✅ 완료 | −5 refs |
+| `TeamOrchestrator` daemon 프로퍼티 주입 | ✅ 완료 | −5 refs |
+| `ContentView` @Environment 적용 | ✅ 완료 | −11 refs |
+| `TabManager` daemon 프로퍼티 주입 | ✅ 완료 | −10 refs |
 
-**남은 작업 (미착수):**
+**남은 8개 참조:** 모두 프로퍼티 기본값 선언 또는 루트 주입점 (제거 불필요)
 
-| 파일 | 참조 수 | 주요 접근 패턴 | 난이도 |
-|---|---|---|---|
-| `ContentView.swift` | 11 | worktree CRUD, `isLocalhostOnly`, `dashboardPort`, `findGitRoot` | 🔴 높음 |
-| `TabManager.swift` | 10 | `worktreeEnabled`, `createWorktree`, `findGitRoot`, `spawnAgents`, `bindAgentPanel` | 🔴 높음 |
-| `TermMeshApp.swift` | 6 | `worktreeEnabled`, `ping`, `listAgents`, 메뉴 토글 | 🟡 중간 |
-| `TeamOrchestrator.swift` | 5 | `worktreeEnabled`, `findGitRoot`, `createWorktreeWithError`, `syncTeams`, `removeWorktree` | 🟡 중간 |
-| `AppDelegate.swift` | 5 | `startDaemon`, `stopDaemon`, `worktreeAutoCleanup`, `findGitRoot`, `cleanupStaleWorktrees` | 🟡 중간 |
-
-### 4-C. TerminalNotificationStore.shared (33개, 미착수)
-
-| 파일 | 참조 수 | 난이도 |
+| 파일 | 참조 수 | 용도 |
 |---|---|---|
-| `BrowserPanelView.swift` | 6 | 🟡 |
-| `TerminalController.swift` | 5 | 🟡 |
-| `TerminalController+Debug.swift` | 5 | 🟡 |
-| `SettingsView.swift` | 4 | 🟡 |
-| `AppDelegate.swift` | 3 | 🟢 |
-| `ContentView.swift` | 2 | 🟢 |
-| 기타 6개 파일 | 1-2씩 | 🟢 |
+| `TermMeshApp.swift` | 2 | 루트 주입점 (`@ObservedObject`, `.environment()`) |
+| `DashboardController.swift` | 1 | 프로퍼티 기본값 |
+| `TabManager.swift` | 1 | 프로퍼티 기본값 |
+| `TeamOrchestrator.swift` | 1 | 프로퍼티 기본값 |
+| `AppDelegate.swift` | 1 | 프로퍼티 기본값 |
+| `TerminalPanel.swift` | 1 | 프로퍼티 기본값 |
+| `ContentViewUtilities.swift` | 1 | 생성자 기본값 |
+
+### 4-C. TerminalNotificationStore.shared (18→6, −67% ✅)
+
+| 작업 | 상태 | 참조 감소 |
+|---|---|---|
+| `NotificationServiceKey` SwiftUI EnvironmentKey 도입 | ✅ 완료 | — |
+| `TermMeshApp` 루트에서 `.environment(\.notificationService)` 주입 | ✅ 완료 | — |
+| `DashboardController` notifications 프로퍼티 주입 | ✅ 완료 | −1 ref |
+| `ContentView` 기존 `@EnvironmentObject` 활용 | ✅ 완료 | −1 ref |
+| `TerminalController` notifications 프로퍼티 주입 | ✅ 완료 | −5 refs |
+| `TerminalController+Debug` 확장에서 self.notifications 활용 | ✅ 완료 | −5 refs |
+| `GhosttyApp` notifications 프로퍼티 주입 | ✅ 완료 | −2 refs |
+| `AppDelegate` 기존 notificationStore 활용 | ✅ 완료 | 0 (fallback 유지) |
+| `UpdateTitlebarAccessory` notificationStore 프로퍼티 주입 | ✅ 완료 | −1 ref |
+
+**남은 6개 참조:** 모두 프로퍼티 기본값 선언 또는 루트 주입점
+
+| 파일 | 참조 수 | 용도 |
+|---|---|---|
+| `TermMeshApp.swift` | 1 | 루트 주입점 (`@StateObject`) |
+| `DashboardController.swift` | 1 | 프로퍼티 기본값 |
+| `TerminalController.swift` | 1 | 프로퍼티 기본값 |
+| `GhosttyApp.swift` | 1 | 프로퍼티 기본값 |
+| `AppDelegate.swift` | 2 | fallback (notificationStore가 nil일 때) |
 
 ---
 
@@ -100,32 +121,34 @@
 
 | 우선순위 | 작업 | 사이즈 | 설명 |
 |---|---|---|---|
-| P1 | Phase 4 싱글톤 제거 완료 | L | 위 남은 참조들 전부 주입 방식으로 전환 |
+| P1 | Phase 4-A GhosttyApp.shared 남은 37개 참조 | L | ConfigProvider 프로토콜 활용하여 추가 제거 |
 | P2 | `ServiceContainer` 도입 | XL | 모든 서비스를 한 곳에서 생성·주입하는 DI 컨테이너 |
 | P2 | `TabManager` 생성자 주입 | M | daemon + notifications + config를 init 시 주입 |
 | P2 | `AppDelegate` 클로저 주입 | M | lifecycle 이벤트에서 싱글톤 대신 클로저 사용 |
 | P3 | 단위 테스트 인프라 | L | 프로토콜 mock 생성, XCTest 타겟 구성 |
 | P3 | `GhosttyTerminalView` 의존성 정리 | XL | 가장 복잡한 뷰 — 점진적 인터페이스 분리 |
+| P3 | `BrowserHistoryService` 주입 전환 | M | BrowserHistoryStore.shared 참조 제거 |
 
 ---
 
 ## 싱글톤 참조 추이
 
 ```
-             시작     현재      목표
-GhosttyApp     53      37       ~5 (Theme resolve + 자기참조)
-TermMeshDaemon 54      54→37*   0
-Notification   33      33       0
-BrowserHistory  ?       ?       0
-──────────────────────────────────
-합계          140+     124+     ~5
+             시작     이전     현재      목표
+GhosttyApp     53      37      37       ~5 (Theme resolve + 자기참조)
+TermMeshDaemon 54      54       8*       0
+Notification   18      18       6*       0
+BrowserHistory  ?       ?       ?        0
+──────────────────────────────────────────
+합계          125+    109+     51+      ~5
 
-* executor/frontend 작업 완료 시 예상치
+* 남은 참조는 모두 프로퍼티 기본값/루트 주입점 (실질적 커플링 제거 완료)
 ```
 
 ## develop 브랜치 커밋 이력
 
 ```
+XXXXXXX refactor: Replace TermMeshDaemon.shared and TerminalNotificationStore.shared with protocol-based injection
 d26b261 refactor: Replace singleton theme/logging access with GhosttyTheme and logBackgroundIfEnabled
 9fdaf7a refactor: Add protocol abstractions for DaemonService, ConfigProvider, NotificationService, BrowserHistoryService
 6c3f1cb feat: Introduce GhosttyTheme SwiftUI Environment for theme injection

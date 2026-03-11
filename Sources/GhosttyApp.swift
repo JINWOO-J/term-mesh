@@ -158,6 +158,9 @@ class GhosttyApp {
         return formatter
     }()
 
+    /// Injected notification service (defaults to singleton for backward compatibility).
+    var notifications: any NotificationService = TerminalNotificationStore.shared
+
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
     private(set) var defaultBackgroundColor: NSColor = .windowBackgroundColor
@@ -832,7 +835,7 @@ class GhosttyApp {
                     let command = actionTitle.isEmpty ? tabTitle : actionTitle
                     let body = actionBody
                     let surfaceId = tabManager.focusedSurfaceId(for: tabId)
-                    TerminalNotificationStore.shared.addNotification(
+                    notifications.addNotification(
                         tabId: tabId,
                         surfaceId: surfaceId,
                         title: command,
@@ -1091,7 +1094,7 @@ class GhosttyApp {
                 let tabTitle = AppDelegate.shared?.tabManager?.titleForTab(tabId) ?? "Terminal"
                 let command = actionTitle.isEmpty ? tabTitle : actionTitle
                 let body = actionBody
-                TerminalNotificationStore.shared.addNotification(
+                notifications.addNotification(
                     tabId: tabId,
                     surfaceId: surfaceId,
                     title: command,

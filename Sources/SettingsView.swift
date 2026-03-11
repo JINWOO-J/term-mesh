@@ -43,6 +43,8 @@ struct SettingsView: View {
     @AppStorage(TermMeshDaemon.dashboardPortKey) private var dashboardPort = 9876
     @AppStorage(TermMeshDaemon.dashboardPasswordKey) private var dashboardPassword = ""
 
+    @Environment(\.daemonService) private var daemonService
+
     @State private var shortcutResetToken = UUID()
     @State private var topBlurOpacity: Double = 0
     @State private var topBlurBaselineOffset: CGFloat?
@@ -622,8 +624,8 @@ struct SettingsView: View {
                         SettingsCardRow("Base Directory", subtitle: "Where worktrees are created") {
                             HStack(spacing: 8) {
                                 TextField("", text: Binding(
-                                    get: { TermMeshDaemon.shared.worktreeBaseDir },
-                                    set: { TermMeshDaemon.shared.worktreeBaseDir = $0 }
+                                    get: { daemonService?.worktreeBaseDir ?? "" },
+                                    set: { daemonService?.worktreeBaseDir = $0 }
                                 ))
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 300)
@@ -635,7 +637,7 @@ struct SettingsView: View {
                                 .foregroundColor(.secondary)
 
                                 Button("Open") {
-                                    let path = TermMeshDaemon.shared.worktreeBaseDir
+                                    let path = daemonService?.worktreeBaseDir ?? ""
                                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
                                 }
                                 .buttonStyle(.plain)
@@ -647,8 +649,8 @@ struct SettingsView: View {
 
                         SettingsCardRow("Auto-Cleanup on Quit", subtitle: "Remove stale worktrees when app closes") {
                             Toggle("", isOn: Binding(
-                                get: { TermMeshDaemon.shared.worktreeAutoCleanup },
-                                set: { TermMeshDaemon.shared.worktreeAutoCleanup = $0 }
+                                get: { daemonService?.worktreeAutoCleanup ?? true },
+                                set: { daemonService?.worktreeAutoCleanup = $0 }
                             ))
                             .toggleStyle(.switch)
                         }

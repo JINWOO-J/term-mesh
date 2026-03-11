@@ -16,6 +16,7 @@ struct ContentView: View {
     @EnvironmentObject var sidebarState: SidebarState
     @EnvironmentObject var sidebarSelectionState: SidebarSelectionState
     @Environment(\.ghosttyTheme) private var theme
+    @Environment(\.daemonService) private var daemonService
     @State private var sidebarWidth: CGFloat = 200
     @State private var hoveredResizerHandles: Set<SidebarResizerHandle> = []
     @State private var isResizerDragging = false
@@ -452,7 +453,7 @@ struct ContentView: View {
     }
     private var fullscreenControls: some View {
         TitlebarControlsView(
-            notificationStore: TerminalNotificationStore.shared,
+            notificationStore: notificationStore,
             viewModel: fullscreenControlsViewModel,
             onToggleSidebar: { sidebarState.toggle() },
             onToggleNotifications: { [fullscreenControlsViewModel] in
@@ -581,7 +582,7 @@ struct ContentView: View {
 
             if let port = titlebarDashboardPort {
                 titlebarInfoSeparator
-                let host = TermMeshDaemon.shared.isLocalhostOnly ? "localhost" : "0.0.0.0"
+                let host = daemonService?.isLocalhostOnly ?? true ? "localhost" : "0.0.0.0"
                 Button(action: {
                     if let url = URL(string: "http://localhost:\(port)") {
                         _ = tabManager.createBrowserSplit(direction: .right, url: url)
@@ -604,12 +605,13 @@ struct ContentView: View {
                 Button(action: {
                     guard let workspace = tabManager.selectedWorkspace else { return }
                     let dir = workspace.currentDirectory
+                    let daemon = self.daemonService
                     DispatchQueue.global(qos: .userInitiated).async {
-                        guard let repoPath = TermMeshDaemon.shared.findGitRoot(from: dir), !repoPath.isEmpty else {
+                        guard let repoPath = daemon?.findGitRoot(from: dir), !repoPath.isEmpty else {
                             DispatchQueue.main.async { NSSound.beep() }
                             return
                         }
-                        let worktrees = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
+                        let worktrees = daemon?.listWorktrees(repoPath: repoPath) ?? []
                         DispatchQueue.main.async {
                             Self.showWorktreeManager(worktrees: worktrees, repoPath: repoPath)
                         }
@@ -862,14 +864,15 @@ struct ContentView: View {
         if titlebarTag != tab.tag { titlebarTag = tab.tag }
 
         // Dashboard port
-        let dashPort: Int? = TermMeshDaemon.shared.isDashboardEnabled ? TermMeshDaemon.shared.dashboardPort : nil
+        let dashPort: Int? = daemonService?.isDashboardEnabled == true ? daemonService?.dashboardPort : nil
         if titlebarDashboardPort != dashPort { titlebarDashboardPort = dashPort }
 
         // Worktree count
+        let daemon = self.daemonService
         DispatchQueue.global(qos: .utility).async {
             let currentDir = tab.currentDirectory
-            if let repoPath = TermMeshDaemon.shared.findGitRoot(from: currentDir), !repoPath.isEmpty {
-                let count = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath).count
+            if let repoPath = daemon?.findGitRoot(from: currentDir), !repoPath.isEmpty {
+                let count = daemon?.listWorktrees(repoPath: repoPath).count ?? 0
                 DispatchQueue.main.async {
                     if self.titlebarWorktreeCount != count { self.titlebarWorktreeCount = count }
                 }
@@ -3034,35 +3037,35 @@ struct ContentView: View {
             }
             workspace.tag = nil
         }
-        registry.register(commandId: "palette.listWorktrees") {
+        registry.register(commandId: "palette.listWorktrees") { [daemon = self.daemonService] in
             guard let workspace = tabManager.selectedWorkspace else {
                 NSSound.beep()
                 return
             }
             let dir = workspace.currentDirectory
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let repoPath = TermMeshDaemon.shared.findGitRoot(from: dir), !repoPath.isEmpty else {
+                guard let repoPath = daemon?.findGitRoot(from: dir), !repoPath.isEmpty else {
                     DispatchQueue.main.async { NSSound.beep() }
                     return
                 }
-                let worktrees = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
+                let worktrees = daemon?.listWorktrees(repoPath: repoPath) ?? []
                 DispatchQueue.main.async {
                     Self.showWorktreeManager(worktrees: worktrees, repoPath: repoPath)
                 }
             }
         }
-        registry.register(commandId: "palette.cleanupWorktrees") {
+        registry.register(commandId: "palette.cleanupWorktrees") { [daemon = self.daemonService] in
             guard let workspace = tabManager.selectedWorkspace else {
                 NSSound.beep()
                 return
             }
             let dir = workspace.currentDirectory
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let repoPath = TermMeshDaemon.shared.findGitRoot(from: dir), !repoPath.isEmpty else {
+                guard let repoPath = daemon?.findGitRoot(from: dir), !repoPath.isEmpty else {
                     DispatchQueue.main.async { NSSound.beep() }
                     return
                 }
-                let removed = TermMeshDaemon.shared.cleanupStaleWorktrees(repoPath: repoPath)
+                let removed = daemon?.cleanupStaleWorktrees(repoPath: repoPath) ?? 0
                 DispatchQueue.main.async {
                     let alert = NSAlert()
                     alert.messageText = "Worktree Cleanup"
@@ -3072,8 +3075,8 @@ struct ContentView: View {
                 }
             }
         }
-        registry.register(commandId: "palette.openWorktreeDir") {
-            let path = TermMeshDaemon.shared.worktreeBaseDir
+        registry.register(commandId: "palette.openWorktreeDir") { [daemon = self.daemonService] in
+            let path = daemon?.worktreeBaseDir ?? ""
             let url = URL(fileURLWithPath: path)
             // Create directory if it doesn't exist
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

@@ -79,6 +79,8 @@ deploy: build
 	@mkdir -p "$(INSTALL_APP)/Contents/Resources/bin"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(INSTALL_APP)/Contents/Resources/bin/term-meshd"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(INSTALL_APP)/Contents/Resources/bin/term-mesh-run"
+	@echo "==> Re-signing app bundle (binaries added after initial sign)..."
+	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@# Update symlinks (term-mesh = Swift CLI from app bundle, term-mesh-run = Rust PTY wrapper)
 	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/bin/term-mesh"
 	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/bin/term-meshd"
@@ -143,6 +145,8 @@ deploy-prod: prod
 	@mkdir -p "$(INSTALL_APP)/Contents/Resources/bin"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(INSTALL_APP)/Contents/Resources/bin/term-meshd"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(INSTALL_APP)/Contents/Resources/bin/term-mesh-run"
+	@echo "==> Re-signing app bundle (binaries added after initial sign)..."
+	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/bin/term-mesh"
 	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/bin/term-meshd"
 	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/bin/term-mesh-run"
@@ -161,6 +165,8 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run"; \
+		echo "==> Re-signing app bundle for DMG..."; \
+		codesign --force --deep --sign - "$$STAGING/term-mesh.app"; \
 		create-dmg \
 			--volname "term-mesh" \
 			--window-pos 200 120 \
@@ -178,6 +184,8 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run"; \
+		echo "==> Re-signing app bundle for DMG..."; \
+		codesign --force --deep --sign - "$$STAGING/term-mesh.app"; \
 		ln -s /Applications "$$STAGING/Applications"; \
 		hdiutil create -volname "term-mesh" -srcfolder "$$STAGING" -ov -format UDZO "$(DMG_NAME)"; \
 		rm -rf "$$STAGING"; \

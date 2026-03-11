@@ -1800,12 +1800,28 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
         // Apply optional working directory and command, then create the surface.
         // withCString keeps the C pointer alive during ghostty_surface_new.
-        // ghostty handles login shell setup via login(1) on macOS, so we pass
-        // the command directly without wrapping.
+        // ghostty handles login shell setup via login(1) on macOS when no command
+        // is specified. When a command IS specified, it runs directly without a
+        // login shell. The "forceLoginShell" preference wraps explicit commands
+        // in `$SHELL -l -c '...'` so .profile/.zshrc are always sourced.
+        let resolvedCommand: String? = {
+            guard let command, !command.isEmpty else { return nil }
+            let loginShellMode = UserDefaults.standard.string(forKey: "shellLoginMode") ?? "login"
+            guard loginShellMode == "login" else { return command }
+            // Already a login-shell invocation — don't double-wrap.
+            if command.contains(" -l ") || command.contains(" --login") || command.hasSuffix(" -l") {
+                return command
+            }
+            let shell = getenv("SHELL").map { String(cString: $0) } ?? "/bin/zsh"
+            // Wrap in login shell: $SHELL -l -c 'exec <command>'
+            let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
+            return "\(shell) -l -c 'exec \(escaped)'"
+        }()
+
         if let workingDirectory, !workingDirectory.isEmpty {
-            if let command, !command.isEmpty {
+            if let resolvedCommand {
                 workingDirectory.withCString { cWorkingDir in
-                    command.withCString { cCmd in
+                    resolvedCommand.withCString { cCmd in
                         surfaceConfig.working_directory = cWorkingDir
                         surfaceConfig.command = cCmd
                         createSurface()
@@ -1817,8 +1833,8 @@ final class TerminalSurface: Identifiable, ObservableObject {
                     createSurface()
                 }
             }
-        } else if let command, !command.isEmpty {
-            command.withCString { cCmd in
+        } else if let resolvedCommand {
+            resolvedCommand.withCString { cCmd in
                 surfaceConfig.command = cCmd
                 createSurface()
             }

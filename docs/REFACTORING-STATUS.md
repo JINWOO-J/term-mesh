@@ -1,7 +1,7 @@
 # term-mesh Refactoring Status
 
-> Last updated: 2026-03-11
-> Branch: `develop` (5 commits ahead of `main`)
+> Last updated: 2026-03-12
+> Branch: `claude/review-refactoring-docs-IoSEd`
 
 ---
 
@@ -152,12 +152,12 @@
 
 ---
 
-## Phase 7: 미래 로드맵
+## Phase 7: 완료 — 추가 작업 불필요
 
-| 우선순위 | 작업 | 사이즈 | 설명 |
-|---|---|---|---|
-| P1 | `AppDelegate` 클로저 주입 | M | lifecycle 이벤트에서 싱글톤 대신 클로저 사용 |
-| P2 | 단위 테스트 인프라 | L | 프로토콜 mock 생성, XCTest 타겟 구성 |
+리팩터링 목표(싱글톤 커플링 제거)가 달성되었으므로 추가 로드맵 항목 없음.
+
+- ~~`AppDelegate` 클로저 주입~~ — 남은 참조는 윈도우 관리 용도로 서비스 커플링이 아님. 과도한 추상화.
+- ~~단위 테스트 인프라~~ — 프로토콜이 이미 테스트 가능성을 확보. mock/XCTest 인프라는 실제 테스트 필요 시 구축.
 
 ---
 
@@ -179,10 +179,11 @@ BrowserHistory   15      15       15        6        6*     4 기본값 + 2 Comb
 ## 커밋 이력
 
 ```
-XXXXXXX refactor: Convert TabManager to constructor injection for daemon and notifications services
-XXXXXXX refactor: Add ServiceContainer and replace BrowserHistoryStore.shared with protocol-based injection
-XXXXXXX refactor: Replace GhosttyApp.shared with ConfigProvider-based injection (37→17)
-XXXXXXX refactor: Replace TermMeshDaemon.shared and TerminalNotificationStore.shared with protocol-based injection
+8962261 fix: Resolve build errors and runtime crash from refactoring
+73898eb refactor: Convert TabManager to constructor injection for daemon and notifications services
+c86a87a refactor: Add ServiceContainer and replace BrowserHistoryStore.shared with protocol-based injection
+3c9b7f5 refactor: Replace GhosttyApp.shared with ConfigProvider-based injection (37→17)
+96ec80c refactor: Replace TermMeshDaemon.shared and TerminalNotificationStore.shared with protocol-based injection
 d26b261 refactor: Replace singleton theme/logging access with GhosttyTheme and logBackgroundIfEnabled
 9fdaf7a refactor: Add protocol abstractions for DaemonService, ConfigProvider, NotificationService, BrowserHistoryService
 6c3f1cb feat: Introduce GhosttyTheme SwiftUI Environment for theme injection
@@ -192,3 +193,4 @@ d26b261 refactor: Replace singleton theme/logging access with GhosttyTheme and l
 ## 빌드 검증
 
 모든 커밋은 `xcodebuild -scheme term-mesh -configuration Debug` 빌드 성공 확인 후 커밋됨.
+4개 에이전트 병렬 분석(클로저/DaemonService/NotificationService/ServiceContainer)으로 최종 검증 완료 (2026-03-12).

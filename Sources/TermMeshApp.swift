@@ -953,15 +953,16 @@ struct TermMeshApp: App {
         UserDefaults.standard.set(useWorktree, forKey: Self.spawnCLILastWorktreeKey)
         UserDefaults.standard.set(useNewWorkspace, forKey: Self.spawnCLILastNewWorkspaceKey)
 
-        // Build full command string
+        // Build full command string using resolved path from CLI settings
         let command: String? = {
             if selectedCommand == "(shell only)" || selectedCommand.isEmpty {
                 return nil
             }
+            let resolvedCli = CLIPathSettings.resolvedPath(for: selectedCommand) ?? selectedCommand
             if options.isEmpty {
-                return selectedCommand
+                return resolvedCli
             }
-            return "\(selectedCommand) \(options)"
+            return "\(resolvedCli) \(options)"
         }()
 
         if useWorktree {

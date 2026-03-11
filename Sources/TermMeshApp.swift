@@ -873,8 +873,10 @@ struct TermMeshApp: App {
         let lastWorktree = UserDefaults.standard.bool(forKey: Self.spawnCLILastWorktreeKey)
         let lastNewWorkspace = UserDefaults.standard.bool(forKey: Self.spawnCLILastNewWorkspaceKey)
 
+        let lastLoginShell = UserDefaults.standard.object(forKey: "shellLoginMode") as? String ?? "login"
+
         let rowH: CGFloat = 28
-        var y: CGFloat = rowH * 5 + 4  // 6 rows
+        var y: CGFloat = rowH * 6 + 4  // 7 rows
 
         // -- Command popup --
         y -= rowH
@@ -929,7 +931,13 @@ struct TermMeshApp: App {
         worktreeCheck.frame = NSRect(x: 0, y: y, width: 300, height: 20)
         worktreeCheck.state = lastWorktree ? .on : .off
 
-        let totalHeight = rowH * 5 + 4
+        // -- Login Shell checkbox --
+        y -= rowH
+        let loginShellCheck = NSButton(checkboxWithTitle: "Login shell (load .profile/.zshrc)", target: nil, action: nil)
+        loginShellCheck.frame = NSRect(x: 0, y: y, width: 300, height: 20)
+        loginShellCheck.state = lastLoginShell == "login" ? .on : .off
+
+        let totalHeight = rowH * 6 + 4
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: totalHeight))
         container.addSubview(commandLabel)
         container.addSubview(commandCombo)
@@ -940,6 +948,7 @@ struct TermMeshApp: App {
         container.addSubview(countValueLabel)
         container.addSubview(newWorkspaceCheck)
         container.addSubview(worktreeCheck)
+        container.addSubview(loginShellCheck)
         alert.accessoryView = container
 
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -955,6 +964,8 @@ struct TermMeshApp: App {
         UserDefaults.standard.set(count, forKey: Self.spawnCLILastCountKey)
         UserDefaults.standard.set(useWorktree, forKey: Self.spawnCLILastWorktreeKey)
         UserDefaults.standard.set(useNewWorkspace, forKey: Self.spawnCLILastNewWorkspaceKey)
+        let loginShellMode = loginShellCheck.state == .on ? "login" : "auto"
+        UserDefaults.standard.set(loginShellMode, forKey: "shellLoginMode")
 
         // Build full command string using resolved path from CLI settings
         let command: String? = {

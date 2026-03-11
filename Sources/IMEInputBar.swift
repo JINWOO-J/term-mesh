@@ -50,16 +50,14 @@ struct IMEInputBar: View {
     let onSubmit: (String) -> Void
     let onBroadcast: ((String) -> Void)?
     let onClose: () -> Void
+    var onCtrlC: (() -> Void)? = nil
 
     @State private var text: String = ""
     @State private var history: [String] = IMEHistory.load()
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
+    @State private var isComposing: Bool = false
     @FocusState private var isFieldFocused: Bool
-
-    private var lineCount: Int {
-        max(1, text.components(separatedBy: "\n").count)
-    }
 
     // MARK: - Actions
 
@@ -84,8 +82,10 @@ struct IMEInputBar: View {
     }
 
     private func addToHistory(_ entry: String) {
-        history.removeAll { $0 == entry }
-        history.insert(entry, at: 0)
+        // Cap entry size to prevent bloating UserDefaults
+        let capped = entry.count > 1000 ? String(entry.prefix(1000)) : entry
+        history.removeAll { $0 == capped }
+        history.insert(capped, at: 0)
         if history.count > IMEHistory.maxEntries {
             history.removeLast(history.count - IMEHistory.maxEntries)
         }
@@ -118,6 +118,21 @@ struct IMEInputBar: View {
         }
     }
 
+    /// Reverse-search history (Ctrl+R): find next entry containing current text.
+    private func historySearch() {
+        let query = text.lowercased()
+        let startIndex = historyIndex + 1
+        guard startIndex < history.count else { return }
+        for i in startIndex..<history.count {
+            if query.isEmpty || history[i].lowercased().contains(query) {
+                if historyIndex == -1 { historyDraft = text }
+                historyIndex = i
+                text = history[i]
+                return
+            }
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -125,7 +140,7 @@ struct IMEInputBar: View {
             // Input row
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "keyboard")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.6))
                     .font(.system(size: 11))
                     .padding(.top, 5)
 
@@ -133,8 +148,11 @@ struct IMEInputBar: View {
                     text: $text,
                     onSubmit: doSubmit,
                     onCancel: onClose,
+                    onCtrlC: onCtrlC,
                     onHistoryUp: historyUp,
-                    onHistoryDown: historyDown
+                    onHistoryDown: historyDown,
+                    onHistorySearch: historySearch,
+                    onComposingChanged: { isComposing = $0 }
                 )
                 .focused($isFieldFocused)
 
@@ -147,16 +165,23 @@ struct IMEInputBar: View {
             // Hint bar
             hintBar
 
-            // History position indicator
-            if historyIndex >= 0 {
-                Text("history [\(historyIndex + 1)/\(history.count)]")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.orange.opacity(0.8))
-                    .padding(.bottom, 2)
+            // Status indicators
+            HStack(spacing: 8) {
+                if isComposing {
+                    Text("IME composing")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.cyan.opacity(0.8))
+                }
+                if historyIndex >= 0 {
+                    Text("history [\(historyIndex + 1)/\(history.count)]")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.orange.opacity(0.8))
+                }
             }
+            .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial)
+        .background(Color.black.opacity(0.75))
         .overlay(alignment: .top) {
             Divider()
         }
@@ -200,9 +225,9 @@ struct IMEInputBar: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.7))
                     .frame(width: 22, height: 22)
-                    .background(Color.primary.opacity(0.08))
+                    .background(Color.white.opacity(0.15))
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
@@ -216,6 +241,7 @@ struct IMEInputBar: View {
             hintLabel("Enter: send")
             hintLabel("\u{21e7}Enter: new line")
             hintLabel("\u{2191}\u{2193}: history (\(history.count))")
+            hintLabel("^R: search")
             hintLabel("Esc: close")
         }
         .padding(.bottom, 6)
@@ -224,7 +250,7 @@ struct IMEInputBar: View {
     private func hintLabel(_ text: String) -> some View {
         Text(text)
             .font(.caption2)
-            .foregroundColor(.secondary.opacity(0.6))
+            .foregroundColor(.white.opacity(0.5))
     }
 }
 
@@ -234,8 +260,11 @@ struct IMETextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    var onCtrlC: (() -> Void)? = nil
     let onHistoryUp: () -> Void
     let onHistoryDown: () -> Void
+    var onHistorySearch: (() -> Void)? = nil
+    var onComposingChanged: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -252,9 +281,10 @@ struct IMETextEditor: NSViewRepresentable {
         let textView = IMETextView()
         textView.delegate = context.coordinator
         textView.font = NSFont.monospacedSystemFont(ofSize: IMEInputBarSettings.fontSize, weight: .regular)
-        textView.textColor = NSColor.labelColor
-        textView.backgroundColor = NSColor.clear
-        textView.drawsBackground = false
+        textView.textColor = NSColor.white
+        textView.backgroundColor = NSColor.black.withAlphaComponent(0.3)
+        textView.drawsBackground = true
+        textView.insertionPointColor = NSColor.white
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
@@ -266,8 +296,11 @@ struct IMETextEditor: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.submitHandler = onSubmit
         textView.cancelHandler = onCancel
+        textView.ctrlCHandler = onCtrlC
         textView.historyUpHandler = onHistoryUp
         textView.historyDownHandler = onHistoryDown
+        textView.historySearchHandler = onHistorySearch
+        textView.composingHandler = onComposingChanged
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
@@ -288,8 +321,11 @@ struct IMETextEditor: NSViewRepresentable {
         }
         textView.submitHandler = onSubmit
         textView.cancelHandler = onCancel
+        textView.ctrlCHandler = onCtrlC
         textView.historyUpHandler = onHistoryUp
         textView.historyDownHandler = onHistoryDown
+        textView.historySearchHandler = onHistorySearch
+        textView.composingHandler = onComposingChanged
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
@@ -312,18 +348,59 @@ struct IMETextEditor: NSViewRepresentable {
 final class IMETextView: NSTextView {
     var submitHandler: (() -> Void)?
     var cancelHandler: (() -> Void)?
+    var ctrlCHandler: (() -> Void)?
     var historyUpHandler: (() -> Void)?
     var historyDownHandler: (() -> Void)?
+    var historySearchHandler: (() -> Void)?
+    var composingHandler: ((Bool) -> Void)?
 
     override func keyDown(with event: NSEvent) {
-        // Enter without Shift → submit
+        // Enter without Shift → submit (guard: let IME commit composed text first)
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
+            if hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
             submitHandler?()
             return
         }
-        // Shift+Enter → insert newline (default behavior)
+        // Shift+Enter → insert newline (guard: let IME handle if composing)
         if event.keyCode == 36 && event.modifierFlags.contains(.shift) {
+            if hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
             insertNewline(nil)
+            return
+        }
+        // Ctrl+C → send interrupt (ETX) to terminal
+        if event.keyCode == 8 && event.modifierFlags.contains(.control) {
+            ctrlCHandler?()
+            return
+        }
+        // Ctrl+A → move to beginning of line (readline)
+        if event.keyCode == 0 && event.modifierFlags.contains(.control) {
+            moveToBeginningOfLine(nil)
+            return
+        }
+        // Ctrl+E → move to end of line (readline)
+        if event.keyCode == 14 && event.modifierFlags.contains(.control) {
+            moveToEndOfLine(nil)
+            return
+        }
+        // Ctrl+K → delete to end of paragraph (readline)
+        if event.keyCode == 40 && event.modifierFlags.contains(.control) {
+            deleteToEndOfParagraph(nil)
+            return
+        }
+        // Ctrl+W → delete word backward (readline)
+        if event.keyCode == 13 && event.modifierFlags.contains(.control) {
+            deleteWordBackward(nil)
+            return
+        }
+        // Ctrl+R → reverse history search
+        if event.keyCode == 15 && event.modifierFlags.contains(.control) {
+            historySearchHandler?()
             return
         }
         // Escape → cancel
@@ -356,5 +433,17 @@ final class IMETextView: NSTextView {
         let str = string as NSString
         let lastNewline = str.range(of: "\n", options: .backwards).location
         return lastNewline == NSNotFound || loc > lastNewline
+    }
+
+    // MARK: - IME composition tracking
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        composingHandler?(hasMarkedText())
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        super.insertText(string, replacementRange: replacementRange)
+        composingHandler?(false)
     }
 }

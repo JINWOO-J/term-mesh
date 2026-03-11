@@ -2795,28 +2795,33 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         let lines = text.components(separatedBy: "\n")
         for (i, line) in lines.enumerated() {
             if !line.isEmpty {
-                // Send text as key event
-                line.withCString { ptr in
-                    var keyEvent = ghostty_input_key_s()
-                    keyEvent.action = GHOSTTY_ACTION_PRESS
-                    keyEvent.keycode = 0
-                    keyEvent.mods = GHOSTTY_MODS_NONE
-                    keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-                    keyEvent.unshifted_codepoint = 0
-                    keyEvent.text = ptr
-                    keyEvent.composing = false
-                    _ = ghostty_surface_key(surface, keyEvent)
+                // Chunk long lines at UTF-8 safe boundaries (max 4096 bytes per event)
+                // to prevent potential buffer issues in the Ghostty C/Zig layer.
+                let segments = Self.chunkUTF8Safe(line, maxBytes: 4096)
+                for segment in segments {
+                    // Send text as key event
+                    segment.withCString { ptr in
+                        var keyEvent = ghostty_input_key_s()
+                        keyEvent.action = GHOSTTY_ACTION_PRESS
+                        keyEvent.keycode = 0
+                        keyEvent.mods = GHOSTTY_MODS_NONE
+                        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+                        keyEvent.unshifted_codepoint = 0
+                        keyEvent.text = ptr
+                        keyEvent.composing = false
+                        _ = ghostty_surface_key(surface, keyEvent)
+                    }
+                    // Send matching RELEASE — TUI apps may track key state
+                    var releaseEvent = ghostty_input_key_s()
+                    releaseEvent.action = GHOSTTY_ACTION_RELEASE
+                    releaseEvent.keycode = 0
+                    releaseEvent.mods = GHOSTTY_MODS_NONE
+                    releaseEvent.consumed_mods = GHOSTTY_MODS_NONE
+                    releaseEvent.unshifted_codepoint = 0
+                    releaseEvent.text = nil
+                    releaseEvent.composing = false
+                    _ = ghostty_surface_key(surface, releaseEvent)
                 }
-                // Send matching RELEASE — TUI apps may track key state
-                var releaseEvent = ghostty_input_key_s()
-                releaseEvent.action = GHOSTTY_ACTION_RELEASE
-                releaseEvent.keycode = 0
-                releaseEvent.mods = GHOSTTY_MODS_NONE
-                releaseEvent.consumed_mods = GHOSTTY_MODS_NONE
-                releaseEvent.unshifted_codepoint = 0
-                releaseEvent.text = nil
-                releaseEvent.composing = false
-                _ = ghostty_surface_key(surface, releaseEvent)
             }
             // Send newline between lines (for multiline input via Shift+Enter)
             if i < lines.count - 1 {
@@ -2827,6 +2832,28 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         if withReturn {
             sendReturnKey(to: surface)
         }
+    }
+
+    /// Split a string into chunks where each chunk fits within `maxBytes` of UTF-8,
+    /// never splitting in the middle of a character.
+    private static func chunkUTF8Safe(_ text: String, maxBytes: Int) -> [String] {
+        guard text.utf8.count > maxBytes else { return [text] }
+        var chunks: [String] = []
+        var current = ""
+        var currentBytes = 0
+        for char in text {
+            let charBytes = char.utf8.count
+            if currentBytes + charBytes > maxBytes {
+                chunks.append(current)
+                current = String(char)
+                currentBytes = charBytes
+            } else {
+                current.append(char)
+                currentBytes += charBytes
+            }
+        }
+        if !current.isEmpty { chunks.append(current) }
+        return chunks
     }
 
     // Prevents NSBeep for unimplemented actions from interpretKeyEvents
@@ -3648,6 +3675,57 @@ extension Notification.Name {
     static let termMeshBroadcastIMEText = Notification.Name("termMeshBroadcastIMEText")
 }
 
+// MARK: - IME Bar Drag Handle
+
+/// Thin drag handle between terminal and IME bar for height resizing.
+/// Positioned at the top edge of the IME bar; dragging upward increases bar height.
+private final class IMEBarDragHandle: NSView {
+    var onHeightChange: ((CGFloat) -> Void)?
+    private var dragStartY: CGFloat = 0
+    private var dragStartHeight: CGFloat = 0
+    var currentHeight: CGFloat = IMEInputBarSettings.height
+
+    static let handleHeight: CGFloat = 8
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartY = event.locationInWindow.y
+        dragStartHeight = currentHeight
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let delta = event.locationInWindow.y - dragStartY
+        let maxHeight = max(120, (superview?.bounds.height ?? 400) * 0.6)
+        let newHeight = min(max(60, dragStartHeight + delta), maxHeight)
+        currentHeight = newHeight
+        onHeightChange?(newHeight)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // Persist the custom height to UserDefaults
+        UserDefaults.standard.set(Double(currentHeight), forKey: "imeBarHeight")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Draw grip indicator (small centered pill)
+        NSColor.white.withAlphaComponent(0.3).setFill()
+        let gripWidth: CGFloat = 36
+        let gripHeight: CGFloat = 3
+        let gripRect = NSRect(
+            x: bounds.midX - gripWidth / 2,
+            y: bounds.midY - gripHeight / 2,
+            width: gripWidth,
+            height: gripHeight
+        )
+        NSBezierPath(roundedRect: gripRect, xRadius: 1.5, yRadius: 1.5).fill()
+    }
+}
+
 // MARK: - Scroll View Wrapper (Ghostty-style scrollbar)
 
 private final class GhosttyScrollView: NSScrollView {
@@ -3694,6 +3772,8 @@ final class GhosttySurfaceScrollView: NSView {
     private let flashLayer: CAShapeLayer
     private var searchOverlayHostingView: NSHostingView<SurfaceSearchOverlay>?
     private var imeInputBarHostingView: NSHostingView<IMEInputBar>?
+    private var imeBarDragHandle: IMEBarDragHandle?
+    private var imeBarCurrentHeight: CGFloat = IMEInputBarSettings.height
     private var observers: [NSObjectProtocol] = []
 	    private var windowObservers: [NSObjectProtocol] = []
 	    private var isLiveScrolling = false
@@ -4002,8 +4082,13 @@ final class GhosttySurfaceScrollView: NSView {
         // If IME bar is visible, dock it at the bottom and shrink the terminal area.
         let imeBarHeight: CGFloat
         if let imeView = imeInputBarHostingView {
-            imeBarHeight = IMEInputBarSettings.height
+            imeBarHeight = imeBarCurrentHeight
             imeView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: imeBarHeight)
+            // Position drag handle straddling the boundary between terminal and IME bar
+            if let handle = imeBarDragHandle {
+                let handleH = IMEBarDragHandle.handleHeight
+                handle.frame = NSRect(x: 0, y: imeBarHeight - handleH / 2, width: bounds.width, height: handleH)
+            }
         } else {
             imeBarHeight = 0
         }
@@ -4200,17 +4285,38 @@ final class GhosttySurfaceScrollView: NSView {
             onClose: { [weak self] in
                 self?.dismissIMEInputBar()
             },
+            onCtrlC: { [weak self] in
+                // Send Ctrl+C (ETX) interrupt to the terminal
+                self?.surfaceView.sendIMEText("\u{03}")
+            }
         )
 
         let overlay = NSHostingView(rootView: rootView)
         addSubview(overlay)
         imeInputBarHostingView = overlay
 
+        // Reset height to persisted value
+        imeBarCurrentHeight = IMEInputBarSettings.height
+
+        // Add drag handle for resizing
+        let handle = IMEBarDragHandle()
+        handle.currentHeight = imeBarCurrentHeight
+        handle.onHeightChange = { [weak self] newHeight in
+            guard let self else { return }
+            self.imeBarCurrentHeight = newHeight
+            handle.currentHeight = newHeight
+            self.needsLayout = true
+        }
+        addSubview(handle, positioned: .above, relativeTo: overlay)
+        imeBarDragHandle = handle
+
         // Trigger layout to position the bar at the bottom and shrink the terminal
         needsLayout = true
     }
 
     private func dismissIMEInputBar() {
+        imeBarDragHandle?.removeFromSuperview()
+        imeBarDragHandle = nil
         imeInputBarHostingView?.removeFromSuperview()
         imeInputBarHostingView = nil
         // Re-layout to restore terminal to full size

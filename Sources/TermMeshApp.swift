@@ -35,6 +35,7 @@ struct TermMeshApp: App {
     @AppStorage(KeyboardShortcutSettings.Action.closeWorkspace.defaultsKey) private var closeWorkspaceShortcutData = Data()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var showTeamCreation = false
+    @State private var ghosttyTheme = GhosttyTheme.current
 
     init() {
         Self.configureGhosttyEnvironment()
@@ -173,6 +174,10 @@ struct TermMeshApp: App {
                 .environmentObject(notificationStore)
                 .environmentObject(sidebarState)
                 .environmentObject(sidebarSelectionState)
+                .environment(\.ghosttyTheme, ghosttyTheme)
+                .onReceive(NotificationCenter.default.publisher(for: .ghosttyDefaultBackgroundDidChange)) { _ in
+                    ghosttyTheme = .current
+                }
                 .onAppear {
 #if DEBUG
                     if termMeshEnv("UI_TEST_MODE") == "1" {

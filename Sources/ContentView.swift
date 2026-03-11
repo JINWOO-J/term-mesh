@@ -15,6 +15,7 @@ struct ContentView: View {
     @EnvironmentObject var notificationStore: TerminalNotificationStore
     @EnvironmentObject var sidebarState: SidebarState
     @EnvironmentObject var sidebarSelectionState: SidebarSelectionState
+    @Environment(\.ghosttyTheme) private var theme
     @State private var sidebarWidth: CGFloat = 200
     @State private var hoveredResizerHandles: Set<SidebarResizerHandle> = []
     @State private var isResizerDragging = false
@@ -433,16 +434,13 @@ struct ContentView: View {
     private var windowIdentifier: String { "term-mesh.main.\(windowId.uuidString)" }
     private var fakeTitlebarBackground: Color {
         _ = titlebarThemeGeneration
-        let ghosttyBackground = GhosttyApp.shared.defaultBackgroundColor
-        let configuredOpacity = CGFloat(max(0, min(1, GhosttyApp.shared.defaultBackgroundOpacity)))
-        let minimumChromeOpacity: CGFloat = ghosttyBackground.isLightColor ? 0.90 : 0.84
-        let chromeOpacity = max(minimumChromeOpacity, configuredOpacity)
-        return Color(nsColor: ghosttyBackground.withAlphaComponent(chromeOpacity))
+        let minimumChromeOpacity: CGFloat = theme.isLightBackground ? 0.90 : 0.84
+        let chromeOpacity = max(minimumChromeOpacity, theme.backgroundOpacity)
+        return Color(nsColor: theme.backgroundColor.withAlphaComponent(chromeOpacity))
     }
     private var fakeTitlebarTextColor: Color {
         _ = titlebarThemeGeneration
-        let ghosttyBackground = GhosttyApp.shared.defaultBackgroundColor
-        return ghosttyBackground.isLightColor
+        return theme.isLightBackground
             ? Color.black.opacity(0.78)
             : Color.white.opacity(0.82)
     }
@@ -450,8 +448,7 @@ struct ContentView: View {
     /// Adaptive titlebar text color based on actual terminal background, not color scheme.
     private func titlebarColor(opacity: Double) -> Color {
         _ = titlebarThemeGeneration
-        let isLight = GhosttyApp.shared.defaultBackgroundColor.isLightColor
-        return isLight ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
+        return theme.isLightBackground ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
     }
     private var fullscreenControls: some View {
         TitlebarControlsView(

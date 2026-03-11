@@ -2470,7 +2470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Quit term-mesh?"
+        alert.messageText = "Quit Term-Mesh?"
         alert.informativeText = "This will close all windows and workspaces."
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
@@ -4089,7 +4089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 @MainActor
 final class MenuBarExtraController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
-    private let menu = NSMenu(title: "term-mesh")
+    private let menu = NSMenu(title: "Term-Mesh")
     private let notificationStore: TerminalNotificationStore
     private let onShowNotifications: () -> Void
     private let onOpenNotification: (TerminalNotification) -> Void
@@ -4110,7 +4110,7 @@ final class MenuBarExtraController: NSObject, NSMenuDelegate {
     private let clearAllItem = NSMenuItem(title: "Clear All", action: nil, keyEquivalent: "")
     private let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: "")
     private let preferencesItem = NSMenuItem(title: "Preferences…", action: nil, keyEquivalent: "")
-    private let quitItem = NSMenuItem(title: "Quit term-mesh", action: nil, keyEquivalent: "")
+    private let quitItem = NSMenuItem(title: "Quit Term-Mesh", action: nil, keyEquivalent: "")
 
     private var notificationItems: [NSMenuItem] = []
     private let maxInlineNotificationItems = 6
@@ -4141,7 +4141,7 @@ final class MenuBarExtraController: NSObject, NSMenuDelegate {
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
             button.image = MenuBarIconRenderer.makeImage(unreadCount: 0)
-            button.toolTip = "term-mesh"
+            button.toolTip = "Term-Mesh"
         }
 
         notificationsCancellable = notificationStore.$notifications
@@ -4238,8 +4238,8 @@ final class MenuBarExtraController: NSObject, NSMenuDelegate {
         if let button = statusItem.button {
             button.image = MenuBarIconRenderer.makeImage(unreadCount: displayedUnreadCount)
             button.toolTip = displayedUnreadCount == 0
-                ? "term-mesh"
-                : "term-mesh: \(displayedUnreadCount) unread notification\(displayedUnreadCount == 1 ? "" : "s")"
+                ? "Term-Mesh"
+                : "Term-Mesh: \(displayedUnreadCount) unread notification\(displayedUnreadCount == 1 ? "" : "s")"
         }
     }
 

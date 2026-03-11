@@ -235,7 +235,7 @@ struct TermMeshApp: App {
             }
 
             CommandGroup(replacing: .appInfo) {
-                Button("About term-mesh") {
+                Button("About Term-Mesh") {
                     showAboutPanel()
                 }
                 Button("Welcome Screen") {
@@ -255,10 +255,10 @@ struct TermMeshApp: App {
                 }
                 InstallUpdateMenuItem(model: appDelegate.updateViewModel)
                 Divider()
-                Button("term-mesh Dashboard (Window)") {
+                Button("Term-Mesh Dashboard (Window)") {
                     DashboardController.shared.showDashboard()
                 }
-                Button("term-mesh Dashboard (Split)") {
+                Button("Term-Mesh Dashboard (Split)") {
                     openDashboardSplit()
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
@@ -1071,7 +1071,7 @@ private enum SettingsAboutWindowKind: String, CaseIterable, Identifiable {
         case .settings:
             return "Settings"
         case .about:
-            return "About term-mesh"
+            return "About Term-Mesh"
         }
     }
 
@@ -1184,7 +1184,7 @@ private struct SettingsAboutTitlebarDebugOptions: Equatable {
         case .about:
             return SettingsAboutTitlebarDebugOptions(
                 overridesEnabled: false,
-                windowTitle: "About term-mesh",
+                windowTitle: "About Term-Mesh",
                 titleVisibility: .hidden,
                 titlebarAppearsTransparent: true,
                 movableByWindowBackground: false,
@@ -1420,7 +1420,7 @@ private struct SettingsAboutTitlebarDebugView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Enable Debug Overrides", isOn: overridesEnabled)
 
-                Text("When disabled, term-mesh uses normal default titlebar behavior for this window.")
+                Text("When disabled, Term-Mesh uses normal default titlebar behavior for this window.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -2044,7 +2044,7 @@ private struct AboutPanelView: View {
 
             VStack(alignment: .center, spacing: 32) {
                 VStack(alignment: .center, spacing: 8) {
-                    Text("term-mesh")
+                    Text("Term-Mesh")
                         .bold()
                         .font(.title)
                         .foregroundColor(.black)
@@ -3348,7 +3348,7 @@ struct SettingsView: View {
                             "Claude Code Integration",
                             subtitle: claudeCodeHooksEnabled
                                 ? "Sidebar shows Claude session status and notifications."
-                                : "Claude Code runs without term-mesh integration."
+                                : "Claude Code runs without Term-Mesh integration."
                         ) {
                             Toggle("", isOn: $claudeCodeHooksEnabled)
                                 .labelsHidden()
@@ -3358,7 +3358,7 @@ struct SettingsView: View {
 
                         SettingsCardDivider()
 
-                        SettingsCardNote("When enabled, term-mesh wraps the claude command to inject session tracking and notification hooks. Disable if you prefer to manage Claude Code hooks yourself.")
+                        SettingsCardNote("When enabled, Term-Mesh wraps the claude command to inject session tracking and notification hooks. Disable if you prefer to manage Claude Code hooks yourself.")
                     }
 
                     SettingsCard {
@@ -3600,7 +3600,7 @@ struct SettingsView: View {
                         SettingsCardDivider()
 
                         SettingsCardRow(
-                            "Open Terminal Links in term-mesh Browser",
+                            "Open Terminal Links in Term-Mesh Browser",
                             subtitle: "When off, links clicked in terminal output open in your default browser."
                         ) {
                             Toggle("", isOn: $openTerminalLinksInTermMeshBrowser)
@@ -3652,7 +3652,7 @@ struct SettingsView: View {
                             Text("HTTP Hosts Allowed in Embedded Browser")
                                 .font(.system(size: 13, weight: .semibold))
 
-                            Text("Controls which HTTP (non-HTTPS) hosts can open in term-mesh without a warning prompt. Defaults include localhost, 127.0.0.1, ::1, 0.0.0.0, and *.localtest.me.")
+                            Text("Controls which HTTP (non-HTTPS) hosts can open in Term-Mesh without a warning prompt. Defaults include localhost, 127.0.0.1, ::1, 0.0.0.0, and *.localtest.me.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 

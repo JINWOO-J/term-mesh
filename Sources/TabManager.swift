@@ -610,6 +610,9 @@ class TabManager: ObservableObject {
     @Published var tabs: [Workspace] = []
     @Published private(set) var isWorkspaceCycleHot: Bool = false
 
+    /// Titlebar progress bar state. Set to non-nil to show, nil to hide.
+    @Published var titlebarProgress: TitlebarProgress?
+
     /// Global monotonically increasing counter for TERMMESH_PORT ordinal assignment.
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
     private static var nextPortOrdinal: Int = 0
@@ -2012,11 +2015,15 @@ class TabManager: ObservableObject {
             return
         }
 
+        // Show indeterminate progress while spawning
+        titlebarProgress = .indeterminate("Spawning \(count) agent\(count > 1 ? "s" : "")…", color: .green)
+
         // Spawn agent sessions via daemon (background to avoid blocking UI)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let sessions = TermMeshDaemon.shared.spawnAgents(repoPath: repoPath, count: count, command: command)
             guard !sessions.isEmpty else {
                 DispatchQueue.main.async {
+                    self?.titlebarProgress = nil
                     let alert = NSAlert()
                     alert.messageText = "Spawn Agents"
                     alert.informativeText = "Failed to spawn agent sessions. Is term-meshd running?"
@@ -2030,19 +2037,39 @@ class TabManager: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       let tab = self.tabs.first(where: { $0.id == selectedTabId }),
-                      let focusedPanelId = tab.focusedPanelId else { return }
+                      let focusedPanelId = tab.focusedPanelId else {
+                    self?.titlebarProgress = nil
+                    return
+                }
 
                 let count = sessions.count
-                // Grid layout: agent columns right of original, then split down
-                // 1→[O|A], 2→[O|A/B], 3→[O|A/C|B], 4→[O|A/C|B/D], 6→[O|A/D|B/E|C/F]
-                let numCols = max(1, Int(ceil(Double(count) / 2.0)))
+
+                // Grid layout: balanced grid on the right side of the leader pane.
+                // Prefer fewer columns (max 3) so agent panes stay wide enough.
+                // Layout: [Leader | Col1 | Col2 | ...]  each column split into rows.
+                let numCols: Int
+                if count <= 3 {
+                    numCols = 1
+                } else if count <= 8 {
+                    numCols = 2
+                } else {
+                    numCols = 3
+                }
+                let numRows = Int(ceil(Double(count) / Double(numCols)))
 
                 // Helper to bind a session to a newly created panel
-                let bindSession = { (session: AgentSessionInfo, panelId: UUID) in
+                var created = 0
+                let bindSession = { [weak self] (session: AgentSessionInfo, panelId: UUID) in
                     if let panel = tab.panels[panelId] as? TerminalPanel {
                         panel.agentSessionId = session.id
                         panel.updateTitle("🔀 [\(session.worktreeBranch)] \(session.name)")
                     }
+                    created += 1
+                    self?.titlebarProgress = .determinate(
+                        Double(created) / Double(count),
+                        label: "Spawning agents (\(created)/\(count))…",
+                        color: .green
+                    )
                     DispatchQueue.global(qos: .utility).async {
                         let _ = TermMeshDaemon.shared.bindAgentPanel(
                             sessionId: session.id,
@@ -2051,41 +2078,89 @@ class TabManager: ObservableObject {
                     }
                 }
 
-                // Phase 1: Create columns (right splits)
-                var columnPanelIds: [UUID] = []
-                var lastPanelId = focusedPanelId
-                for i in 0..<numCols {
+                // Assign sessions to grid cells: grid[col][row]
+                var grid: [[Int]] = Array(repeating: [], count: numCols)
+                for i in 0..<count {
+                    grid[i % numCols].append(i)
+                }
+
+                // Phase 1: Create the first pane in each column (right splits from leader)
+                // Split from the FIRST agent pane (not cascading) so columns stay equal width.
+                var columnTopPanelIds: [UUID] = []
+                var firstAgentPanelId: UUID?
+                for col in 0..<numCols {
+                    let sessionIdx = grid[col][0]
+                    let splitFrom = firstAgentPanelId ?? focusedPanelId
                     if let panelId = self.newSplit(
                         tabId: selectedTabId,
-                        surfaceId: lastPanelId,
+                        surfaceId: splitFrom,
                         direction: .right,
                         focus: false,
-                        workingDirectory: sessions[i].worktreePath,
-                        command: sessions[i].command
+                        workingDirectory: sessions[sessionIdx].worktreePath,
+                        command: sessions[sessionIdx].command
                     ) {
-                        bindSession(sessions[i], panelId)
-                        columnPanelIds.append(panelId)
-                        lastPanelId = panelId
+                        bindSession(sessions[sessionIdx], panelId)
+                        columnTopPanelIds.append(panelId)
+                        if firstAgentPanelId == nil { firstAgentPanelId = panelId }
                     }
                 }
 
-                // Phase 2: Split columns down for remaining sessions
-                for i in numCols..<count {
-                    let colIndex = i - numCols
-                    guard colIndex < columnPanelIds.count else { break }
-                    if let panelId = self.newSplit(
-                        tabId: selectedTabId,
-                        surfaceId: columnPanelIds[colIndex],
-                        direction: .down,
-                        focus: false,
-                        workingDirectory: sessions[i].worktreePath,
-                        command: sessions[i].command
-                    ) {
-                        bindSession(sessions[i], panelId)
+                // Phase 2: Split each column down to create rows
+                for col in 0..<numCols {
+                    guard col < columnTopPanelIds.count else { break }
+                    var lastRowPanelId = columnTopPanelIds[col]
+                    for rowIdx in 1..<grid[col].count {
+                        let sessionIdx = grid[col][rowIdx]
+                        if let panelId = self.newSplit(
+                            tabId: selectedTabId,
+                            surfaceId: lastRowPanelId,
+                            direction: .down,
+                            focus: false,
+                            workingDirectory: sessions[sessionIdx].worktreePath,
+                            command: sessions[sessionIdx].command
+                        ) {
+                            bindSession(sessions[sessionIdx], panelId)
+                            lastRowPanelId = panelId
+                        }
+                    }
+                }
+
+                // Phase 3: Equalize splits via tree snapshot
+                self.equalizeAgentGrid(workspace: tab)
+
+                // Clear progress after a brief delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self?.titlebarProgress = nil
                     }
                 }
             }
         }
+    }
+
+    /// Equalize split dividers so all leaf panes get uniform size.
+    /// Uses leaf-count weighting: ratio = leftLeaves / (leftLeaves + rightLeaves).
+    /// This correctly handles cascading splits (e.g., 3 rows → 1/3 + 1/3 + 1/3).
+    private func equalizeAgentGrid(workspace: Workspace) {
+        func leafCount(_ node: ExternalTreeNode) -> Int {
+            switch node {
+            case .pane: return 1
+            case .split(let s): return leafCount(s.first) + leafCount(s.second)
+            }
+        }
+        func equalizeSplits(_ node: ExternalTreeNode) {
+            guard case .split(let splitNode) = node else { return }
+            let left = leafCount(splitNode.first)
+            let right = leafCount(splitNode.second)
+            let ratio = Double(left) / Double(left + right)
+            if let splitId = UUID(uuidString: splitNode.id) {
+                workspace.bonsplitController.setDividerPosition(CGFloat(ratio), forSplit: splitId)
+            }
+            equalizeSplits(splitNode.first)
+            equalizeSplits(splitNode.second)
+        }
+        let tree = workspace.bonsplitController.treeSnapshot()
+        equalizeSplits(tree)
     }
 
     /// Reconnect a detached agent session to a new split panel.

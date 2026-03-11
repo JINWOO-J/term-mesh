@@ -1101,6 +1101,10 @@ struct ContentView: View {
     @State private var titlebarGitDirty: Bool = false
     @State private var titlebarGitDirtyCount: Int = 0
     @State private var titlebarDirBasename: String = ""
+    @State private var titlebarPorts: [Int] = []
+    @State private var titlebarSessionStart: Date? = nil
+    @State private var titlebarTag: String? = nil
+    @State private var titlebarDashboardPort: Int? = nil
     @State private var isFullScreen: Bool = false
     @State private var observedWindow: NSWindow?
     @StateObject private var fullscreenControlsViewModel = TitlebarControlsViewModel()
@@ -1755,6 +1759,8 @@ struct ContentView: View {
                 titlebarBranchAndDirectory
 
                 Spacer()
+
+                titlebarRightInfo
             }
             .frame(height: 28)
             .padding(.top, 2)
@@ -1769,6 +1775,12 @@ struct ContentView: View {
             Rectangle()
                 .fill(Color(nsColor: .separatorColor))
                 .frame(height: 1)
+        }
+        .overlay(alignment: .top) {
+            if let progress = tabManager.titlebarProgress {
+                TitlebarProgressBar(progress: progress)
+                    .transition(.opacity)
+            }
         }
     }
 
@@ -1801,12 +1813,124 @@ struct ContentView: View {
         .lineLimit(1)
     }
 
+    private var titlebarInfoSeparator: some View {
+        Text("|")
+            .font(.system(size: 10))
+            .foregroundColor(.white.opacity(0.15))
+    }
+
+    private var titlebarRightInfo: some View {
+        HStack(spacing: 8) {
+            Button(action: {
+                if let workspace = tabManager.selectedWorkspace {
+                    ContentView.showWorkspaceTagPrompt(for: workspace)
+                }
+            }) {
+                if let tag = titlebarTag, !tag.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.system(size: 9))
+                        Text(tag)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(.yellow.opacity(0.8))
+                } else {
+                    Image(systemName: "bookmark")
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+            }
+            .buttonStyle(.plain)
+            .help(titlebarTag != nil ? "Edit Tag" : "Set Tag")
+
+            if !titlebarPorts.isEmpty {
+                titlebarInfoSeparator
+                HStack(spacing: 3) {
+                    Image(systemName: "network")
+                        .font(.system(size: 9))
+                    Text(verbatim: titlebarPorts.prefix(3).map { ":\($0)" }.joined(separator: " "))
+                        .font(.system(size: 11, design: .monospaced))
+                }
+                .foregroundColor(.cyan.opacity(0.8))
+            }
+
+            if let port = titlebarDashboardPort {
+                titlebarInfoSeparator
+                let host = TermMeshDaemon.shared.isLocalhostOnly ? "localhost" : "0.0.0.0"
+                Button(action: {
+                    if let url = URL(string: "http://localhost:\(port)") {
+                        _ = tabManager.createBrowserSplit(direction: .right, url: url)
+                    }
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 9))
+                        Text(verbatim: "\(host):\(port)")
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    .foregroundColor(.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .help("Open Dashboard")
+            }
+
+            if let start = titlebarSessionStart {
+                titlebarInfoSeparator
+                Text(Self.formatDuration(since: start))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+        }
+        .lineLimit(1)
+    }
+
+    @MainActor
+    static func showWorkspaceTagPrompt(for target: Workspace) {
+        let alert = NSAlert()
+        alert.messageText = "Set Workspace Tag"
+        alert.informativeText = "Enter a short tag or bookmark label for this workspace."
+        let input = NSTextField(string: target.tag ?? "")
+        input.placeholderString = "e.g. debug, prod, test"
+        input.frame = NSRect(x: 0, y: 0, width: 240, height: 22)
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Set Tag")
+        alert.addButton(withTitle: "Cancel")
+        if target.tag != nil {
+            alert.addButton(withTitle: "Clear")
+        }
+        let alertWindow = alert.window
+        alertWindow.initialFirstResponder = input
+        DispatchQueue.main.async {
+            alertWindow.makeFirstResponder(input)
+            input.selectText(nil)
+        }
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            target.tag = value.isEmpty ? nil : value
+        } else if response == .alertThirdButtonReturn {
+            target.tag = nil
+        }
+    }
+
+    private static func formatDuration(since start: Date) -> String {
+        let elapsed = Int(Date().timeIntervalSince(start))
+        if elapsed < 60 { return "\(elapsed)s" }
+        if elapsed < 3600 { return "\(elapsed / 60)m" }
+        let h = elapsed / 3600
+        let m = (elapsed % 3600) / 60
+        return "\(h)h \(m)m"
+    }
+
     private func updateTitlebarText() {
         guard let selectedId = tabManager.selectedTabId,
               let tab = tabManager.tabs.first(where: { $0.id == selectedId }) else {
             if !titlebarText.isEmpty { titlebarText = "" }
             if !titlebarGitBranch.isEmpty { titlebarGitBranch = "" }
             if !titlebarDirBasename.isEmpty { titlebarDirBasename = "" }
+            if !titlebarPorts.isEmpty { titlebarPorts = [] }
+            if titlebarSessionStart != nil { titlebarSessionStart = nil }
+            if titlebarTag != nil { titlebarTag = nil }
             return
         }
         let title = tab.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1839,6 +1963,20 @@ struct ContentView: View {
         // Directory basename
         let dirBase = (tab.currentDirectory as NSString).lastPathComponent
         if titlebarDirBasename != dirBase { titlebarDirBasename = dirBase }
+
+        // Listening ports
+        let ports = tab.listeningPorts
+        if titlebarPorts != ports { titlebarPorts = ports }
+
+        // Session time
+        if titlebarSessionStart != tab.createdAt { titlebarSessionStart = tab.createdAt }
+
+        // Tag
+        if titlebarTag != tab.tag { titlebarTag = tab.tag }
+
+        // Dashboard port
+        let dashPort: Int? = TermMeshDaemon.shared.isDashboardEnabled ? TermMeshDaemon.shared.dashboardPort : nil
+        if titlebarDashboardPort != dashPort { titlebarDashboardPort = dashPort }
     }
 
     private static func queryGitBranch(in directory: String) -> (branch: String, dirty: Bool, dirtyCount: Int) {
@@ -3498,6 +3636,25 @@ struct ContentView: View {
         )
         contributions.append(
             CommandPaletteCommandContribution(
+                commandId: "palette.setWorkspaceTag",
+                title: constant("Set Workspace Tag…"),
+                subtitle: workspaceSubtitle,
+                keywords: ["tag", "bookmark", "label", "workspace"],
+                dismissOnRun: false,
+                when: { $0.bool(CommandPaletteContextKeys.hasWorkspace) }
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.clearWorkspaceTag",
+                title: constant("Clear Workspace Tag"),
+                subtitle: workspaceSubtitle,
+                keywords: ["tag", "bookmark", "clear", "remove"],
+                when: { $0.bool(CommandPaletteContextKeys.hasWorkspace) }
+            )
+        )
+        contributions.append(
+            CommandPaletteCommandContribution(
                 commandId: "palette.clearWorkspaceName",
                 title: constant("Clear Workspace Name"),
                 subtitle: workspaceSubtitle,
@@ -3946,6 +4103,20 @@ struct ContentView: View {
                 return
             }
             tabManager.clearCustomTitle(tabId: workspace.id)
+        }
+        registry.register(commandId: "palette.setWorkspaceTag") {
+            guard let workspace = tabManager.selectedWorkspace else {
+                NSSound.beep()
+                return
+            }
+            Self.showWorkspaceTagPrompt(for: workspace)
+        }
+        registry.register(commandId: "palette.clearWorkspaceTag") {
+            guard let workspace = tabManager.selectedWorkspace else {
+                NSSound.beep()
+                return
+            }
+            workspace.tag = nil
         }
         registry.register(commandId: "palette.toggleWorkspacePin") {
             guard let workspace = tabManager.selectedWorkspace else {
@@ -6471,6 +6642,15 @@ private struct TabItemView: View {
                         }
                     }
                 }
+            }
+
+            if tab.tag != nil {
+                Button("Clear Tag") {
+                    tab.tag = nil
+                }
+            }
+            Button("Set Tag…") {
+                ContentView.showWorkspaceTagPrompt(for: tab)
             }
 
             Divider()

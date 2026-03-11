@@ -459,6 +459,9 @@ class TerminalController {
         case "report_pwd":
             return reportPwd(args)
 
+        case "workspace_tag":
+            return workspaceTag(args)
+
         case "sidebar_state":
             return sidebarState(args)
 

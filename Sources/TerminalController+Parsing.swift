@@ -965,4 +965,26 @@ extension TerminalController {
         }
         return result
     }
+
+    func workspaceTag(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        let tabOption = parsed.options["tab"]
+
+        guard let tab = (tabOption != nil ? resolveTabForReport("--tab=\(tabOption!)") : resolveTabForReport("")) else {
+            return "ERROR: No active tab"
+        }
+
+        if parsed.positional.first == "--clear" || parsed.positional.first == "clear" {
+            tab.tag = nil
+            return "OK cleared"
+        }
+
+        let tagText = parsed.positional.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if tagText.isEmpty {
+            return tab.tag ?? "(none)"
+        }
+
+        tab.tag = tagText
+        return "OK \(tagText)"
+    }
 }

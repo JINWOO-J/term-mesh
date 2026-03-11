@@ -64,7 +64,11 @@ struct IMEInputBar: View {
     // MARK: - Actions
 
     private func doSubmit() {
-        guard !text.isEmpty else { return }
+        if text.isEmpty {
+            // Pass through Enter to the terminal so the user isn't "trapped"
+            onSubmit("")
+            return
+        }
         let submitted = text
         addToHistory(submitted)
         onSubmit(submitted)

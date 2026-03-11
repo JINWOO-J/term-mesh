@@ -263,7 +263,9 @@ final class TermMeshDaemon: ObservableObject {
         var params: [String: Any] = ["repo_path": repoPath, "count": count]
         if let name { params["name"] = name }
         if let command { params["command"] = command }
-        guard let response = rpcCall(method: "agent.spawn", params: params) as? [[String: Any]] else { return [] }
+        // Worktree creation takes ~2s per agent; allow generous timeout
+        let timeoutSec = max(10, count * 5)
+        guard let response = rpcCall(method: "agent.spawn", params: params, timeout: timeoutSec) as? [[String: Any]] else { return [] }
         return response.compactMap { parseAgentSessionInfo($0) }
     }
 
@@ -501,7 +503,7 @@ final class TermMeshDaemon: ObservableObject {
 
     // MARK: - Private
 
-    private func rpcCall(method: String, params: [String: Any]) -> Any? {
+    private func rpcCall(method: String, params: [String: Any], timeout timeoutSec: Int = 5) -> Any? {
         let id = nextId
         nextId += 1
 
@@ -535,7 +537,7 @@ final class TermMeshDaemon: ObservableObject {
         guard connectResult == 0 else { return nil }
 
         // Set timeout
-        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        var timeout = timeval(tv_sec: timeoutSec, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 

@@ -299,6 +299,12 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var customColor: String?  // hex string, e.g. "#C0392B"
     @Published var currentDirectory: String
 
+    /// Timestamp when this workspace was created (for session duration display)
+    let createdAt: Date = Date()
+
+    /// User-assigned tag/bookmark displayed in the titlebar
+    @Published var tag: String?
+
     /// Ordinal for TERMMESH_PORT range assignment (monotonically increasing per app session)
     var portOrdinal: Int = 0
 

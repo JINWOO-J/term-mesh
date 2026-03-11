@@ -54,6 +54,7 @@
 			A5001270 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = A5001271 /* PostHog */; };
 			A5001303 /* SurfaceSearchOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001301 /* SurfaceSearchOverlay.swift */; };
 			A5009001 /* IMEInputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5009000 /* IMEInputBar.swift */; };
+			A5009101 /* TitlebarProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5009100 /* TitlebarProgressBar.swift */; };
 			A5009003 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5009002 /* WelcomeView.swift */; };
 			A5009005 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5009004 /* StatusBarView.swift */; };
 			A50012F1 /* Backport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50012F0 /* Backport.swift */; };
@@ -200,6 +201,7 @@
 		A5001092 /* TerminalNotificationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalNotificationStore.swift; sourceTree = "<group>"; };
 		A5001301 /* SurfaceSearchOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Find/SurfaceSearchOverlay.swift; sourceTree = "<group>"; };
 		A5009000 /* IMEInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMEInputBar.swift; sourceTree = "<group>"; };
+		A5009100 /* TitlebarProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitlebarProgressBar.swift; sourceTree = "<group>"; };
 		A5009002 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		A5009004 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		A50012F0 /* Backport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backport.swift; sourceTree = "<group>"; };
@@ -383,6 +385,7 @@
 				A5001092 /* TerminalNotificationStore.swift */,
 				A5001301 /* SurfaceSearchOverlay.swift */,
 				A5009000 /* IMEInputBar.swift */,
+				A5009100 /* TitlebarProgressBar.swift */,
 				A5009002 /* WelcomeView.swift */,
 				A5009004 /* StatusBarView.swift */,
 				A5001410 /* Panel.swift */,
@@ -632,6 +635,7 @@
 				A5001095 /* TerminalNotificationStore.swift in Sources */,
 				A5001303 /* SurfaceSearchOverlay.swift in Sources */,
 				A5009001 /* IMEInputBar.swift in Sources */,
+				A5009101 /* TitlebarProgressBar.swift in Sources */,
 				A5009003 /* WelcomeView.swift in Sources */,
 				A5009005 /* StatusBarView.swift in Sources */,
 				A5001400 /* Panel.swift in Sources */,

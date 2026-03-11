@@ -1925,6 +1925,89 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
+    static func showWorktreeManager(worktrees: [WorktreeInfo], repoPath: String) {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 400),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Worktrees (\(worktrees.count))"
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.minSize = NSSize(width: 400, height: 250)
+
+        if worktrees.isEmpty {
+            let label = NSTextField(labelWithString: "No active worktrees.")
+            label.font = .systemFont(ofSize: 14)
+            label.alignment = .center
+            label.frame = NSRect(x: 0, y: 0, width: 520, height: 400)
+            label.autoresizingMask = [.width, .height]
+            panel.contentView = label
+            panel.center()
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+        contentView.autoresizingMask = [.width, .height]
+
+        // Table data source
+        let dataSource = WorktreeTableDataSource(worktrees: worktrees, repoPath: repoPath)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 16, y: 50, width: 488, height: 334))
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+
+        let tableView = NSTableView()
+        tableView.style = .fullWidth
+        tableView.rowHeight = 52
+        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.headerView = nil
+
+        let nameCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        nameCol.title = "Worktree"
+        nameCol.width = 360
+        nameCol.resizingMask = .userResizingMask
+        tableView.addTableColumn(nameCol)
+
+        let actionCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("action"))
+        actionCol.title = ""
+        actionCol.width = 80
+        actionCol.maxWidth = 80
+        actionCol.minWidth = 80
+        tableView.addTableColumn(actionCol)
+
+        tableView.dataSource = dataSource
+        tableView.delegate = dataSource
+        scrollView.documentView = tableView
+        contentView.addSubview(scrollView)
+
+        // Bottom bar: Cleanup All + Close
+        let closeButton = NSButton(title: "Close", target: nil, action: #selector(NSPanel.close))
+        closeButton.frame = NSRect(x: 520 - 16 - 80, y: 12, width: 80, height: 28)
+        closeButton.autoresizingMask = [.minXMargin]
+        closeButton.bezelStyle = .rounded
+        closeButton.target = panel
+        contentView.addSubview(closeButton)
+
+        let cleanupButton = NSButton(title: "Cleanup Stale", target: dataSource, action: #selector(WorktreeTableDataSource.cleanupStale(_:)))
+        cleanupButton.frame = NSRect(x: 16, y: 12, width: 120, height: 28)
+        cleanupButton.bezelStyle = .rounded
+        contentView.addSubview(cleanupButton)
+
+        // Store dataSource so it's retained
+        dataSource.tableView = tableView
+        dataSource.panel = panel
+        objc_setAssociatedObject(panel, "worktreeDataSource", dataSource, .OBJC_ASSOCIATION_RETAIN)
+
+        panel.contentView = contentView
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     private static func formatDuration(since start: Date) -> String {
         let elapsed = Int(Date().timeIntervalSince(start))
         if elapsed < 60 { return "\(elapsed)s" }
@@ -4181,30 +4264,7 @@ struct ContentView: View {
                 }
                 let worktrees = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
                 DispatchQueue.main.async {
-                    let alert = NSAlert()
-                    alert.messageText = "Worktrees (\(worktrees.count))"
-                    if worktrees.isEmpty {
-                        alert.informativeText = "No active worktrees."
-                    } else {
-                        alert.informativeText = worktrees.map { "• \($0.name)\n  branch: \($0.branch)\n  path: \($0.path)" }.joined(separator: "\n\n")
-                    }
-                    alert.addButton(withTitle: "OK")
-                    if !worktrees.isEmpty {
-                        alert.addButton(withTitle: "Cleanup Stale")
-                    }
-                    let response = alert.runModal()
-                    if response == .alertSecondButtonReturn {
-                        DispatchQueue.global(qos: .userInitiated).async {
-                            let removed = TermMeshDaemon.shared.cleanupStaleWorktrees(repoPath: repoPath)
-                            DispatchQueue.main.async {
-                                let resultAlert = NSAlert()
-                                resultAlert.messageText = "Worktree Cleanup"
-                                resultAlert.informativeText = removed > 0 ? "Removed \(removed) stale worktree(s)." : "No stale worktrees found."
-                                resultAlert.addButton(withTitle: "OK")
-                                resultAlert.runModal()
-                            }
-                        }
-                    }
+                    Self.showWorktreeManager(worktrees: worktrees, repoPath: repoPath)
                 }
             }
         }
@@ -8539,5 +8599,122 @@ extension NSColor {
             min(255, max(0, Int(green * 255))),
             min(255, max(0, Int(blue * 255)))
         )
+    }
+}
+
+// MARK: - Worktree Manager Table
+
+@MainActor
+final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    private var worktrees: [WorktreeInfo]
+    private let repoPath: String
+    weak var tableView: NSTableView?
+    weak var panel: NSPanel?
+
+    init(worktrees: [WorktreeInfo], repoPath: String) {
+        self.worktrees = worktrees
+        self.repoPath = repoPath
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        worktrees.count
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard row < worktrees.count else { return nil }
+        let wt = worktrees[row]
+
+        if tableColumn?.identifier.rawValue == "action" {
+            let button = NSButton(title: "Delete", target: self, action: #selector(deleteRow(_:)))
+            button.bezelStyle = .rounded
+            button.tag = row
+            button.controlSize = .small
+            button.contentTintColor = .systemRed
+            return button
+        }
+
+        // Name column: two-line cell (name + branch, path)
+        let cell = NSView()
+        let nameLabel = NSTextField(labelWithString: "\(wt.name)")
+        nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        nameLabel.lineBreakMode = .byTruncatingTail
+
+        let detailLabel = NSTextField(labelWithString: "branch: \(wt.branch)  ·  \(wt.path)")
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingMiddle
+
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(nameLabel)
+        cell.addSubview(detailLabel)
+
+        NSLayoutConstraint.activate([
+            nameLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            nameLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            nameLabel.topAnchor.constraint(equalTo: cell.topAnchor, constant: 6),
+            detailLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            detailLabel.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            detailLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
+        ])
+
+        return cell
+    }
+
+    @objc func deleteRow(_ sender: NSButton) {
+        let row = sender.tag
+        guard row < worktrees.count else { return }
+        let wt = worktrees[row]
+
+        let confirm = NSAlert()
+        confirm.messageText = "Delete Worktree?"
+        confirm.informativeText = "Remove \"\(wt.name)\" (branch: \(wt.branch))?\nPath: \(wt.path)"
+        confirm.alertStyle = .warning
+        confirm.addButton(withTitle: "Delete")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        let repoPath = self.repoPath
+        let name = wt.name
+        DispatchQueue.global(qos: .userInitiated).async {
+            let success = TermMeshDaemon.shared.removeWorktree(repoPath: repoPath, name: name)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if success {
+                    self.worktrees.remove(at: row)
+                    self.tableView?.reloadData()
+                    self.panel?.title = "Worktrees (\(self.worktrees.count))"
+                } else {
+                    let errAlert = NSAlert()
+                    errAlert.messageText = "Failed to remove worktree"
+                    errAlert.informativeText = "Could not remove \"\(name)\". It may be in use."
+                    errAlert.alertStyle = .warning
+                    errAlert.addButton(withTitle: "OK")
+                    errAlert.runModal()
+                }
+            }
+        }
+    }
+
+    @objc func cleanupStale(_ sender: Any?) {
+        let repoPath = self.repoPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let removed = TermMeshDaemon.shared.cleanupStaleWorktrees(repoPath: repoPath)
+            let remaining = TermMeshDaemon.shared.listWorktrees(repoPath: repoPath)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.worktrees = remaining
+                self.tableView?.reloadData()
+                self.panel?.title = "Worktrees (\(remaining.count))"
+
+                let resultAlert = NSAlert()
+                resultAlert.messageText = "Worktree Cleanup"
+                resultAlert.informativeText = removed > 0
+                    ? "Removed \(removed) stale worktree(s)."
+                    : "No stale worktrees found."
+                resultAlert.addButton(withTitle: "OK")
+                resultAlert.runModal()
+            }
+        }
     }
 }

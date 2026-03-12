@@ -4,7 +4,6 @@ import Carbon.HIToolbox
 import Bonsplit
 import WebKit
 
-#if DEBUG
 extension TerminalController {
     func sendKeyEvent(
         surface: ghostty_surface_t,
@@ -303,4 +302,3 @@ extension TerminalController {
         return success ? "OK" : "ERROR: Unknown key '\(keyName)'"
     }
 }
-#endif

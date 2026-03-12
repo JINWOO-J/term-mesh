@@ -484,6 +484,8 @@ final class TeamOrchestrator {
             gitRepoRoot: gitRepoRoot
         )
         teams[name] = team
+        // Register in thread-safe data store for off-main access (approach C: dual queue)
+        TeamDataStore.shared.registerTeam(name, agentNames: members.map(\.name))
         syncTeamStateToDaemon()
         Logger.team.info("created team '\(name, privacy: .public)' with \(members.count, privacy: .public) agent(s) + leader console")
 
@@ -1065,6 +1067,7 @@ final class TeamOrchestrator {
             cleanupWorktrees(team: team)
             teams.removeValue(forKey: name)
             heartbeats.removeValue(forKey: name)
+            TeamDataStore.shared.unregisterTeam(name)
             syncTeamStateToDaemon()
             return true
         }
@@ -1097,6 +1100,9 @@ final class TeamOrchestrator {
         clearMessages(teamName: name)
         clearTasks(teamName: name)
         heartbeats.removeValue(forKey: name)
+
+        // Unregister from thread-safe data store (approach C: dual queue)
+        TeamDataStore.shared.unregisterTeam(name)
 
         // Clean up dynamic kiro agent profiles
         Self.cleanupKiroProfiles(teamName: name)

@@ -20,6 +20,11 @@ class TerminalController {
     var tabManager: TabManager?
     var accessMode: SocketControlMode = .termMeshOnly
     let myPid = getpid()
+
+    /// Dedicated queue for team data commands that don't need MainActor.
+    /// Approach C (dual queue): data-only team operations bypass v2MainSync entirely.
+    private let teamDataQueue = DispatchQueue(label: "term-mesh.team-data", qos: .userInitiated)
+
     private nonisolated(unsafe) static var socketCommandPolicyDepth: Int = 0
     private nonisolated(unsafe) static var socketCommandFocusAllowanceStack: [Bool] = []
     private nonisolated static let socketCommandPolicyLock = NSLock()
@@ -672,6 +677,13 @@ class TerminalController {
 
         guard !method.isEmpty else {
             return v2Error(id: id, code: "invalid_request", message: "Missing method")
+        }
+
+        // ── Approach C: Dual Queue ──────────────────────────────────────
+        // Route data-only team commands to teamDataQueue, bypassing v2MainSync.
+        // This prevents main-thread contention that causes IME hangs.
+        if let dataResponse = dispatchTeamDataCommand(method: method, params: params, id: id) {
+            return dataResponse
         }
 
         v2MainSync { self.v2RefreshKnownRefs() }
@@ -1701,6 +1713,281 @@ class TerminalController {
                 "window_id": windowId.uuidString,
                 "window_ref": v2Ref(kind: .window, uuid: windowId)
             ])
+    }
+
+    // MARK: - V2 Team Data Dispatch (Approach C: Dual Queue)
+
+    /// Data-only team commands that are safe to run off the main thread.
+    private static let teamDataCommands: Set<String> = [
+        "team.message.post",
+        "team.message.list",
+        "team.message.clear",
+        "team.report",
+        "team.result.status",
+        "team.result.collect",
+        "team.agent.heartbeat",
+        "team.task.get",
+        "team.task.list",
+        "team.task.dependents",
+        "team.task.clear",
+        "team.task.create",
+        "team.task.update",
+    ]
+
+    /// Dispatch data-only team commands to teamDataQueue, bypassing v2MainSync.
+    /// Returns nil if the command should fall through to the normal (main-thread) path.
+    private func dispatchTeamDataCommand(method: String, params: [String: Any], id: Any?) -> String? {
+        guard Self.teamDataCommands.contains(method) else { return nil }
+
+        let store = TeamDataStore.shared
+
+        return teamDataQueue.sync {
+            switch method {
+            case "team.message.post":
+                return teamDataMessagePost(params: params, id: id, store: store)
+            case "team.message.list":
+                return teamDataMessageList(params: params, id: id, store: store)
+            case "team.message.clear":
+                return teamDataMessageClear(params: params, id: id, store: store)
+            case "team.report":
+                return teamDataReport(params: params, id: id, store: store)
+            case "team.result.status":
+                return teamDataResultStatus(params: params, id: id, store: store)
+            case "team.result.collect":
+                return teamDataResultCollect(params: params, id: id, store: store)
+            case "team.agent.heartbeat":
+                return teamDataAgentHeartbeat(params: params, id: id, store: store)
+            case "team.task.get":
+                return teamDataTaskGet(params: params, id: id, store: store)
+            case "team.task.list":
+                return teamDataTaskList(params: params, id: id, store: store)
+            case "team.task.dependents":
+                return teamDataTaskDependents(params: params, id: id, store: store)
+            case "team.task.clear":
+                return teamDataTaskClear(params: params, id: id, store: store)
+            case "team.task.create":
+                return teamDataTaskCreate(params: params, id: id, store: store)
+            case "team.task.update":
+                return teamDataTaskUpdate(params: params, id: id, store: store)
+            default:
+                return nil
+            }
+        }
+    }
+
+    // MARK: - Team Data Command Handlers (off-main-thread safe)
+
+    private func teamDataMessagePost(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let from = params["from"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing from")
+        }
+        guard let content = params["content"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing content")
+        }
+        let type = params["type"] as? String ?? "report"
+        if let msg = store.postMessage(teamName: teamName, from: from, content: content, type: type) {
+            return v2Ok(id: id, result: store.messageDictionary(msg))
+        }
+        return v2Error(id: id, code: "internal_error", message: "Failed to post message")
+    }
+
+    private func teamDataMessageList(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        let from = params["from"] as? String
+        let type = params["type"] as? String
+        let limit = params["limit"] as? Int
+        let msgs = store.getMessages(teamName: teamName, from: from, type: type, limit: limit)
+        let formatted = msgs.map { store.messageDictionary($0) }
+        return v2Ok(id: id, result: ["team_name": teamName, "messages": formatted, "count": formatted.count])
+    }
+
+    private func teamDataMessageClear(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        store.clearMessages(teamName: teamName)
+        return v2Ok(id: id, result: ["cleared": true, "team_name": teamName])
+    }
+
+    private func teamDataReport(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing agent_name")
+        }
+        guard let content = params["content"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing content")
+        }
+        let wrote = store.writeResult(teamName: teamName, agentName: agentName, content: content)
+        store.postMessage(teamName: teamName, from: agentName, content: content, type: "report")
+        return v2Ok(id: id, result: ["reported": wrote, "team_name": teamName, "agent_name": agentName])
+    }
+
+    private func teamDataResultStatus(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        let status = store.resultStatus(teamName: teamName)
+        if status.isEmpty {
+            return v2Error(id: id, code: "not_found", message: "Team not found")
+        }
+        return v2Ok(id: id, result: status)
+    }
+
+    private func teamDataResultCollect(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        return v2Ok(id: id, result: ["team_name": teamName, "results": store.collectResults(teamName: teamName)])
+    }
+
+    private func teamDataAgentHeartbeat(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing agent_name")
+        }
+        let summary = params["summary"] as? String
+        store.postHeartbeat(teamName: teamName, agentName: agentName, summary: summary)
+        return v2Ok(id: id, result: ["team_name": teamName, "agent_name": agentName, "summary": summary as Any])
+    }
+
+    private func teamDataTaskGet(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let taskId = params["task_id"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing task_id")
+        }
+        if let task = store.getTask(teamName: teamName, taskId: taskId) {
+            return v2Ok(id: id, result: store.taskDictionary(task))
+        }
+        return v2Error(id: id, code: "not_found", message: "Task not found")
+    }
+
+    private func teamDataTaskList(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        let status = params["status"] as? String
+        let assignee = params["assignee"] as? String
+        let needsAttention = params["needs_attention"] as? Bool ?? false
+        let priority = params["priority"] as? Int
+        let staleOnly = params["stale"] as? Bool ?? false
+        let dependsOn = params["depends_on"] as? String
+        let tasks = store.listTasks(
+            teamName: teamName,
+            status: status,
+            assignee: assignee,
+            needsAttention: needsAttention,
+            priority: priority,
+            staleOnly: staleOnly,
+            dependsOn: dependsOn
+        )
+        return v2Ok(id: id, result: [
+            "team_name": teamName,
+            "tasks": tasks.map { store.taskDictionary($0) },
+            "count": tasks.count,
+        ])
+    }
+
+    private func teamDataTaskDependents(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let taskId = params["task_id"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing task_id")
+        }
+        let tasks = store.dependentTasks(teamName: teamName, taskId: taskId)
+        return v2Ok(id: id, result: [
+            "team_name": teamName,
+            "task_id": taskId,
+            "tasks": tasks.map { store.taskDictionary($0) },
+            "count": tasks.count,
+        ])
+    }
+
+    private func teamDataTaskClear(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        store.clearTasks(teamName: teamName)
+        return v2Ok(id: id, result: ["cleared": true, "team_name": teamName])
+    }
+
+    private func teamDataTaskCreate(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let title = params["title"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing title")
+        }
+        let details = params["description"] as? String
+        let assignee = params["assignee"] as? String
+        let acceptanceCriteria = params["acceptance_criteria"] as? [String] ?? []
+        let labels = params["labels"] as? [String] ?? []
+        let estimatedSize = params["estimated_size"] as? Int
+        let priority = params["priority"] as? Int ?? 2
+        let dependsOn = params["depends_on"] as? [String] ?? []
+        let parentTaskId = params["parent_task_id"] as? String
+        let createdBy = params["created_by"] as? String ?? "leader"
+
+        if let task = store.createTask(
+            teamName: teamName,
+            title: title,
+            details: details,
+            assignee: assignee,
+            acceptanceCriteria: acceptanceCriteria,
+            labels: labels,
+            estimatedSize: estimatedSize,
+            priority: priority,
+            dependsOn: dependsOn,
+            parentTaskId: parentTaskId,
+            createdBy: createdBy
+        ) {
+            // Note: task notification (sendTextToPanel to leader/assignee) is skipped
+            // in the off-main data path. The caller already receives the task data
+            // in the RPC response. The `delegate` command in team.py handles sending
+            // instructions to agents separately via team.send.
+            return v2Ok(id: id, result: store.taskDictionary(task))
+        }
+        return v2Error(id: id, code: "internal_error", message: "Failed to create task")
+    }
+
+    private func teamDataTaskUpdate(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let taskId = params["task_id"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing task_id")
+        }
+        let status = params["status"] as? String
+        let taskResult = params["result"] as? String
+        let assignee = params["assignee"] as? String
+        let blockedReason = params["blocked_reason"] as? String
+        let reviewSummary = params["review_summary"] as? String
+        let progressNote = params["progress_note"] as? String
+
+        if let task = store.updateTask(
+            teamName: teamName,
+            taskId: taskId,
+            status: status,
+            result: taskResult,
+            assignee: assignee,
+            blockedReason: blockedReason,
+            reviewSummary: reviewSummary,
+            progressNote: progressNote
+        ) {
+            return v2Ok(id: id, result: store.taskDictionary(task))
+        }
+        return v2Error(id: id, code: "not_found", message: "Task not found")
     }
 
     // MARK: - V2 Agent Team Methods

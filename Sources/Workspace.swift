@@ -930,6 +930,11 @@ final class Workspace: Identifiable, ObservableObject {
         )
         panels[newPanel.id] = newPanel
         panelTitles[newPanel.id] = newPanel.displayTitle
+        // Seed panel directory from workingDirectory so titlebar shows correct branch
+        // before shell integration reports via OSC 7.
+        if let wd = workingDirectory, !wd.isEmpty {
+            panelDirectories[newPanel.id] = wd
+        }
         seedTerminalInheritanceFontPoints(panelId: newPanel.id, configTemplate: inheritedConfig)
 
         // Pre-generate the bonsplit tab ID so we can install the panel mapping before bonsplit

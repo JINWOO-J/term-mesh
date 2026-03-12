@@ -30,6 +30,8 @@ struct ContentView: View {
     @State private var titlebarGitBranch: String = ""
     @State private var titlebarGitDirty: Bool = false
     @State private var titlebarGitDirtyCount: Int = 0
+    @State private var titlebarWorktreeName: String = ""
+    @State private var titlebarIsWorktree: Bool = false
     @State private var titlebarDirBasename: String = ""
     @State private var titlebarPorts: [Int] = []
     @State private var titlebarSessionStart: Date? = nil
@@ -515,12 +517,20 @@ struct ContentView: View {
     private var titlebarBranchAndDirectory: some View {
         HStack(spacing: 5) {
             if !titlebarGitBranch.isEmpty {
-                Image(systemName: "arrow.triangle.branch")
+                Image(systemName: titlebarIsWorktree ? "arrow.triangle.swap" : "arrow.triangle.branch")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(titlebarColor(opacity: 0.7))
+                    .foregroundColor(titlebarIsWorktree ? .cyan.opacity(0.8) : titlebarColor(opacity: 0.7))
                 Text(titlebarGitBranch)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(titlebarColor(opacity: 0.85))
+                    .foregroundColor(titlebarIsWorktree ? .cyan.opacity(0.9) : titlebarColor(opacity: 0.85))
+                if !titlebarWorktreeName.isEmpty {
+                    Text("⋮")
+                        .font(.system(size: 11))
+                        .foregroundColor(titlebarColor(opacity: 0.4))
+                    Text(titlebarWorktreeName)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundColor(titlebarColor(opacity: 0.65))
+                }
                 if titlebarGitDirty {
                     Text(titlebarGitDirtyCount > 0 ? "±\(titlebarGitDirtyCount)" : "±")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -818,6 +828,8 @@ struct ContentView: View {
               let tab = tabManager.tabs.first(where: { $0.id == selectedId }) else {
             if !titlebarText.isEmpty { titlebarText = "" }
             if !titlebarGitBranch.isEmpty { titlebarGitBranch = "" }
+            if !titlebarWorktreeName.isEmpty { titlebarWorktreeName = "" }
+            if titlebarIsWorktree { titlebarIsWorktree = false }
             if !titlebarDirBasename.isEmpty { titlebarDirBasename = "" }
             if !titlebarPorts.isEmpty { titlebarPorts = [] }
             if titlebarSessionStart != nil { titlebarSessionStart = nil }
@@ -828,8 +840,15 @@ struct ContentView: View {
         if titlebarText != title {
             titlebarText = title
         }
-        // Git branch — try workspace-level, panel branches, or run git directly
-        let branchState = tab.gitBranch ?? tab.panelGitBranches.values.first
+        // Git branch — prefer focused panel's reported branch; fall back to git query
+        let focusedPanelId = tab.focusedPanelId
+        let branchState = tab.gitBranch
+        let focusedDir = focusedPanelId.flatMap { tab.panelDirectories[$0] } ?? tab.currentDirectory
+        let focusedTTY: String? = focusedPanelId.flatMap { tab.surfaceTTYNames[$0] }
+        let hasPanelDir = focusedPanelId != nil && tab.panelDirectories[focusedPanelId!] != nil
+        #if DEBUG
+        dlog("titlebar.update focusedPanel=\(focusedPanelId?.uuidString.prefix(8) ?? "nil") gitBranch=\(branchState?.branch ?? "nil") panelBranches=\(tab.panelGitBranches.mapValues { $0.branch }) currentDir=\(tab.currentDirectory) focusedDir=\(focusedDir) tty=\(focusedTTY ?? "nil") hasPanelDir=\(hasPanelDir) worktreeName=\(tab.worktreeName ?? "nil")")
+        #endif
         if let bs = branchState {
             let branch = bs.branch
             if titlebarGitBranch != branch { titlebarGitBranch = branch }
@@ -837,20 +856,37 @@ struct ContentView: View {
             if titlebarGitDirty != dirty { titlebarGitDirty = dirty }
             let dirtyCount = bs.dirtyFileCount ?? 0
             if titlebarGitDirtyCount != dirtyCount { titlebarGitDirtyCount = dirtyCount }
+            if titlebarIsWorktree { titlebarIsWorktree = false }
         } else {
-            // Fallback: run git directly in the workspace's current directory
-            let dir = tab.currentDirectory
-            if !dir.isEmpty {
-                DispatchQueue.global(qos: .utility).async {
-                    let (branch, dirty, count) = Self.queryGitBranch(in: dir)
-                    DispatchQueue.main.async {
-                        if self.titlebarGitBranch != branch { self.titlebarGitBranch = branch }
-                        if self.titlebarGitDirty != dirty { self.titlebarGitDirty = dirty }
-                        if self.titlebarGitDirtyCount != count { self.titlebarGitDirtyCount = count }
-                    }
+            // Fallback: resolve CWD from TTY if panelDirectories has no entry, then run git
+            let resolveDir = focusedDir
+            let needsTTYResolve = !hasPanelDir && focusedTTY != nil
+            let ttyForResolve = focusedTTY
+            DispatchQueue.global(qos: .utility).async {
+                let dir: String
+                if needsTTYResolve, let tty = ttyForResolve,
+                   let ttyCwd = Self.queryCWDFromTTY(tty), !ttyCwd.isEmpty {
+                    dir = ttyCwd
+                } else {
+                    dir = resolveDir
+                }
+                guard !dir.isEmpty else { return }
+                let (branch, dirty, count, isWt) = Self.queryGitBranch(in: dir)
+                #if DEBUG
+                dlog("titlebar.gitFallback dir=\(dir) branch=\(branch) dirty=\(dirty) count=\(count) isWorktree=\(isWt) viaTTY=\(needsTTYResolve)")
+                #endif
+                DispatchQueue.main.async {
+                    if self.titlebarGitBranch != branch { self.titlebarGitBranch = branch }
+                    if self.titlebarGitDirty != dirty { self.titlebarGitDirty = dirty }
+                    if self.titlebarGitDirtyCount != count { self.titlebarGitDirtyCount = count }
+                    if self.titlebarIsWorktree != isWt { self.titlebarIsWorktree = isWt }
                 }
             }
         }
+        // Worktree name
+        let wtName = tab.worktreeName ?? ""
+        if titlebarWorktreeName != wtName { titlebarWorktreeName = wtName }
+
         // Directory basename
         let dirBase = (tab.currentDirectory as NSString).lastPathComponent
         if titlebarDirBasename != dirBase { titlebarDirBasename = dirBase }
@@ -882,7 +918,7 @@ struct ContentView: View {
         }
     }
 
-    private static func queryGitBranch(in directory: String) -> (branch: String, dirty: Bool, dirtyCount: Int) {
+    private static func queryGitBranch(in directory: String) -> (branch: String, dirty: Bool, dirtyCount: Int, isWorktree: Bool) {
         let branchProcess = Process()
         branchProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         branchProcess.arguments = ["branch", "--show-current"]
@@ -893,11 +929,11 @@ struct ContentView: View {
         do {
             try branchProcess.run()
             branchProcess.waitUntilExit()
-        } catch { return ("", false, 0) }
-        guard branchProcess.terminationStatus == 0 else { return ("", false, 0) }
+        } catch { return ("", false, 0, false) }
+        guard branchProcess.terminationStatus == 0 else { return ("", false, 0, false) }
         let branchData = branchPipe.fileHandleForReading.readDataToEndOfFile()
         let branch = String(data: branchData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !branch.isEmpty else { return ("", false, 0) }
+        guard !branch.isEmpty else { return ("", false, 0, false) }
 
         let statusProcess = Process()
         statusProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -909,11 +945,74 @@ struct ContentView: View {
         do {
             try statusProcess.run()
             statusProcess.waitUntilExit()
-        } catch { return (branch, false, 0) }
+        } catch { return (branch, false, 0, false) }
         let statusData = statusPipe.fileHandleForReading.readDataToEndOfFile()
         let statusOutput = String(data: statusData, encoding: .utf8) ?? ""
         let changedFiles = statusOutput.components(separatedBy: "\n").filter { !$0.isEmpty }
-        return (branch, !changedFiles.isEmpty, changedFiles.count)
+
+        // Detect worktree: git-dir != git-common-dir means we're in a worktree
+        var isWorktree = false
+        let gitDirProcess = Process()
+        gitDirProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        gitDirProcess.arguments = ["rev-parse", "--git-dir", "--git-common-dir"]
+        gitDirProcess.currentDirectoryURL = URL(fileURLWithPath: directory)
+        let gitDirPipe = Pipe()
+        gitDirProcess.standardOutput = gitDirPipe
+        gitDirProcess.standardError = FileHandle.nullDevice
+        do {
+            try gitDirProcess.run()
+            gitDirProcess.waitUntilExit()
+            let gitDirData = gitDirPipe.fileHandleForReading.readDataToEndOfFile()
+            let lines = (String(data: gitDirData, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .components(separatedBy: "\n")
+            if lines.count >= 2 {
+                let gitDir = lines[0].trimmingCharacters(in: .whitespaces)
+                let commonDir = lines[1].trimmingCharacters(in: .whitespaces)
+                isWorktree = gitDir != commonDir
+            }
+        } catch {}
+
+        return (branch, !changedFiles.isEmpty, changedFiles.count, isWorktree)
+    }
+
+    /// Resolve the CWD of the foreground process on a given TTY.
+    /// Runs `ps` to find PIDs, then `lsof` to get the CWD of the last (deepest) process.
+    private static func queryCWDFromTTY(_ tty: String) -> String? {
+        // 1. Get all PIDs on this TTY
+        let psProcess = Process()
+        psProcess.executableURL = URL(fileURLWithPath: "/bin/ps")
+        psProcess.arguments = ["-t", tty, "-o", "pid="]
+        let psPipe = Pipe()
+        psProcess.standardOutput = psPipe
+        psProcess.standardError = FileHandle.nullDevice
+        do { try psProcess.run(); psProcess.waitUntilExit() } catch { return nil }
+        let psData = psPipe.fileHandleForReading.readDataToEndOfFile()
+        let psOutput = String(data: psData, encoding: .utf8) ?? ""
+        let pids = psOutput.split(separator: "\n")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !pids.isEmpty else { return nil }
+
+        // 2. Get CWD of all PIDs via lsof, take the last one (deepest child)
+        let pidsCsv = pids.map(String.init).joined(separator: ",")
+        let lsofProcess = Process()
+        lsofProcess.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsofProcess.arguments = ["-a", "-d", "cwd", "-p", pidsCsv, "-Fn"]
+        let lsofPipe = Pipe()
+        lsofProcess.standardOutput = lsofPipe
+        lsofProcess.standardError = FileHandle.nullDevice
+        do { try lsofProcess.run(); lsofProcess.waitUntilExit() } catch { return nil }
+        let lsofData = lsofPipe.fileHandleForReading.readDataToEndOfFile()
+        let lsofOutput = String(data: lsofData, encoding: .utf8) ?? ""
+
+        // Parse lsof -Fn: lines starting with 'n' contain the path
+        var lastCwd: String?
+        for line in lsofOutput.split(separator: "\n") {
+            if line.hasPrefix("n") {
+                lastCwd = String(line.dropFirst())
+            }
+        }
+        return lastCwd
     }
 
     private func scheduleTitlebarTextRefresh() {

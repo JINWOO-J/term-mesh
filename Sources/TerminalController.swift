@@ -1428,6 +1428,48 @@ class TerminalController {
         return DispatchQueue.main.sync(execute: body)
     }
 
+    /// Like v2MainSync but with a timeout to prevent deadlocks when the main thread
+    /// is blocked by IME composition or modal event loops.
+    ///
+    /// Returns `true` if `body` executed and completed within the timeout.
+    /// Returns `false` if the main thread did not respond in time — in this case
+    /// `body` is guaranteed **not** to have run (safe to ignore captured results).
+    ///
+    /// Use for high-frequency socket commands (send_text, send_key, read_text) that
+    /// may contend with user input on the main thread.
+    func v2MainExec(timeout: TimeInterval = 2.0, _ body: @escaping () -> Void) -> Bool {
+        if Thread.isMainThread {
+            body()
+            return true
+        }
+        let state = NSLock()
+        var cancelled = false
+        var started = false
+        let sema = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            state.lock()
+            let skip = cancelled
+            if !skip { started = true }
+            state.unlock()
+            if !skip { body() }
+            sema.signal()
+        }
+        if sema.wait(timeout: .now() + timeout) == .timedOut {
+            state.lock()
+            cancelled = true
+            let didStart = started
+            state.unlock()
+            if didStart {
+                // body() already started before we could cancel — wait for it
+                // to finish so the caller can safely read captured results.
+                sema.wait()
+                return true
+            }
+            return false
+        }
+        return true
+    }
+
     func v2Ok(id: Any?, result: Any) -> String {
         return v2Encode([
             "id": v2OrNull(id),

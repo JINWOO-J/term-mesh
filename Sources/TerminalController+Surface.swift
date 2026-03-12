@@ -621,12 +621,12 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to send text", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
-            let surfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            let surfaceId = self.v2UUID(params, "surface_id") ?? ws.focusedPanelId
             guard let surfaceId else {
                 result = .err(code: "not_found", message: "No focused surface", data: nil)
                 return
@@ -640,7 +640,7 @@ extension TerminalController {
             #endif
             let queued: Bool
             if let surface = terminalPanel.surface.surface {
-                sendSocketText(text, surface: surface)
+                self.sendSocketText(text, surface: surface)
                 // Ensure we present a new frame after injecting input so snapshot-based tests (and
                 // socket-driven agents) can observe the updated terminal without requiring a focus
                 // change to trigger a draw.
@@ -660,13 +660,16 @@ extension TerminalController {
             #endif
             result = .ok([
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId),
                 "queued": queued,
-                "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))
+                "window_id": self.v2OrNull(self.v2ResolveWindowId(tabManager: tabManager)?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: self.v2ResolveWindowId(tabManager: tabManager))
             ])
+        }
+        if !completed {
+            return .err(code: "timeout", message: "Main thread busy (IME or modal UI active)", data: nil)
         }
         return result
     }
@@ -680,12 +683,12 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to send key", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
-            let surfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            let surfaceId = self.v2UUID(params, "surface_id") ?? ws.focusedPanelId
             guard let surfaceId else {
                 result = .err(code: "not_found", message: "No focused surface", data: nil)
                 return
@@ -698,12 +701,15 @@ extension TerminalController {
                 result = .err(code: "internal_error", message: "Surface not ready", data: ["surface_id": surfaceId.uuidString])
                 return
             }
-            guard sendNamedKey(surface, keyName: key) else {
+            guard self.sendNamedKey(surface, keyName: key) else {
                 result = .err(code: "invalid_params", message: "Unknown key", data: ["key": key])
                 return
             }
             terminalPanel.surface.forceRefresh()
-            result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": v2Ref(kind: .surface, uuid: surfaceId), "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))])
+            result = .ok(["workspace_id": ws.id.uuidString, "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id), "surface_id": surfaceId.uuidString, "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId), "window_id": self.v2OrNull(self.v2ResolveWindowId(tabManager: tabManager)?.uuidString), "window_ref": self.v2Ref(kind: .window, uuid: self.v2ResolveWindowId(tabManager: tabManager))])
+        }
+        if !completed {
+            return .err(code: "timeout", message: "Main thread busy (IME or modal UI active)", data: nil)
         }
         return result
     }
@@ -764,13 +770,13 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to read terminal text", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
 
-            let surfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            let surfaceId = self.v2UUID(params, "surface_id") ?? ws.focusedPanelId
             guard let surfaceId else {
                 result = .err(code: "not_found", message: "No focused surface", data: nil)
                 return
@@ -780,7 +786,7 @@ extension TerminalController {
                 return
             }
 
-            let response = readTerminalTextBase64(
+            let response = self.readTerminalTextBase64(
                 terminalPanel: terminalPanel,
                 includeScrollback: includeScrollback,
                 lineLimit: lineLimit
@@ -796,17 +802,20 @@ extension TerminalController {
                 return
             }
 
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
                 "text": text,
                 "base64": base64,
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId)
+                "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId)
             ])
+        }
+        if !completed {
+            return .err(code: "timeout", message: "Main thread busy (IME or modal UI active)", data: nil)
         }
         return result
     }

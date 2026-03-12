@@ -974,7 +974,12 @@ final class GhosttySurfaceScrollView: NSView {
             if let previous, previous !== self {
                 _ = previous.surfaceView.resignFirstResponder()
             }
-            window.makeFirstResponder(self.surfaceView)
+            // If IME bar is active in this pane, redirect focus to IMETextView
+            if let imeTextView = self.findIMETextView() {
+                window.makeFirstResponder(imeTextView)
+            } else {
+                window.makeFirstResponder(self.surfaceView)
+            }
         }
 
         if let delay, delay > 0 {
@@ -1095,6 +1100,7 @@ final class GhosttySurfaceScrollView: NSView {
 
         guard isActive else { return }
         guard surfaceView.terminalSurface?.searchState == nil else { return }
+        guard findIMETextView() == nil else { return }
         guard let window else { return }
         guard surfaceView.isVisibleInUI else {
             retry()

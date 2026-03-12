@@ -5,6 +5,7 @@ Usage:
     ./scripts/team.py create [N] [--claude-leader] [--kiro agent1,agent2] [--codex agent1] [--gemini agent2]
     ./scripts/team.py send <agent> <text>
     ./scripts/team.py delegate <agent> <text> [--title text] [--priority N] [--accept text ...] [--deps id ...]
+    ./scripts/team.py reply [--from X] <text...>
     ./scripts/team.py broadcast <text>
     ./scripts/team.py status
     ./scripts/team.py inbox
@@ -16,7 +17,7 @@ Usage:
     ./scripts/team.py brief <agent> [--lines N]
     ./scripts/team.py agent ping <summary>
     ./scripts/team.py report <text>
-    ./scripts/team.py msg send [--to X] [--from X] [--type X] [--report] <text>
+    ./scripts/team.py msg send [--to X] [--from X] [--type X] [--report] [recipient] <text...>
     ./scripts/team.py msg post [--report] <from> <text>
     ./scripts/team.py msg list [--from X] [--limit N]
     ./scripts/team.py msg clear
@@ -69,11 +70,12 @@ REPORT_SUFFIX = (
     '5. When the task is actually done, run `./scripts/team.py task done <task_id> \'<result>\'`.\n'
     'If the leader did not give you a task id, report that and ask for one.\n'
     '\n'
-    '[IMPORTANT] When you finish this task, you MUST use your bash/execute tool to run this exact shell command:\n'
+    '[IMPORTANT] When you finish this task, you MUST use your bash/execute tool to run this SINGLE command:\n'
     '```\n'
-    './scripts/team.py report \'<one-paragraph summary of your result>\'\n'
+    './scripts/team.py reply \'<one-paragraph summary of your result>\'\n'
     '```\n'
-    'Do NOT just describe the result in text. Actually execute the shell command above using your tool.'
+    'This sends the result to the leader AND registers it as a report in one step.\n'
+    'Do NOT run separate msg send + report commands. Just use `reply` once.'
 )
 
 AGENT_INIT_PROMPT = (
@@ -86,9 +88,9 @@ AGENT_INIT_PROMPT = (
     '5. If ready for validation, run `./scripts/team.py task review <task_id> \'<summary>\'`.\n'
     '6. When accepted as done, run `./scripts/team.py task done <task_id> \'<result>\'`.\n'
     'When you complete any task assigned by the leader, you MUST use your bash/execute tool to run:\n'
-    './scripts/team.py report \'<summary of your result>\'\n'
-    'Do NOT just write the result as text — actually execute the shell command using your tool. '
-    'This allows the leader to detect task completion automatically. '
+    './scripts/team.py reply \'<summary of your result>\'\n'
+    'This single command sends the result to the leader AND registers a report in one step. '
+    'Do NOT run separate msg send + report commands — just use `reply` once. '
     'Respond with "Agent {agent} ready." to confirm.'
 )
 
@@ -384,9 +386,10 @@ def cmd_broadcast(sock: str, args: argparse.Namespace) -> None:
     text = args.text
     if not no_report:
         text += (
-            '\n\n[IMPORTANT] When you finish this task, you MUST run this command to report your result:\n'
-            './scripts/team.py report \'<one-paragraph summary of your result>\'\n'
-            '(Make sure CMUX_AGENT_NAME is set to your agent name)'
+            '\n\n[IMPORTANT] When you finish this task, you MUST run this SINGLE command to report your result:\n'
+            './scripts/team.py reply \'<one-paragraph summary of your result>\'\n'
+            'This sends the result to the leader AND registers it as a report in one step.\n'
+            'Do NOT run separate msg send + report commands. Just use `reply` once.'
         )
     r = rpc(sock, "team.broadcast", {
         "team_name": TEAM,
@@ -656,23 +659,56 @@ def cmd_report(sock: str, args: argparse.Namespace) -> None:
 
 def cmd_msg_send(sock: str, args: argparse.Namespace) -> None:
     sender = args.sender or AGENT_NAME or "anonymous"
+    # Support both: msg send --to leader "text"  AND  msg send leader "text"
+    words = args.text  # nargs='+' gives a list
+    to = args.to
+    if not to and len(words) >= 2:
+        # First word is the recipient when --to is omitted
+        to = words[0]
+        text = " ".join(words[1:])
+    else:
+        text = " ".join(words)
     params: dict = {
         "team_name": TEAM,
         "from": sender,
-        "content": args.text,
+        "content": text,
         "type": args.type or "report",
     }
-    if args.to:
-        params["to"] = args.to
+    if to:
+        params["to"] = to
     r = rpc(sock, "team.message.post", params)
     print(pretty(r))
 
-    # Also submit report for wait detection
-    if args.report and (args.sender or AGENT_NAME):
+    # Auto-submit report for wait detection when sending to leader (or explicit --report)
+    agent = args.sender or AGENT_NAME
+    should_report = args.report or (to and to.lower() == "leader")
+    if should_report and agent:
         rpc(sock, "team.report", {
             "team_name": TEAM,
-            "agent_name": args.sender or AGENT_NAME,
-            "content": args.text,
+            "agent_name": agent,
+            "content": text,
+        }, req_id=2)
+
+
+def cmd_reply(sock: str, args: argparse.Namespace) -> None:
+    """Shortcut: reply to leader with auto-report."""
+    sender = args.sender or AGENT_NAME or "anonymous"
+    text = " ".join(args.text)
+    r = rpc(sock, "team.message.post", {
+        "team_name": TEAM,
+        "from": sender,
+        "content": text,
+        "to": "leader",
+        "type": "report",
+    })
+    print(pretty(r))
+    # Auto-submit report for wait detection
+    agent = args.sender or AGENT_NAME
+    if agent:
+        rpc(sock, "team.report", {
+            "team_name": TEAM,
+            "agent_name": agent,
+            "content": text,
         }, req_id=2)
 
 
@@ -896,6 +932,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-report", action="store_true",
                     help="Don't append report instruction suffix")
 
+    # reply (shortcut for msg send leader + auto-report)
+    sp = sub.add_parser("reply", help="Reply to leader (auto-report, shortcut for msg send leader)")
+    sp.add_argument("text", nargs="+", help="Message text")
+    sp.add_argument("--from", dest="sender")
+
     # broadcast
     sp = sub.add_parser("broadcast", help="Send text to all agents")
     sp.add_argument("text")
@@ -943,7 +984,7 @@ def build_parser() -> argparse.ArgumentParser:
     msg_sub = msg_p.add_subparsers(dest="msg_command", help="msg subcommand")
 
     sp = msg_sub.add_parser("send", help="Send message (auto-detects sender)")
-    sp.add_argument("text")
+    sp.add_argument("text", nargs="+", help="[recipient] <text...> — first word used as recipient when --to is omitted and 2+ words given")
     sp.add_argument("--to", dest="to")
     sp.add_argument("--from", dest="sender")
     sp.add_argument("--type", choices=["note", "progress", "blocked", "review_ready", "error", "report"])
@@ -1036,6 +1077,7 @@ COMMAND_MAP = {
     "create": cmd_create,
     "send": cmd_send,
     "delegate": cmd_delegate,
+    "reply": cmd_reply,
     "broadcast": cmd_broadcast,
     "status": cmd_status,
     "inbox": cmd_inbox,

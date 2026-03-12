@@ -90,7 +90,15 @@ enum GhosttyPasteboardHelper {
             return value
         }
 
-        return pasteboard.string(forType: utf8PlainTextType)
+        if let text = pasteboard.string(forType: utf8PlainTextType) {
+            return text
+        }
+
+        if let path = saveClipboardImageToTempFile(from: pasteboard) {
+            return path
+        }
+
+        return nil
     }
 
     static func hasString(for location: ghostty_clipboard_e) -> Bool {
@@ -110,6 +118,58 @@ enum GhosttyPasteboardHelper {
             result = result.replacingOccurrences(of: String(char), with: "\\\(char)")
         }
         return result
+    }
+
+    // MARK: - Clipboard image support
+
+    private static let imageTypes: [NSPasteboard.PasteboardType] = [
+        .png,
+        .tiff,
+        NSPasteboard.PasteboardType("public.jpeg"),
+        NSPasteboard.PasteboardType("public.heic"),
+    ]
+
+    private static func readImageData(from pasteboard: NSPasteboard) -> Data? {
+        for type in imageTypes {
+            if let data = pasteboard.data(forType: type) {
+                return data
+            }
+        }
+        return nil
+    }
+
+    static func saveClipboardImageToTempFile(from pasteboard: NSPasteboard) -> String? {
+        guard let imageData = readImageData(from: pasteboard) else { return nil }
+        guard let image = NSImage(data: imageData),
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else { return nil }
+
+        cleanupOldClipboardImages()
+
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "clipboard-\(timestamp).png"
+        let path = "/tmp/\(filename)"
+        do {
+            try pngData.write(to: URL(fileURLWithPath: path))
+            return path
+        } catch {
+            return nil
+        }
+    }
+
+    private static func cleanupOldClipboardImages() {
+        let fm = FileManager.default
+        let tmpDir = "/tmp"
+        let oneHourAgo = Date().addingTimeInterval(-3600)
+        guard let files = try? fm.contentsOfDirectory(atPath: tmpDir) else { return }
+        for file in files where file.hasPrefix("clipboard-") && file.hasSuffix(".png") {
+            let fullPath = "\(tmpDir)/\(file)"
+            guard let attrs = try? fm.attributesOfItem(atPath: fullPath),
+                  let created = attrs[.creationDate] as? Date,
+                  created < oneHourAgo else { continue }
+            try? fm.removeItem(atPath: fullPath)
+        }
     }
 }
 
@@ -2139,8 +2199,15 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         #if DEBUG
         dlog("terminal.mouseDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
         #endif
-        // Don't steal focus from the IME input bar when it's active
-        if enclosingSurfaceScrollView?.findIMETextView() == nil {
+        if let imeTextView = enclosingSurfaceScrollView?.findIMETextView() {
+            // IME input bar is active — don't steal focus from it, but ensure
+            // the window is activated so the user can type after switching apps.
+            if let w = window, !w.isKeyWindow {
+                NSApp.activate(ignoringOtherApps: true)
+                w.makeKeyAndOrderFront(nil)
+                w.makeFirstResponder(imeTextView)
+            }
+        } else {
             window?.makeFirstResponder(self)
         }
         guard let surface = surface else { return }

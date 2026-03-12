@@ -149,12 +149,15 @@ struct IMEInputBar: View {
     let onBroadcast: ((String) -> Void)?
     let onClose: () -> Void
     var onCtrlC: (() -> Void)? = nil
+    /// Send a raw key event (keycode + modifier flags) to the terminal surface.
+    var onSendKey: ((_ keycode: UInt16, _ mods: UInt32) -> Void)? = nil
 
     @State private var text: String = ""
     @State private var history: [String] = IMEHistory.loadMerged()
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
     @State private var isComposing: Bool = false
+    @State private var showKeyboardHelp: Bool = false
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isFieldFocused: Bool
 
@@ -172,6 +175,16 @@ struct IMEInputBar: View {
         addToHistory(submitted)
         onSubmit(submitted)
         text = ""
+    }
+
+    private func doSubmitAndClose() {
+        if !text.isEmpty {
+            let submitted = text
+            addToHistory(submitted)
+            onSubmit(submitted)
+            text = ""
+        }
+        onClose()
     }
 
     private func doBroadcast() {
@@ -250,6 +263,8 @@ struct IMEInputBar: View {
                     onSubmit: doSubmit,
                     onCancel: onClose,
                     onCtrlC: onCtrlC,
+                    onSendKey: onSendKey,
+                    onSubmitAndClose: doSubmitAndClose,
                     onHistoryUp: historyUp,
                     onHistoryDown: historyDown,
                     onHistorySearch: historySearch,
@@ -336,19 +351,86 @@ struct IMEInputBar: View {
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
-            .help("Close (Esc)")
+            .help("Close (⌘Esc)")
         }
         .padding(.top, 3)
     }
 
     private var hintBar: some View {
-        HStack(spacing: 12) {
-            hintLabel("Enter: send")
-            hintLabel("\u{21e7}Enter: new line")
-            hintLabel("\u{2191}\u{2193}: history (\(history.count))")
-            hintLabel("^R: search")
-            hintLabel("Esc: close")
+        HStack(spacing: 10) {
+            hintLabel("⏎ send")
+            hintLabel("⌘⏎ send+close")
+            hintLabel("⇧⏎ newline")
+
+            Button(action: { showKeyboardHelp.toggle() }) {
+                Text("?")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.primary.opacity(0.5))
+                    .frame(width: 14, height: 14)
+                    .background(Color.primary.opacity(0.08))
+                    .cornerRadius(7)
+            }
+            .buttonStyle(.plain)
+            .help("Show all keyboard shortcuts")
+            .popover(isPresented: $showKeyboardHelp, arrowEdge: .top) {
+                keyboardHelpView
+            }
         }
+    }
+
+    private var keyboardHelpView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Keyboard Shortcuts")
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.bottom, 6)
+
+            Group {
+                helpSection("Input") {
+                    helpRow("⏎", "Send")
+                    helpRow("⌘⏎", "Send & close")
+                    helpRow("⇧⏎", "New line")
+                    helpRow("⌃C", "Interrupt (Ctrl+C)")
+                }
+                helpSection("Navigation") {
+                    helpRow("↑ ↓", "History (\(history.count))")
+                    helpRow("⌃R", "Search history")
+                    helpRow("⌃A / ⌃E", "Line start / end")
+                }
+                helpSection("Terminal") {
+                    helpRow("Esc", "Send Escape to terminal")
+                    helpRow("⇧Tab", "Send Shift+Tab (accept)")
+                }
+                helpSection("IME Box") {
+                    helpRow("⌘Esc", "Close")
+                    helpRow("⌘⇧I", "Toggle")
+                }
+            }
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(12)
+        .frame(width: 240)
+    }
+
+    private func helpSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.top, 6)
+                .padding(.bottom, 2)
+            content()
+        }
+    }
+
+    private func helpRow(_ key: String, _ desc: String) -> some View {
+        HStack(spacing: 0) {
+            Text(key)
+                .foregroundColor(.primary.opacity(0.7))
+                .frame(width: 80, alignment: .leading)
+            Text(desc)
+                .foregroundColor(.primary.opacity(0.5))
+        }
+        .font(.system(size: 11, design: .monospaced))
     }
 
     private func hintLabel(_ text: String) -> some View {
@@ -365,6 +447,8 @@ struct IMETextEditor: NSViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     var onCtrlC: (() -> Void)? = nil
+    var onSendKey: ((_ keycode: UInt16, _ mods: UInt32) -> Void)? = nil
+    var onSubmitAndClose: (() -> Void)? = nil
     let onHistoryUp: () -> Void
     let onHistoryDown: () -> Void
     var onHistorySearch: (() -> Void)? = nil
@@ -390,7 +474,7 @@ struct IMETextEditor: NSViewRepresentable {
         textView.backgroundColor = .clear
         textView.drawsBackground = true
         textView.insertionPointColor = NSColor.textColor
-        textView.isRichText = false
+        textView.isRichText = true
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -410,6 +494,8 @@ struct IMETextEditor: NSViewRepresentable {
         textView.submitHandler = onSubmit
         textView.cancelHandler = onCancel
         textView.ctrlCHandler = onCtrlC
+        textView.sendKeyHandler = onSendKey
+        textView.submitAndCloseHandler = onSubmitAndClose
         textView.historyUpHandler = onHistoryUp
         textView.historyDownHandler = onHistoryDown
         textView.historySearchHandler = onHistorySearch
@@ -428,7 +514,11 @@ struct IMETextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? IMETextView else { return }
-        if textView.string != text && !textView.hasMarkedText() {
+        if textView.submittableText() != text && !textView.hasMarkedText() {
+            // Clear image attachments when text is reset externally (e.g. after submit)
+            if text.isEmpty {
+                textView.imageAttachments.removeAll()
+            }
             textView.string = text
             textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
         }
@@ -445,6 +535,8 @@ struct IMETextEditor: NSViewRepresentable {
         textView.submitHandler = onSubmit
         textView.cancelHandler = onCancel
         textView.ctrlCHandler = onCtrlC
+        textView.sendKeyHandler = onSendKey
+        textView.submitAndCloseHandler = onSubmitAndClose
         textView.historyUpHandler = onHistoryUp
         textView.historyDownHandler = onHistoryDown
         textView.historySearchHandler = onHistorySearch
@@ -460,8 +552,8 @@ struct IMETextEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            parent.text = textView.string
+            guard let textView = notification.object as? IMETextView else { return }
+            parent.text = textView.submittableText()
         }
     }
 }
@@ -476,8 +568,41 @@ final class IMETextView: NSTextView {
     var historyDownHandler: (() -> Void)?
     var historySearchHandler: (() -> Void)?
     var composingHandler: ((Bool) -> Void)?
+    /// Send a raw key event (keycode + mods) directly to the terminal surface,
+    /// bypassing text input.  Used for Shift+Tab, Ctrl+Tab, and similar TUI shortcuts.
+    var sendKeyHandler: ((_ keycode: UInt16, _ mods: UInt32) -> Void)?
+    /// Submit current text and close the IME box in one action (Cmd+Enter).
+    var submitAndCloseHandler: (() -> Void)?
+
+    // MARK: - Focus activation
+
+    override func mouseDown(with event: NSEvent) {
+        // When the user clicks the IME box, ensure the app is activated and the
+        // window is key — so typing works even when another app had focus.
+        if let w = window, !w.isKeyWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            w.makeKeyAndOrderFront(nil)
+        }
+        super.mouseDown(with: event)
+    }
+
+    // MARK: - Key handling
 
     override func keyDown(with event: NSEvent) {
+        // Cmd+V → paste (ensure image paste works even if menu dispatch is intercepted)
+        if event.keyCode == 9 && event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift) {
+            paste(nil)
+            return
+        }
+        // Cmd+Enter → submit and close IME box
+        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
+            if hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
+            submitAndCloseHandler?()
+            return
+        }
         // Enter without Shift → submit (guard: let IME commit composed text first)
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
             if hasMarkedText() {
@@ -526,9 +651,19 @@ final class IMETextView: NSTextView {
             historySearchHandler?()
             return
         }
-        // Escape → cancel
-        if event.keyCode == 53 {
+        // Shift+Tab → forward to terminal (Claude Code uses this for accepting suggestions)
+        if event.keyCode == 48 && event.modifierFlags.contains(.shift) {
+            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_SHIFT.rawValue))
+            return
+        }
+        // Cmd+Escape → close IME box
+        if event.keyCode == 53 && event.modifierFlags.contains(.command) {
             cancelHandler?()
+            return
+        }
+        // Escape → forward to terminal (e.g. cancel current Claude Code operation)
+        if event.keyCode == 53 {
+            sendKeyHandler?(event.keyCode, 0)
             return
         }
         // ArrowUp → history (when cursor is on first line and not composing IME)
@@ -556,6 +691,55 @@ final class IMETextView: NSTextView {
         let str = string as NSString
         let lastNewline = str.range(of: "\n", options: .backwards).location
         return lastNewline == NSNotFound || loc > lastNewline
+    }
+
+    // MARK: - Paste (image → inline thumbnail)
+
+    /// Pasted image attachments and their /tmp file paths.
+    var imageAttachments: [(attachment: NSTextAttachment, path: String)] = []
+
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if pb.string(forType: .string) != nil || pb.string(forType: NSPasteboard.PasteboardType("public.utf8-plain-text")) != nil {
+            super.paste(sender)
+            return
+        }
+        if let path = GhosttyPasteboardHelper.saveClipboardImageToTempFile(from: pb),
+           let image = NSImage(contentsOfFile: path) {
+            let attachment = NSTextAttachment()
+            let maxHeight: CGFloat = 48
+            let scale = min(maxHeight / image.size.height, 1.0)
+            let thumbSize = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+            let cell = NSTextAttachmentCell(imageCell: image)
+            cell.image?.size = thumbSize
+            attachment.attachmentCell = cell
+
+            let attrStr = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+            attrStr.append(NSAttributedString(string: " ",
+                attributes: [.font: font ?? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]))
+
+            textStorage?.insert(attrStr, at: selectedRange().location)
+            setSelectedRange(NSRange(location: selectedRange().location + attrStr.length, length: 0))
+            imageAttachments.append((attachment: attachment, path: path))
+            delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
+            return
+        }
+        super.paste(sender)
+    }
+
+    /// Returns text with image attachments replaced by their file paths.
+    func submittableText() -> String {
+        guard let storage = textStorage, !imageAttachments.isEmpty else { return string }
+        var result = ""
+        storage.enumerateAttributes(in: NSRange(location: 0, length: storage.length)) { attrs, range, _ in
+            if let att = attrs[.attachment] as? NSTextAttachment,
+               let entry = imageAttachments.first(where: { $0.attachment === att }) {
+                result += entry.path
+            } else {
+                result += (storage.string as NSString).substring(with: range)
+            }
+        }
+        return result
     }
 
     // MARK: - IME composition tracking

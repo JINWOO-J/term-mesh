@@ -384,6 +384,68 @@ final class TeamDataStore: @unchecked Sendable {
         return (age, entry.summary, age >= Int(staleHeartbeatThreshold))
     }
 
+    // MARK: - Agent Status Enrichment (off-main data for team.status)
+
+    /// Returns data-layer enrichment for a given agent, avoiding MainActor.
+    /// Includes active task, heartbeat, and runtime state derived from task status.
+    func agentDataEnrichment(teamName: String, agentName: String) -> [String: Any] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Active task: most recently updated non-terminal task assigned to this agent
+        let terminalStatuses: Set<String> = ["completed", "failed", "abandoned"]
+        let activeTask = taskBoards[teamName, default: []]
+            .filter { $0.assignee == agentName && !terminalStatuses.contains($0.status) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .first
+
+        // Runtime state derived from task status
+        let agentState: String
+        if let task = activeTask {
+            switch task.status {
+            case "blocked": agentState = "blocked"
+            case "review_ready": agentState = "review_ready"
+            case "failed": agentState = "error"
+            case "queued", "assigned": agentState = "idle"
+            default: agentState = "running"
+            }
+        } else {
+            agentState = "idle"
+        }
+
+        // Task staleness
+        let isTaskStale: Bool
+        if let task = activeTask, !terminalStatuses.contains(task.status) {
+            let anchor = task.lastProgressAt ?? task.startedAt ?? task.updatedAt
+            isTaskStale = Date().timeIntervalSince(anchor) >= staleTaskThreshold
+        } else {
+            isTaskStale = false
+        }
+
+        // Heartbeat
+        let heartbeat = heartbeats[teamName]?[agentName]
+        let heartbeatAge: Int? = heartbeat.map { max(0, Int(Date().timeIntervalSince($0.at))) }
+        let heartbeatStale = heartbeat.map { Date().timeIntervalSince($0.at) >= staleHeartbeatThreshold } ?? false
+
+        return [
+            "agent_state": agentState,
+            "active_task_id": activeTask?.id as Any,
+            "active_task_title": activeTask?.title as Any,
+            "active_task_status": activeTask?.status as Any,
+            "active_task_is_stale": isTaskStale,
+            "heartbeat_age_seconds": heartbeatAge as Any,
+            "last_heartbeat_summary": heartbeat?.summary as Any,
+            "heartbeat_is_stale": heartbeatStale,
+        ]
+    }
+
+    /// Task count for a team (off-main).
+    func taskCount(teamName: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return taskBoards[teamName, default: []].count
+    }
+
     // MARK: - File-Based Results
 
     /// Local copy of result directory path (avoids calling @MainActor TeamOrchestrator.resultDirectory)

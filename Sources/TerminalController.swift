@@ -2024,23 +2024,38 @@ class TerminalController {
             return TeamOrchestrator.shared.allAgentPanels(teamName: teamName, tabManager: tabManager)
         }
 
-        // Read each agent's terminal with per-agent MainActor.run to avoid O(N) main-thread hold
-        var agentTexts: [[String: Any]] = []
-        for (name, panel) in panels {
-            let base64Str: String = await MainActor.run {
-                self.readTerminalTextBase64(
-                    terminalPanel: panel, includeScrollback: true, lineLimit: lineLimit
-                )
+        // Parallel per-agent reads using TaskGroup.
+        // Each child task does: MainActor.run (read raw bytes) → base64 decode off-main.
+        // Since MainActor is serial, reads still execute one-at-a-time on main,
+        // but base64 decoding of agent N overlaps with the MainActor read of agent N+1.
+        let agentTexts: [(Int, [String: Any])] = await withTaskGroup(
+            of: (Int, [String: Any]).self
+        ) { group in
+            for (index, (name, panel)) in panels.enumerated() {
+                group.addTask {
+                    let base64Str: String = await MainActor.run {
+                        self.readTerminalTextBase64(
+                            terminalPanel: panel, includeScrollback: true, lineLimit: lineLimit
+                        )
+                    }
+                    // Decode base64 off-main
+                    var text = ""
+                    if base64Str.hasPrefix("OK ") {
+                        let raw = String(base64Str.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        text = Data(base64Encoded: raw).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    }
+                    return (index, ["agent_name": name, "text": text] as [String: Any])
+                }
             }
-            // Decode base64 off-main
-            var text = ""
-            if base64Str.hasPrefix("OK ") {
-                let raw = String(base64Str.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-                text = Data(base64Encoded: raw).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            var results: [(Int, [String: Any])] = []
+            for await result in group {
+                results.append(result)
             }
-            agentTexts.append(["agent_name": name, "text": text])
+            return results
         }
-        return v2Ok(id: id, result: ["team_name": teamName, "agents": agentTexts])
+        // Restore original agent order
+        let sorted = agentTexts.sorted { $0.0 < $1.0 }.map(\.1)
+        return v2Ok(id: id, result: ["team_name": teamName, "agents": sorted])
     }
 
     private func asyncTeamList(params: [String: Any], id: Any?) async -> String {
@@ -2054,13 +2069,58 @@ class TerminalController {
         guard let teamName = params["team_name"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
         }
-        let status: [String: Any]? = await MainActor.run {
-            TeamOrchestrator.shared.teamStatus(name: teamName)
+
+        // Minimal MainActor hold: get team struct (agent names, UUIDs, team metadata) only
+        let teamInfo: (leaderSessionId: String, workspaceId: String, agents: [(name: String, id: String, cli: String, model: String, agentType: String, color: String, workspaceId: String, panelId: String, worktreeBranch: String?, worktreePath: String?)], createdAt: String)? = await MainActor.run {
+            guard let team = TeamOrchestrator.shared.teamStruct(name: teamName) else { return nil }
+            return (
+                leaderSessionId: team.leaderSessionId,
+                workspaceId: team.workspaceId.uuidString,
+                agents: team.agents.map { a in
+                    (name: a.name, id: a.id, cli: a.cli, model: a.model, agentType: a.agentType, color: a.color,
+                     workspaceId: a.workspaceId.uuidString, panelId: a.panelId.uuidString,
+                     worktreeBranch: a.worktreeBranch, worktreePath: a.worktreePath)
+                },
+                createdAt: ISO8601DateFormatter().string(from: team.createdAt)
+            )
         }
-        if let status {
-            return v2Ok(id: id, result: status)
+        guard let teamInfo else {
+            return v2Error(id: id, code: "not_found", message: "Team not found")
         }
-        return v2Error(id: id, code: "not_found", message: "Team not found")
+
+        // Enrich with data from TeamDataStore (off-main, lock-protected)
+        let store = TeamDataStore.shared
+        let inboxCount = store.inboxItems(teamName: teamName).count
+        let taskTotal = store.taskCount(teamName: teamName)
+
+        let agents: [[String: Any]] = teamInfo.agents.map { agent in
+            let enrichment = store.agentDataEnrichment(teamName: teamName, agentName: agent.name)
+            var info: [String: Any] = [
+                "id": agent.id,
+                "name": agent.name,
+                "cli": agent.cli,
+                "model": agent.model,
+                "agent_type": agent.agentType,
+                "workspace_id": agent.workspaceId,
+                "panel_id": agent.panelId,
+            ]
+            // Merge data enrichment (task, heartbeat, agent_state)
+            for (key, value) in enrichment { info[key] = value }
+            if let branch = agent.worktreeBranch { info["worktree_branch"] = branch }
+            if let path = agent.worktreePath { info["worktree_path"] = path }
+            return info
+        }
+
+        return v2Ok(id: id, result: [
+            "team_name": teamName,
+            "leader_session_id": teamInfo.leaderSessionId,
+            "workspace_id": teamInfo.workspaceId,
+            "agent_count": teamInfo.agents.count,
+            "agents": agents,
+            "attention_count": inboxCount,
+            "task_count": taskTotal,
+            "created_at": teamInfo.createdAt,
+        ] as [String: Any])
     }
 
     private func asyncTeamInbox(params: [String: Any], id: Any?) async -> String {
@@ -2081,16 +2141,29 @@ class TerminalController {
         guard let agentName = params["agent_name"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing agent_name")
         }
-        let agent: [String: Any]? = await MainActor.run {
-            guard let status = TeamOrchestrator.shared.teamStatus(name: teamName),
-                  let agents = status["agents"] as? [[String: Any]],
-                  let agent = agents.first(where: { ($0["name"] as? String) == agentName }) else { return nil }
-            return agent
+        // Minimal MainActor hold: get agent struct only
+        let agentInfo: (id: String, name: String, cli: String, model: String, agentType: String, color: String, workspaceId: String, panelId: String, worktreeBranch: String?, worktreePath: String?)? = await MainActor.run {
+            guard let team = TeamOrchestrator.shared.teamStruct(name: teamName),
+                  let agent = team.agents.first(where: { $0.name == agentName }) else { return nil }
+            return (id: agent.id, name: agent.name, cli: agent.cli, model: agent.model,
+                    agentType: agent.agentType, color: agent.color,
+                    workspaceId: agent.workspaceId.uuidString, panelId: agent.panelId.uuidString,
+                    worktreeBranch: agent.worktreeBranch, worktreePath: agent.worktreePath)
         }
-        if let agent {
-            return v2Ok(id: id, result: agent)
+        guard let agentInfo else {
+            return v2Error(id: id, code: "not_found", message: "Agent not found")
         }
-        return v2Error(id: id, code: "not_found", message: "Agent not found")
+        // Enrich off-main
+        let enrichment = TeamDataStore.shared.agentDataEnrichment(teamName: teamName, agentName: agentName)
+        var info: [String: Any] = [
+            "id": agentInfo.id, "name": agentInfo.name, "cli": agentInfo.cli,
+            "model": agentInfo.model, "agent_type": agentInfo.agentType,
+            "workspace_id": agentInfo.workspaceId, "panel_id": agentInfo.panelId,
+        ]
+        for (key, value) in enrichment { info[key] = value }
+        if let branch = agentInfo.worktreeBranch { info["worktree_branch"] = branch }
+        if let path = agentInfo.worktreePath { info["worktree_path"] = path }
+        return v2Ok(id: id, result: info)
     }
 
     // MARK: - Async Task Lifecycle Handlers (data change + UI notification)

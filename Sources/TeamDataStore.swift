@@ -19,11 +19,25 @@ final class TeamDataStore: @unchecked Sendable {
     private let staleTaskThreshold: TimeInterval = 10 * 60
     private let staleHeartbeatThreshold: TimeInterval = 5 * 60
 
+    /// Max messages retained per team before oldest are dropped.
+    private let maxMessagesPerTeam = 500
+
     /// Called after data changes to sync state to the daemon (fire-and-forget).
     var onDataChanged: (() -> Void)?
 
+    /// Serial queue for coalescing change notifications to avoid races.
+    private let notifyQueue = DispatchQueue(label: "team.data.notify", qos: .utility)
+    private var notifyPending = false
+
     private func notifyChanged() {
-        onDataChanged?()
+        notifyQueue.async { [weak self] in
+            guard let self, !self.notifyPending else { return }
+            self.notifyPending = true
+            self.notifyQueue.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.notifyPending = false
+                self?.onDataChanged?()
+            }
+        }
     }
 
     // MARK: - Team Registry
@@ -80,8 +94,11 @@ final class TeamDataStore: @unchecked Sendable {
             type: Self.normalizedMessageType(type)
         )
         messages[teamName, default: []].append(msg)
-        // notifyChanged deferred to avoid lock re-entry
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.notifyChanged() }
+        // Trim oldest messages if over retention limit
+        if let count = messages[teamName]?.count, count > maxMessagesPerTeam {
+            messages[teamName]?.removeFirst(count - maxMessagesPerTeam)
+        }
+        notifyChanged()
         return msg
     }
 
@@ -89,12 +106,15 @@ final class TeamDataStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard let msgs = messages[teamName] else { return [] }
-        var filtered = msgs
-        if let from { filtered = filtered.filter { $0.from == from } }
-        if let to { filtered = filtered.filter { $0.to == to } }
-        if let type { filtered = filtered.filter { $0.type == type } }
-        if let since { filtered = filtered.filter { $0.timestamp > since } }
-        if let limit { filtered = Array(filtered.suffix(limit)) }
+        // Single-pass filter to avoid creating intermediate arrays
+        let filtered = msgs.filter { msg in
+            if let from, msg.from != from { return false }
+            if let to, msg.to != to { return false }
+            if let type, msg.type != type { return false }
+            if let since, msg.timestamp <= since { return false }
+            return true
+        }
+        if let limit { return Array(filtered.suffix(limit)) }
         return filtered
     }
 
@@ -170,7 +190,7 @@ final class TeamDataStore: @unchecked Sendable {
             tasks[parentIdx].updatedAt = now
             taskBoards[teamName] = tasks
         }
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.notifyChanged() }
+        notifyChanged()
         return task
     }
 
@@ -242,7 +262,7 @@ final class TeamDataStore: @unchecked Sendable {
         }
         tasks[idx].updatedAt = now
         taskBoards[teamName] = tasks
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.notifyChanged() }
+        notifyChanged()
         return tasks[idx]
     }
 
@@ -271,7 +291,7 @@ final class TeamDataStore: @unchecked Sendable {
             tasks[idx].reassignmentCount += 1
         }
         taskBoards[teamName] = tasks
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.notifyChanged() }
+        notifyChanged()
         return tasks[idx]
     }
 
@@ -293,7 +313,7 @@ final class TeamDataStore: @unchecked Sendable {
         tasks[idx].updatedAt = now
         tasks[idx].lastProgressAt = now
         taskBoards[teamName] = tasks
-        DispatchQueue.global(qos: .utility).async { [weak self] in self?.notifyChanged() }
+        notifyChanged()
         return tasks[idx]
     }
 
@@ -638,8 +658,15 @@ final class TeamDataStore: @unchecked Sendable {
             ])
         }
 
+        if topOnly {
+            // O(n) min scan instead of O(n log n) sort for single item
+            if let best = items.min(by: { ($0["priority"] as? Int ?? 99) < ($1["priority"] as? Int ?? 99) }) {
+                return [best]
+            }
+            return []
+        }
         items.sort { ($0["priority"] as? Int ?? 99) < ($1["priority"] as? Int ?? 99) }
-        return topOnly ? Array(items.prefix(1)) : items
+        return items
     }
 
     // MARK: - Static Helpers (no instance state needed)

@@ -102,6 +102,12 @@ jobs:
           brew update
           brew install zig
           npm install --global create-dmg
+          # Ensure Rust toolchain is available for daemon/tm-rpc builds
+          if ! command -v cargo &>/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Download Metal Toolchain
         if: steps.guard_release_assets.outputs.skip_all != 'true'
@@ -143,6 +149,11 @@ jobs:
           DERIVED_PUBLIC_KEY=$(swift scripts/derive_sparkle_public_key.swift "$SPARKLE_PRIVATE_KEY")
           echo "Derived Sparkle public key: $DERIVED_PUBLIC_KEY"
           echo "SPARKLE_PUBLIC_KEY=$DERIVED_PUBLIC_KEY" >> "$GITHUB_ENV"
+
+      - name: Build daemon binaries (Rust)
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        run: |
+          cd daemon && cargo build --release
 
       - name: Build app (Release)
         if: steps.guard_release_assets.outputs.skip_all != 'true'
@@ -187,6 +198,21 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security list-keychains -d user -s build.keychain
 
+      - name: Bundle daemon binaries
+        if: steps.guard_release_assets.outputs.skip_all != 'true'
+        run: |
+          APP_PATH="build/Build/Products/Release/term-mesh.app"
+          BIN_DIR="$APP_PATH/Contents/Resources/bin"
+          mkdir -p "$BIN_DIR"
+          for bin in daemon/target/release/term-meshd daemon/target/release/tm-rpc; do
+            if [ -f "$bin" ]; then
+              cp "$bin" "$BIN_DIR/"
+              chmod +x "$BIN_DIR/$(basename "$bin")"
+              echo "Bundled $(basename "$bin")"
+            fi
+          done
+          ls -la "$BIN_DIR/"
+
       - name: Codesign app
         if: steps.guard_release_assets.outputs.skip_all != 'true'
         env:
@@ -198,10 +224,13 @@ jobs:
           fi
           APP_PATH="build/Build/Products/Release/term-mesh.app"
           ENTITLEMENTS="term-mesh.entitlements"
-          CLI_PATH="$APP_PATH/Contents/Resources/bin/term-mesh"
-          if [ -f "$CLI_PATH" ]; then
-            /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$CLI_PATH"
-          fi
+          # Sign embedded binaries individually before signing the app bundle
+          for bin in term-mesh term-meshd tm-rpc; do
+            BIN_PATH="$APP_PATH/Contents/Resources/bin/$bin"
+            if [ -f "$BIN_PATH" ]; then
+              /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$BIN_PATH"
+            fi
+          done
           /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" --deep "$APP_PATH"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 

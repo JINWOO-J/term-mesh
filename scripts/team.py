@@ -85,6 +85,12 @@ AGENT_INIT_PROMPT = (
     '4. If blocked, run `./scripts/team.py task block <task_id> \'<reason>\'`.\n'
     '5. If ready for validation, run `./scripts/team.py task review <task_id> \'<summary>\'`.\n'
     '6. When accepted as done, run `./scripts/team.py task done <task_id> \'<result>\'`.\n'
+    '\n'
+    'Environment:\n'
+    '- Working directory: {workdir}\n'
+    '- Socket: {socket}\n'
+    '- Project: term-mesh (Swift/macOS terminal multiplexer)\n'
+    '\n'
     'When you complete any task assigned by the leader, you MUST use your bash/execute tool to run:\n'
     './scripts/team.py report \'<summary of your result>\'\n'
     'Do NOT just write the result as text — actually execute the shell command using your tool. '
@@ -242,7 +248,7 @@ def cmd_create(sock: str, args: argparse.Namespace) -> None:
             time.sleep(3)  # Wait for agent CLI to initialize
             for agent in non_kiro:
                 name = agent["name"]
-                init_text = AGENT_INIT_PROMPT.format(agent=name)
+                init_text = AGENT_INIT_PROMPT.format(agent=name, workdir=WORKDIR, socket=sock)
                 rpc(sock, "team.send", {
                     "team_name": TEAM,
                     "agent_name": name,

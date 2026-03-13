@@ -799,10 +799,10 @@ final class TeamOrchestrator {
     }
 
     /// Send text to a specific agent in a team.
-    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager) -> Bool {
+    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.15) -> Bool {
         guard let team = teams[teamName] else { return false }
         guard let agent = team.agents.first(where: { $0.name == agentName }) else { return false }
-        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager)
+        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager, enterDelay: enterDelay)
     }
 
     func sendToLeader(teamName: String, text: String, tabManager: TabManager) -> Bool {
@@ -931,7 +931,7 @@ final class TeamOrchestrator {
         return lines.joined(separator: "\n")
     }
 
-    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager) -> Bool {
+    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.15) -> Bool {
         guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return false }
         guard let panel = workspace.terminalPanel(for: panelId) else { return false }
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
@@ -939,23 +939,32 @@ final class TeamOrchestrator {
 
         // Use key-event input plus delayed Return so TUI apps submit the message
         // instead of leaving the text in the composer input.
+        // RunLoop timer in .common mode is more reliable than asyncAfter under
+        // heavy main-thread load (asyncAfter can be delayed/coalesced, causing
+        // missed Enter presses during broadcast or rapid sends).
         panel.sendInputText(trimmed)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            panel.sendInputText("\n")
+        let enterTimer = Timer(timeInterval: enterDelay, repeats: false) { [weak panel] _ in
+            panel?.sendInputText("\n")
         }
+        RunLoop.main.add(enterTimer, forMode: .common)
 
         #if DEBUG
-        dlog("[team.sendTextToPanel] sendText textLen=\(trimmed.count) text=\(trimmed.prefix(80).debugDescription)")
+        dlog("[team.sendTextToPanel] sendText textLen=\(trimmed.count) enterDelay=\(enterDelay) text=\(trimmed.prefix(80).debugDescription)")
         #endif
         return true
     }
 
     /// Broadcast text to all agents in a team.
+    /// Staggers Enter key delivery across agents to avoid main-thread contention
+    /// when many agents process input simultaneously (e.g., 10-agent broadcasts).
     func broadcast(teamName: String, text: String, tabManager: TabManager) -> Int {
         guard let team = teams[teamName] else { return 0 }
         var count = 0
-        for agent in team.agents {
-            if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager) {
+        for (index, agent) in team.agents.enumerated() {
+            // Stagger Enter timers: agent 0 at 0.15s, agent 1 at 0.20s, etc.
+            // This spreads Enter key delivery to avoid N simultaneous timer fires.
+            let enterDelay = 0.15 + Double(index) * 0.05
+            if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager, enterDelay: enterDelay) {
                 count += 1
             }
         }
@@ -1033,6 +1042,11 @@ final class TeamOrchestrator {
         DispatchQueue.global(qos: .utility).async {
             self.daemon.syncTeams(payload)
         }
+    }
+
+    /// Get raw team struct for minimal MainActor access (used by hybrid team.status).
+    func teamStruct(name: String) -> Team? {
+        teams[name]
     }
 
     /// Get team status.

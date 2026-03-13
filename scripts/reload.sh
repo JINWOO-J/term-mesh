@@ -11,6 +11,7 @@ BUNDLE_SET=0
 DERIVED_SET=0
 TAG=""
 TERMMESH_DEBUG_LOG=""
+ALLOW_ALL=0
 
 usage() {
   cat <<'EOF'
@@ -22,6 +23,7 @@ Options:
   --name <app name>      Override app display/bundle name.
   --bundle-id <id>       Override bundle identifier.
   --derived-data <path>  Override derived data path.
+  --allow-all            Set TERMMESH_SOCKET_MODE=allowAll (for external socket access).
   -h, --help             Show this help.
 EOF
 }
@@ -131,6 +133,10 @@ while [[ $# -gt 0 ]]; do
       fi
       DERIVED_SET=1
       shift 2
+      ;;
+    --allow-all)
+      ALLOW_ALL=1
+      shift
       ;;
     -h|--help)
       usage
@@ -326,14 +332,20 @@ OPEN_CLEAN_ENV=(
   -u XDG_DATA_DIRS
 )
 
+# Build optional env vars array for the open command
+EXTRA_ENV=()
+if [[ "$ALLOW_ALL" -eq 1 ]]; then
+  EXTRA_ENV+=(TERMMESH_SOCKET_MODE=allowAll)
+fi
+
 if [[ -n "${TAG_SLUG:-}" && -n "${TERMMESH_SOCKET:-}" ]]; then
   # Ensure tag-specific socket paths win even if the caller has TERMMESH_* overrides.
-  "${OPEN_CLEAN_ENV[@]}" TERMMESH_TAG="$TAG_SLUG" TERMMESH_SOCKET_PATH="$TERMMESH_SOCKET" TERMMESH_DAEMON_UNIX_PATH="$TERMMESH_DAEMON_SOCKET" TERMMESH_DEBUG_LOG="$TERMMESH_DEBUG_LOG" open "$APP_PATH"
+  "${OPEN_CLEAN_ENV[@]}" "${EXTRA_ENV[@]}" TERMMESH_TAG="$TAG_SLUG" TERMMESH_SOCKET_PATH="$TERMMESH_SOCKET" TERMMESH_DAEMON_UNIX_PATH="$TERMMESH_DAEMON_SOCKET" TERMMESH_DEBUG_LOG="$TERMMESH_DEBUG_LOG" open "$APP_PATH"
 elif [[ -n "${TAG_SLUG:-}" ]]; then
-  "${OPEN_CLEAN_ENV[@]}" TERMMESH_TAG="$TAG_SLUG" TERMMESH_DEBUG_LOG="$TERMMESH_DEBUG_LOG" open "$APP_PATH"
+  "${OPEN_CLEAN_ENV[@]}" "${EXTRA_ENV[@]}" TERMMESH_TAG="$TAG_SLUG" TERMMESH_DEBUG_LOG="$TERMMESH_DEBUG_LOG" open "$APP_PATH"
 else
   echo "/tmp/term-mesh-debug.log" > /tmp/term-mesh-last-debug-log-path || true
-  "${OPEN_CLEAN_ENV[@]}" open "$APP_PATH"
+  "${OPEN_CLEAN_ENV[@]}" "${EXTRA_ENV[@]}" open "$APP_PATH"
 fi
 osascript -e "tell application id \"${BUNDLE_ID}\" to activate" || true
 

@@ -47,7 +47,7 @@ Non-goals for P0/P1:
 ## Current Constraints
 
 Current relevant files:
-1. [scripts/team.py](/Users/jinwoo/work/project/cmux/scripts/team.py)
+1. [daemon/term-mesh-cli/src/tm_agent.rs](/Users/jinwoo/work/project/cmux/daemon/term-mesh-cli/src/tm_agent.rs) (unified CLI — replaces scripts/team.py)
 2. [Sources/TeamOrchestrator.swift](/Users/jinwoo/work/project/cmux/Sources/TeamOrchestrator.swift)
 3. [Sources/TerminalController.swift](/Users/jinwoo/work/project/cmux/Sources/TerminalController.swift)
 4. [Resources/dashboard/index.html](/Users/jinwoo/work/project/cmux/Resources/dashboard/index.html)
@@ -188,15 +188,15 @@ Proposed `team.task.update` params:
 
 ### P0 CLI Surface
 
-Update [scripts/team.py](/Users/jinwoo/work/project/cmux/scripts/team.py).
+Update `tm-agent` CLI ([daemon/term-mesh-cli/src/tm_agent.rs](/Users/jinwoo/work/project/cmux/daemon/term-mesh-cli/src/tm_agent.rs)).
 
 New commands:
-1. `./scripts/team.py inbox`
-2. `./scripts/team.py task get <id>`
-3. `./scripts/team.py task block <id> <reason>`
-4. `./scripts/team.py task review <id> <summary>`
-5. `./scripts/team.py task start <id>`
-6. `./scripts/team.py task done <id> [result]`
+1. `tm-agent inbox`
+2. `tm-agent task-get <id>`
+3. `tm-agent task-block <id> <reason>`
+4. `tm-agent task-review <id> <summary>`
+5. `tm-agent task-start <id>`
+6. `tm-agent task-done <id> [result]`
 
 CLI behavior changes:
 1. `task create` should support `--desc`, `--accept`, `--priority`, and `--deps`.
@@ -292,11 +292,11 @@ API behavior:
 ### P1 CLI Surface
 
 New commands:
-1. `./scripts/team.py task reassign <id> <agent>`
-2. `./scripts/team.py task split <id> '<title>' --assign <agent>`
-3. `./scripts/team.py task unblock <id>`
-4. `./scripts/team.py agent ping '<summary>'`
-5. `./scripts/team.py brief <agent>`
+1. `tm-agent task-reassign <id> <agent>`
+2. `tm-agent task-split <id> '<title>' --assign <agent>`
+3. `tm-agent task-unblock <id>`
+4. `tm-agent heartbeat '<summary>'`
+5. `tm-agent brief <agent>`
 
 CLI behavior changes:
 1. `wait` should support `--task <id>`.
@@ -348,7 +348,7 @@ Each workflow preset should define:
 
 1. Expand `TeamTask` and task serialization in [Sources/TeamOrchestrator.swift](/Users/jinwoo/work/project/cmux/Sources/TeamOrchestrator.swift).
 2. Extend JSON-RPC handling in [Sources/TerminalController.swift](/Users/jinwoo/work/project/cmux/Sources/TerminalController.swift) for `team.inbox` and richer task updates.
-3. Update [scripts/team.py](/Users/jinwoo/work/project/cmux/scripts/team.py) to expose the new task and inbox commands.
+3. Update `tm-agent` CLI to expose the new task and inbox commands.
 4. Update dashboard fetch wiring in [Sources/DashboardController.swift](/Users/jinwoo/work/project/cmux/Sources/DashboardController.swift).
 5. Update dashboard rendering in [Resources/dashboard/index.html](/Users/jinwoo/work/project/cmux/Resources/dashboard/index.html).
 6. Update leader and worker prompts in [Sources/TeamOrchestrator.swift](/Users/jinwoo/work/project/cmux/Sources/TeamOrchestrator.swift).

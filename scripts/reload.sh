@@ -299,11 +299,11 @@ if [[ -x "$TERMMESHD_SRC" ]]; then
   mkdir -p "$BIN_DIR"
   cp "$TERMMESHD_SRC" "$BIN_DIR/term-meshd"
   chmod +x "$BIN_DIR/term-meshd"
-  # Also copy tm-rpc (fast team RPC client) if built
-  TMRPC_SRC="$PWD/daemon/target/release/tm-rpc"
-  if [[ -x "$TMRPC_SRC" ]]; then
-    cp "$TMRPC_SRC" "$BIN_DIR/tm-rpc"
-    chmod +x "$BIN_DIR/tm-rpc"
+  # Also copy tm-agent (unified team CLI) if built
+  TMAGENT_SRC="$PWD/daemon/target/release/tm-agent"
+  if [[ -x "$TMAGENT_SRC" ]]; then
+    cp "$TMAGENT_SRC" "$BIN_DIR/tm-agent"
+    chmod +x "$BIN_DIR/tm-agent"
   fi
 fi
 # Avoid inheriting term-mesh/ghostty environment variables from the terminal that

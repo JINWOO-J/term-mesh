@@ -102,7 +102,7 @@ jobs:
           brew update
           brew install zig
           npm install --global create-dmg
-          # Ensure Rust toolchain is available for daemon/tm-rpc builds
+          # Ensure Rust toolchain is available for daemon/tm-agent builds
           if ! command -v cargo &>/dev/null; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             source "$HOME/.cargo/env"
@@ -204,7 +204,7 @@ jobs:
           APP_PATH="build/Build/Products/Release/term-mesh.app"
           BIN_DIR="$APP_PATH/Contents/Resources/bin"
           mkdir -p "$BIN_DIR"
-          for bin in daemon/target/release/term-meshd daemon/target/release/tm-rpc; do
+          for bin in daemon/target/release/term-meshd daemon/target/release/tm-agent; do
             if [ -f "$bin" ]; then
               cp "$bin" "$BIN_DIR/"
               chmod +x "$BIN_DIR/$(basename "$bin")"
@@ -225,7 +225,7 @@ jobs:
           APP_PATH="build/Build/Products/Release/term-mesh.app"
           ENTITLEMENTS="term-mesh.entitlements"
           # Sign embedded binaries individually before signing the app bundle
-          for bin in term-mesh term-meshd tm-rpc; do
+          for bin in term-mesh term-meshd tm-agent; do
             BIN_PATH="$APP_PATH/Contents/Resources/bin/$bin"
             if [ -f "$BIN_PATH" ]; then
               /usr/bin/codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$ENTITLEMENTS" "$BIN_PATH"

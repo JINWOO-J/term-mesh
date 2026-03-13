@@ -146,27 +146,27 @@ Before sending meaningful work, create a task and assign it.
 
 Create a task and delegate it to a specific agent:
 \`\`\`bash
-${SCRIPT_DIR}/team.py delegate <agent_name> '<your instruction>'
+tm-agent delegate <agent_name> '<your instruction>'
 \`\`\`
 
 Send a raw direct message to a specific agent:
 \`\`\`bash
-${SCRIPT_DIR}/team.py send <agent_name> '<your instruction>'
+tm-agent send <agent_name> '<your instruction>'
 \`\`\`
 
 Broadcast to all agents:
 \`\`\`bash
-${SCRIPT_DIR}/team.py broadcast '<your instruction>'
+tm-agent broadcast '<your instruction>'
 \`\`\`
 
 Check team status:
 \`\`\`bash
-${SCRIPT_DIR}/team.py status
+tm-agent status
 \`\`\`
 
 Check what needs intervention first:
 \`\`\`bash
-${SCRIPT_DIR}/team.py inbox
+tm-agent inbox
 \`\`\`
 
 Environment variable is pre-set: TERMMESH_SOCKET=${SOCKET}
@@ -178,44 +178,44 @@ NEVER answer the user's question using only your own analysis when agents were d
 
 Read a specific agent's terminal output:
 \`\`\`bash
-${SCRIPT_DIR}/team.py read <agent_name> --lines 100
+tm-agent read <agent_name> --lines 100
 \`\`\`
 
 Read ALL agents' terminal output at once:
 \`\`\`bash
-${SCRIPT_DIR}/team.py collect --lines 100
+tm-agent collect --lines 100
 \`\`\`
 
 Wait for all agents to post results (blocks until done):
 \`\`\`bash
-${SCRIPT_DIR}/team.py wait --timeout 120
+tm-agent wait --timeout 120
 \`\`\`
 
 Wait for a blocked or review-ready item:
 \`\`\`bash
-${SCRIPT_DIR}/team.py wait --mode blocked --timeout 120
-${SCRIPT_DIR}/team.py wait --mode review_ready --timeout 120
+tm-agent wait --mode blocked --timeout 120
+tm-agent wait --mode review_ready --timeout 120
 \`\`\`
 
 ## Message Channel
 
 Agents can post messages. Read the message queue:
 \`\`\`bash
-${SCRIPT_DIR}/team.py msg list
-${SCRIPT_DIR}/team.py msg list --from <agent_name>
+tm-agent msg-list
+tm-agent msg-list --from <agent_name>
 \`\`\`
 
 ## Task Board
 
 Create and track tasks for agents:
 \`\`\`bash
-${SCRIPT_DIR}/team.py task create '<title>' --assign <agent_name> --priority 2
-${SCRIPT_DIR}/team.py task list
-${SCRIPT_DIR}/team.py task get <id>
-${SCRIPT_DIR}/team.py task start <id> --assign <agent_name>
-${SCRIPT_DIR}/team.py task block <id> '<reason>'
-${SCRIPT_DIR}/team.py task review <id> '<summary>'
-${SCRIPT_DIR}/team.py task done <id> '<result summary>'
+tm-agent task-create '<title>' --assign <agent_name> --priority 2
+tm-agent tasks
+tm-agent task-get <id>
+tm-agent task-start <id> --assign <agent_name>
+tm-agent task-block <id> '<reason>'
+tm-agent task-review <id> '<summary>'
+tm-agent task-done <id> '<result summary>'
 \`\`\`
 
 ## Your Role
@@ -230,8 +230,8 @@ ${SCRIPT_DIR}/team.py task done <id> '<result summary>'
 
 ## Guidelines
 
-- Always use the team.py commands via Bash to communicate with agents
-- Prefer \`team.py delegate\` for new work so task ids are created automatically
+- Always use the tm-agent commands via Bash to communicate with agents
+- Prefer \`tm-agent delegate\` for new work so task ids are created automatically
 - Be concise in your instructions to agents, but include task id and completion conditions
 - When delegating, include enough context for the agent to work independently
 - **NEVER synthesize your own answer when agents are working — always read their output first**

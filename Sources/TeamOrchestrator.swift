@@ -180,7 +180,7 @@ final class TeamOrchestrator {
 
         // Env vars for agent panes
         // Include essential PATH entries since pane commands may not source shell profiles
-        // Include app's Resources/bin (contains tm-rpc, term-meshd)
+        // Include app's Resources/bin (contains tm-agent, term-meshd)
         let resourceBin = Bundle.main.resourcePath.map { "\($0)/bin" } ?? ""
         let essentialPaths = [
             resourceBin,
@@ -248,11 +248,11 @@ final class TeamOrchestrator {
                 let agentListStr = agents.enumerated().map { i, a in
                     "  \(i + 1). \(a.name) (\(a.agentType))"
                 }.joined(separator: "\n")
-                let teamPy = "\(scriptDir)/team.py"
+                let tmAgent = "tm-agent"
                 let systemPrompt = Self.buildLeaderClaudeSystemPrompt(
                     teamName: name,
                     agentList: agentListStr,
-                    teamPy: teamPy,
+                    tmAgent: tmAgent,
                     socketPath: socketPath
                 )
                 // Escape single quotes for shell, same approach as buildClaudeCommand
@@ -357,13 +357,13 @@ final class TeamOrchestrator {
 
                 Operational rules:
                 1. Work should be tracked with task ids.
-                2. When you begin a task, run `./scripts/team.py task start <task_id>`.
-                3. While actively working, periodically run `./scripts/team.py agent ping '<short progress summary>'`.
-                4. If blocked, run `./scripts/team.py task block <task_id> '<reason>'`.
-                5. If ready for validation, run `./scripts/team.py task review <task_id> '<summary>'`.
-                6. When accepted as done, run `./scripts/team.py task done <task_id> '<result>'`.
+                2. When you begin a task, run `tm-agent task-start <task_id>`.
+                3. While actively working, periodically run `tm-agent heartbeat '<short progress summary>'`.
+                4. If blocked, run `tm-agent task-block <task_id> '<reason>'`.
+                5. If ready for validation, run `tm-agent task-review <task_id> '<summary>'`.
+                6. When accepted as done, run `tm-agent task-done <task_id> '<result>'`.
                 When you complete any task, you MUST use your bash/execute tool to run:
-                ./scripts/team.py report '<summary of your result>'
+                tm-agent report '<summary of your result>'
                 Do NOT just write the result as text — actually execute the shell command.
                 """
                 agentCommand = buildKiroCommand(
@@ -380,7 +380,7 @@ final class TeamOrchestrator {
                     teamName: name,
                     model: agent.model
                 )
-                // Codex CLI starts interactively; leader sends instructions via team.py send.
+                // Codex CLI starts interactively; leader sends instructions via tm-agent send.
             case "gemini":
                 agentCommand = buildGeminiCommand(
                     geminiPath: cliPath,
@@ -388,7 +388,7 @@ final class TeamOrchestrator {
                     teamName: name,
                     model: agent.model
                 )
-                // Gemini CLI starts interactively; leader sends instructions via team.py send.
+                // Gemini CLI starts interactively; leader sends instructions via tm-agent send.
             default:
                 agentCommand = buildClaudeCommand(
                     claudePath: cliPath,
@@ -521,7 +521,7 @@ final class TeamOrchestrator {
                 let delay: Double = 5.0
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
-                    let msg = "Read the file \(promptFile) — it contains your team leader instructions with agent list and team.py commands. Follow those instructions for all team coordination."
+                    let msg = "Read the file \(promptFile) — it contains your team leader instructions with agent list and tm-agent commands. Follow those instructions for all team coordination."
                     let sent = self.sendTextToPanel(
                         workspaceId: workspace.id,
                         panelId: leaderPanelId,
@@ -564,7 +564,7 @@ final class TeamOrchestrator {
         return nil
     }
 
-    /// Find the scripts/ directory (for team.py path in leader prompts).
+    /// Find the scripts/ directory (for leader prompts).
     private static func findScriptsDir(workingDirectory: String) -> String {
         // 1) App bundle Resources/scripts/ (works in Release builds)
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("scripts").path,
@@ -590,7 +590,7 @@ final class TeamOrchestrator {
     private static func buildLeaderClaudeSystemPrompt(
         teamName: String,
         agentList: String,
-        teamPy: String,
+        tmAgent: String,
         socketPath: String
     ) -> String {
         return """
@@ -610,23 +610,23 @@ final class TeamOrchestrator {
 
         Create a task and delegate it to a specific agent:
         ```
-        \(teamPy) delegate <agent_name> '<your instruction>'
+        \(tmAgent) delegate <agent_name> '<your instruction>'
         ```
 
         Send a raw direct message:
         ```
-        \(teamPy) send <agent_name> '<your instruction>'
+        \(tmAgent) send <agent_name> '<your instruction>'
         ```
 
         Broadcast to all agents:
         ```
-        \(teamPy) broadcast '<your instruction>'
+        \(tmAgent) broadcast '<your instruction>'
         ```
 
         Check team status / inbox:
         ```
-        \(teamPy) status
-        \(teamPy) inbox
+        \(tmAgent) status
+        \(tmAgent) inbox
         ```
 
         ## Reading Agent Results (MANDATORY)
@@ -635,28 +635,28 @@ final class TeamOrchestrator {
         NEVER answer using only your own analysis when agents were delegated.
 
         ```
-        \(teamPy) read <agent_name> --lines 100
-        \(teamPy) collect --lines 100
-        \(teamPy) wait --timeout 120
-        \(teamPy) wait --mode blocked --timeout 120
-        \(teamPy) wait --mode review_ready --timeout 120
+        \(tmAgent) read <agent_name> --lines 100
+        \(tmAgent) collect --lines 100
+        \(tmAgent) wait --timeout 120
+        \(tmAgent) wait --mode blocked --timeout 120
+        \(tmAgent) wait --mode review_ready --timeout 120
         ```
 
         ## Message Channel
         ```
-        \(teamPy) msg list
-        \(teamPy) msg list --from <agent_name>
+        \(tmAgent) msg list
+        \(tmAgent) msg list --from <agent_name>
         ```
 
         ## Task Board
         ```
-        \(teamPy) task create '<title>' --assign <agent_name> --priority 2
-        \(teamPy) task list
-        \(teamPy) task get <id>
-        \(teamPy) task start <id> --assign <agent_name>
-        \(teamPy) task block <id> '<reason>'
-        \(teamPy) task review <id> '<summary>'
-        \(teamPy) task done <id> '<result>'
+        \(tmAgent) task create '<title>' --assign <agent_name> --priority 2
+        \(tmAgent) task list
+        \(tmAgent) task get <id>
+        \(tmAgent) task start <id> --assign <agent_name>
+        \(tmAgent) task block <id> '<reason>'
+        \(tmAgent) task review <id> '<summary>'
+        \(tmAgent) task done <id> '<result>'
         ```
 
         ## Your Role
@@ -685,7 +685,7 @@ final class TeamOrchestrator {
             "  \(i + 1). \(a.name) (\(a.agentType))"
         }.joined(separator: "\n")
 
-        let teamPy = "\(scriptDir)/team.py"
+        let tmAgent = "tm-agent"
 
         // Worktree info
         let worktreeAgents = agents.filter { $0.worktreeBranch != nil }
@@ -723,27 +723,27 @@ final class TeamOrchestrator {
 
         Create a task and delegate it to a specific agent:
         ```
-        \(teamPy) delegate <agent_name> '<your instruction>'
+        \(tmAgent) delegate <agent_name> '<your instruction>'
         ```
 
         Send a raw direct message to a specific agent:
         ```
-        \(teamPy) send <agent_name> '<your instruction>'
+        \(tmAgent) send <agent_name> '<your instruction>'
         ```
 
         Broadcast to all agents:
         ```
-        \(teamPy) broadcast '<your instruction>'
+        \(tmAgent) broadcast '<your instruction>'
         ```
 
         Check team status:
         ```
-        \(teamPy) status
+        \(tmAgent) status
         ```
 
         Check what needs intervention first:
         ```
-        \(teamPy) inbox
+        \(tmAgent) inbox
         ```
 
         ## Reading Agent Results (MANDATORY)
@@ -752,40 +752,40 @@ final class TeamOrchestrator {
 
         Read a specific agent's output:
         ```
-        \(teamPy) read <agent_name> --lines 100
+        \(tmAgent) read <agent_name> --lines 100
         ```
 
         Read ALL agents' output:
         ```
-        \(teamPy) collect --lines 100
+        \(tmAgent) collect --lines 100
         ```
 
         Wait for agents to finish:
         ```
-        \(teamPy) wait --timeout 120
+        \(tmAgent) wait --timeout 120
         ```
 
         Wait for the next blocked or review-ready item:
         ```
-        \(teamPy) wait --mode blocked --timeout 120
-        \(teamPy) wait --mode review_ready --timeout 120
+        \(tmAgent) wait --mode blocked --timeout 120
+        \(tmAgent) wait --mode review_ready --timeout 120
         ```
 
         ## Message Channel
         ```
-        \(teamPy) msg list
-        \(teamPy) msg list --from <agent_name>
+        \(tmAgent) msg list
+        \(tmAgent) msg list --from <agent_name>
         ```
 
         ## Task Board
         ```
-        \(teamPy) task create '<title>' --assign <agent_name> --priority 2
-        \(teamPy) task list
-        \(teamPy) task get <id>
-        \(teamPy) task start <id> --assign <agent_name>
-        \(teamPy) task block <id> '<reason>'
-        \(teamPy) task review <id> '<summary>'
-        \(teamPy) task done <id> '<result>'
+        \(tmAgent) task create '<title>' --assign <agent_name> --priority 2
+        \(tmAgent) task list
+        \(tmAgent) task get <id>
+        \(tmAgent) task start <id> --assign <agent_name>
+        \(tmAgent) task block <id> '<reason>'
+        \(tmAgent) task review <id> '<summary>'
+        \(tmAgent) task done <id> '<result>'
         ```
         \(worktreeSection)
 
@@ -887,10 +887,10 @@ final class TeamOrchestrator {
         lines.append("Resume or start this assigned task now.")
         lines.append("")
         lines.append("Use the task lifecycle commands with this task id:")
-        lines.append("- ./scripts/team.py task start \(task.id)")
-        lines.append("- ./scripts/team.py task block \(task.id) '<reason>'")
-        lines.append("- ./scripts/team.py task review \(task.id) '<summary>'")
-        lines.append("- ./scripts/team.py task done \(task.id) '<result>'")
+        lines.append("- tm-agent task-start \(task.id)")
+        lines.append("- tm-agent task-block \(task.id) '<reason>'")
+        lines.append("- tm-agent task-review \(task.id) '<summary>'")
+        lines.append("- tm-agent task-done \(task.id) '<result>'")
         return lines.joined(separator: "\n")
     }
 
@@ -907,7 +907,7 @@ final class TeamOrchestrator {
         lines.append("")
         lines.append("A new task has been assigned to you.")
         lines.append("When you begin work, run:")
-        lines.append("./scripts/team.py task start \(task.id)")
+        lines.append("tm-agent task-start \(task.id)")
         return lines.joined(separator: "\n")
     }
 
@@ -1273,7 +1273,7 @@ final class TeamOrchestrator {
             defaultPrompt = """
             You are a team leader in term-mesh. \
             On startup, immediately read /tmp/term-mesh-leader-\(teamName).md — \
-            it contains your full team instructions with agent list and team.py commands. \
+            it contains your full team instructions with agent list and tm-agent commands. \
             Follow those instructions for all team coordination. \
             Rules: 1) Be concise. 2) Delegate work, don't do it yourself. \
             3) Always read agent results before responding. 4) Use short, clear instructions.
@@ -1339,7 +1339,7 @@ final class TeamOrchestrator {
             parts.append("--model \(codexModel)")
         }
 
-        // Start interactively — leader sends instructions via team.py send.
+        // Start interactively — leader sends instructions via tm-agent send.
         return parts.joined(separator: " ")
     }
 
@@ -1370,7 +1370,7 @@ final class TeamOrchestrator {
             parts.append("--model \(geminiModel)")
         }
 
-        // Start interactively — leader sends instructions via team.py send.
+        // Start interactively — leader sends instructions via tm-agent send.
         return parts.joined(separator: " ")
     }
 

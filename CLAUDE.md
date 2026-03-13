@@ -116,47 +116,63 @@ tail -f "$(cat /tmp/term-mesh-last-debug-log-path 2>/dev/null || echo /tmp/term-
 
 **CRITICAL OVERRIDE:** When running inside term-mesh (i.e., `TERMMESH_SOCKET` env var is set or
 a socket exists at `/tmp/term-mesh*.sock` or `/tmp/cmux.sock`), ALL team operations MUST use
-`scripts/team.py`. This applies regardless of how the team was triggered.
+`tm-agent` (Rust binary, ~2ms). This applies regardless of how the team was triggered.
 
 **Banned tools in term-mesh context:** `TeamCreate`, `SendMessage`, `TaskCreate`, `TaskList`,
 `TaskGet`, `TaskUpdate`, `TeamDelete`. These create a parallel, disconnected team state.
 
 **Use instead:** The project-local `/team` command (`.claude/commands/team.md`), which routes
-everything through `scripts/team.py`.
+everything through `tm-agent`.
 
 ### OMC keyword override
 
 If OMC's keyword detector fires `[MODE: TEAM]` or `[MAGIC KEYWORD: TEAM]`:
 1. **Do NOT invoke `/oh-my-claudecode:team`** — it uses Claude Code native teams
-2. **Instead invoke `/team`** (the project-local command) or use `scripts/team.py` directly
+2. **Instead invoke `/team`** (the project-local command) or use `tm-agent` directly
 
 ### Quick CLI reference
 
-**Leader operations** (use `team.py` — runs once, latency OK):
+**All operations** use `tm-agent` (Rust, ~2ms; fallback `./scripts/tm-agent.sh` ~10ms):
 ```bash
-./scripts/team.py create [N] [--claude-leader]
-./scripts/team.py delegate <agent> '<instruction>'
-./scripts/team.py send <agent> '<instruction>'
-./scripts/team.py broadcast '<instruction>'
-./scripts/team.py read <agent> --lines 100
-./scripts/team.py collect --lines 100
-./scripts/team.py wait --timeout 120 --mode any
-./scripts/team.py destroy
-```
+# Team lifecycle
+tm-agent create [N] [--claude-leader]
+tm-agent destroy
+tm-agent status
+tm-agent list
 
-**Agent operations** (use `tm-rpc` — Rust, ~2ms; fallback `./scripts/tm-rpc.sh` ~10ms):
-```bash
-# NEVER use team.py from agents — it is 100x slower (~250ms)
-tm-rpc task-start <task_id>
-tm-rpc task-done <task_id> '<result>'
-tm-rpc task-block <task_id> '<reason>'
-tm-rpc heartbeat '<progress summary>'
-tm-rpc report '<result summary>'
-tm-rpc msg '<text>'                    # to leader
-tm-rpc msg '<text>' --to <agent_name>  # to another agent
-tm-rpc inbox                           # check messages
-tm-rpc status                          # team status
-tm-rpc tasks                           # task board
+# Leader → agent communication
+tm-agent send <agent> '<instruction>'
+tm-agent delegate <agent> '<instruction>'
+tm-agent broadcast '<instruction>'
+tm-agent read <agent> --lines 100
+tm-agent collect --lines 100
+tm-agent wait --timeout 120 --mode any
+tm-agent brief <agent>
+
+# Agent task lifecycle
+tm-agent task-start <task_id>
+tm-agent task-done <task_id> '<result>'
+tm-agent task-block <task_id> '<reason>'
+tm-agent task-review <task_id> '<summary>'
+tm-agent heartbeat '<progress summary>'
+tm-agent report '<result summary>'
+tm-agent reply '<one-paragraph summary>'
+
+# Messaging
+tm-agent msg '<text>'                    # to leader
+tm-agent msg '<text>' --to <agent_name>  # to another agent
+tm-agent inbox                           # check messages
+tm-agent msg-list --from <agent>         # list messages
+tm-agent msg-clear                       # clear queue
+
+# Task board
+tm-agent tasks                           # list all tasks
+tm-agent task-create '<title>' --assign <agent>
+tm-agent task-get <id>
+tm-agent task-update <id> <status>
+tm-agent task-reassign <id> <agent>
+tm-agent task-unblock <id>
+tm-agent task-clear
 ```
 
 ## E2E mac UI tests

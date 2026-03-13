@@ -15,6 +15,18 @@ if [[ -z "${APP_PATH}" ]]; then
   echo "term-mesh.app not found in DerivedData" >&2
   exit 1
 fi
+# Copy daemon binaries into app bundle
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BIN_DIR="$APP_PATH/Contents/Resources/bin"
+mkdir -p "$BIN_DIR"
+for bin in term-meshd tm-agent; do
+  src="$PROJECT_DIR/daemon/target/release/$bin"
+  if [[ -x "$src" ]]; then
+    cp "$src" "$BIN_DIR/$bin"
+    chmod +x "$BIN_DIR/$bin"
+  fi
+done
 # Dev shells (including CI/Codex) often force-disable paging by exporting these.
 # Don't leak that into term-mesh, otherwise `git diff` won't page even with PAGER=less.
 env -u GIT_PAGER -u GH_PAGER open "$APP_PATH"

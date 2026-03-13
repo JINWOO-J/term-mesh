@@ -145,11 +145,13 @@ deploy-prod: prod
 	@mkdir -p "$(INSTALL_APP)/Contents/Resources/bin"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(INSTALL_APP)/Contents/Resources/bin/term-meshd"
 	@cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(INSTALL_APP)/Contents/Resources/bin/term-mesh-run"
+	@-cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$(INSTALL_APP)/Contents/Resources/bin/tm-agent" 2>/dev/null || true
 	@echo "==> Re-signing app bundle (binaries added after initial sign)..."
 	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/bin/term-mesh"
 	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/bin/term-meshd"
 	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/bin/term-mesh-run"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$(HOME)/bin/tm-agent" 2>/dev/null || true
 	@echo "==> Starting daemon..."
 	@nohup "$(HOME)/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
 	@echo "==> Launching term-mesh..."
@@ -165,6 +167,7 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run"; \
+		cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" 2>/dev/null || true; \
 		echo "==> Re-signing app bundle for DMG..."; \
 		codesign --force --deep --sign - "$$STAGING/term-mesh.app"; \
 		create-dmg \
@@ -184,6 +187,7 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd"; \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run"; \
+		cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" 2>/dev/null || true; \
 		echo "==> Re-signing app bundle for DMG..."; \
 		codesign --force --deep --sign - "$$STAGING/term-mesh.app"; \
 		ln -s /Applications "$$STAGING/Applications"; \

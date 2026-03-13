@@ -2643,7 +2643,7 @@ class TerminalController {
         ) {
             // Note: task notification (sendTextToPanel to leader/assignee) is skipped
             // in the off-main data path. The caller already receives the task data
-            // in the RPC response. The `delegate` command in team.py handles sending
+            // in the RPC response. The `delegate` command in tm-agent handles sending
             // instructions to agents separately via team.send.
             return v2Ok(id: id, result: store.taskDictionary(task))
         }

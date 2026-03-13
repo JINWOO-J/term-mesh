@@ -91,7 +91,7 @@ delegate_to_agent() {
     local script_dir
     script_dir="$(cd "$(dirname "$0")" && pwd)"
     local output
-    output=$("$script_dir/team.py" delegate "$agent" "$msg" 2>&1)
+    output=$(tm-agent delegate "$agent" "$msg" 2>&1)
     local status=$?
     if [ $status -eq 0 ]; then
         task_id=$(printf "%s" "$output" | python3 -c "

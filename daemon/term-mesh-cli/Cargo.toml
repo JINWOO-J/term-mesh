@@ -9,10 +9,11 @@ name = "term-mesh-run"
 path = "src/main.rs"
 
 [[bin]]
-name = "tm-rpc"
-path = "src/tm_rpc.rs"
+name = "tm-agent"
+path = "src/tm_agent.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 glob = "0.3"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

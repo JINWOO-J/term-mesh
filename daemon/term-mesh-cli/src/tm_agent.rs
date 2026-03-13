@@ -315,6 +315,12 @@ fn rpc_call_timeout(sock: &PathBuf, method: &str, params: Value, timeout_secs: u
 
 /// Send multiple JSON-RPC calls over a single connection.
 fn rpc_batch(sock: &PathBuf, payloads: &[String]) -> Result<Vec<Value>, String> {
+    // Validate all payloads are valid JSON before sending
+    for (i, payload) in payloads.iter().enumerate() {
+        serde_json::from_str::<Value>(payload)
+            .map_err(|e| format!("invalid JSON in payload {i}: {e}"))?;
+    }
+
     let stream = UnixStream::connect(sock).map_err(|e| format!("connect: {e}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
 
@@ -353,7 +359,12 @@ fn task_title_from_text(text: &str) -> String {
     if compact.is_empty() {
         "Untitled task".to_string()
     } else if compact.len() > 80 {
-        compact[..80].to_string()
+        // Find a valid char boundary at or before byte 80
+        let mut end = 80;
+        while end > 0 && !compact.is_char_boundary(end) {
+            end -= 1;
+        }
+        compact[..end].to_string()
     } else {
         compact
     }
@@ -499,21 +510,26 @@ fn main() {
             }
         }
         Commands::Raw { payload } => {
-            match serde_json::from_str::<Value>(&payload) {
-                Ok(_) => {
-                    let stream = UnixStream::connect(&sock).unwrap();
+            if let Err(e) = serde_json::from_str::<Value>(&payload) {
+                eprintln!("Invalid JSON: {e}");
+                process::exit(1);
+            }
+            let stream = UnixStream::connect(&sock).map_err(|e| format!("connect: {e}"));
+            match stream {
+                Ok(stream) => {
                     stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
-                    let mut writer = stream.try_clone().unwrap();
-                    writer.write_all(payload.as_bytes()).unwrap();
-                    writer.write_all(b"\n").unwrap();
-                    writer.flush().unwrap();
+                    let mut writer = stream.try_clone().map_err(|e| format!("clone: {e}")).unwrap_or_else(|e| { eprintln!("Error: {e}"); process::exit(1); });
+                    if let Err(e) = writer.write_all(payload.as_bytes()).and_then(|_| writer.write_all(b"\n")).and_then(|_| writer.flush()) {
+                        eprintln!("Error: write: {e}");
+                        process::exit(1);
+                    }
                     let mut reader = BufReader::new(&stream);
                     let mut line = String::new();
                     reader.read_line(&mut line).ok();
                     print!("{line}");
                     return;
                 }
-                Err(e) => { eprintln!("Invalid JSON: {e}"); process::exit(1); }
+                Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
             }
         }
 
@@ -693,9 +709,24 @@ fn run_create(
         }));
     }
 
-    // Destroy existing team first
+    // Destroy existing team first, then poll until gone (max 10 × 50ms = 500ms)
     let _ = rpc_call_timeout(sock, "team.destroy", json!({ "team_name": team }), 2);
-    thread::sleep(Duration::from_millis(500));
+    for i in 0..10 {
+        if rpc_call_timeout(sock, "team.status", json!({ "team_name": team }), 1).is_err() {
+            break;
+        }
+        // team.status returns ok even if team exists but is being torn down;
+        // check if the response indicates the team no longer exists
+        if let Ok(r) = rpc_call_timeout(sock, "team.status", json!({ "team_name": team }), 1) {
+            if !r["ok"].as_bool().unwrap_or(false) {
+                break;
+            }
+        }
+        if i == 9 {
+            eprintln!("Warning: previous team may still be tearing down");
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 
     let workdir = env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -728,8 +759,31 @@ fn run_create(
             .filter(|a| a["cli"].as_str().unwrap_or("claude") != "kiro")
             .collect();
         if !non_kiro.is_empty() {
-            eprintln!("\nSending init prompts to non-kiro agents...");
-            thread::sleep(Duration::from_secs(3));
+            // Poll until all agent panels are spawned (max 60 × 100ms = 6s)
+            eprintln!("\nWaiting for agent panels to spawn...");
+            let expected = non_kiro.len();
+            for i in 0..60 {
+                if let Ok(st) = rpc_call_timeout(sock, "team.status", json!({ "team_name": team }), 2) {
+                    if let Some(agents_arr) = st["result"]["agents"].as_array() {
+                        let with_panels = agents_arr.iter()
+                            .filter(|a| a["panel_id"].as_str().map(|s| !s.is_empty()).unwrap_or(false))
+                            .count();
+                        if with_panels >= expected {
+                            eprintln!("  All {expected} agent panels ready ({} ms)", (i + 1) * 100);
+                            break;
+                        }
+                        if i % 10 == 9 {
+                            eprintln!("  ... {with_panels}/{expected} panels ready");
+                        }
+                    }
+                }
+                if i == 59 {
+                    eprintln!("  Warning: timed out waiting for all panels (proceeding anyway)");
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+
+            eprintln!("Sending init prompts to non-kiro agents...");
             for a in &non_kiro {
                 let name = a["name"].as_str().unwrap_or("");
                 let init_text = agent_init_prompt(name, &workdir, &sock.to_string_lossy());
@@ -738,6 +792,11 @@ fn run_create(
                     "text": format!("{init_text}\n"),
                 }), 3);
                 eprintln!("  \u{2713} {name}: init prompt sent");
+                // Keep 1s delay between sends: this is NOT state synchronization but
+                // main-thread congestion relief. The Swift app processes sendTextToPanel
+                // on DispatchQueue.main — sending too fast causes Enter key events to be
+                // dropped because the TUI (Claude Code) hasn't processed the previous
+                // text input before the next arrives. DO NOT remove this delay.
                 thread::sleep(Duration::from_secs(1));
             }
         }
@@ -1020,7 +1079,15 @@ fn run_brief(sock: &PathBuf, team: &str, target: &str, lines: u32) {
                 if let Some(reports) = r["result"]["reports"].as_array() {
                     if let Some(first) = reports.first() {
                         let content = first["content"].as_str().unwrap_or("");
-                        let trunc = if content.len() > 500 { &content[..500] } else { content };
+                        let trunc = if content.len() > 500 {
+                            let mut end = 500;
+                            while end > 0 && !content.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            &content[..end]
+                        } else {
+                            content
+                        };
                         terminal_tail = format!("[Last report] {trunc}");
                     }
                 }

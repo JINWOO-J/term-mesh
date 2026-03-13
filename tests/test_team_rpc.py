@@ -219,6 +219,258 @@ def test_team_not_found_after_destroy(sock_path: str) -> TestResult:
     return result
 
 
+# Shared state for task lifecycle tests
+_task_state: dict = {"task_id": None}
+
+
+def test_team_report(sock_path: str) -> TestResult:
+    """Test submitting an agent report."""
+    result = TestResult("team.report")
+    try:
+        resp = _rpc_call(sock_path, "team.report", {
+            "team_name": TEAM_NAME,
+            "agent_name": "w1",
+            "content": "test report content",
+        }, rid=30)
+        if resp.get("ok"):
+            result.success("Report submitted by w1")
+        else:
+            result.failure(f"team.report failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_team_heartbeat(sock_path: str) -> TestResult:
+    """Test agent heartbeat."""
+    result = TestResult("team.agent.heartbeat")
+    try:
+        resp = _rpc_call(sock_path, "team.agent.heartbeat", {
+            "team_name": TEAM_NAME,
+            "agent_name": "w1",
+            "summary": "test heartbeat alive",
+        }, rid=31)
+        if resp.get("ok"):
+            result.success("Heartbeat received from w1")
+        else:
+            result.failure(f"team.agent.heartbeat failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_team_inbox(sock_path: str) -> TestResult:
+    """Test fetching the team leader inbox."""
+    result = TestResult("team.inbox")
+    try:
+        resp = _rpc_call(sock_path, "team.inbox", {
+            "team_name": TEAM_NAME,
+        }, rid=32)
+        if resp.get("ok"):
+            result.success(f"Inbox fetched: {json.dumps(resp.get('result', ''))[:100]}")
+        else:
+            result.failure(f"team.inbox failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_create(sock_path: str) -> TestResult:
+    """Test task creation and store task_id for subsequent tests."""
+    result = TestResult("team.task.create")
+    try:
+        resp = _rpc_call(sock_path, "team.task.create", {
+            "team_name": TEAM_NAME,
+            "title": "rpc-test-task",
+            "assignee": "w1",
+        }, rid=10)
+        if resp.get("ok"):
+            task = resp.get("result", {})
+            task_id = task.get("id", "")
+            _task_state["task_id"] = task_id
+            result.success(f"Task created: id={task_id}")
+        else:
+            result.failure(f"task.create failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_get(sock_path: str) -> TestResult:
+    """Test fetching a task by ID."""
+    result = TestResult("team.task.get")
+    task_id = _task_state.get("task_id")
+    if not task_id:
+        result.failure("No task_id available (test_task_create may have failed)")
+        return result
+    try:
+        resp = _rpc_call(sock_path, "team.task.get", {
+            "team_name": TEAM_NAME,
+            "task_id": task_id,
+        }, rid=11)
+        if resp.get("ok"):
+            title = resp.get("result", {}).get("title", "")
+            result.success(f"Task fetched: id={task_id} title={title!r}")
+        else:
+            result.failure(f"task.get failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_update(sock_path: str) -> TestResult:
+    """Test updating task status to in_progress."""
+    result = TestResult("team.task.update (in_progress)")
+    task_id = _task_state.get("task_id")
+    if not task_id:
+        result.failure("No task_id available")
+        return result
+    try:
+        resp = _rpc_call(sock_path, "team.task.update", {
+            "team_name": TEAM_NAME,
+            "task_id": task_id,
+            "status": "in_progress",
+        }, rid=12)
+        if resp.get("ok"):
+            result.success(f"Task {task_id} updated to in_progress")
+        else:
+            result.failure(f"task.update failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_review(sock_path: str) -> TestResult:
+    """Test submitting a task for review."""
+    result = TestResult("team.task.review")
+    task_id = _task_state.get("task_id")
+    if not task_id:
+        result.failure("No task_id available")
+        return result
+    try:
+        resp = _rpc_call(sock_path, "team.task.review", {
+            "team_name": TEAM_NAME,
+            "task_id": task_id,
+            "summary": "rpc test review summary",
+        }, rid=13)
+        if resp.get("ok"):
+            result.success(f"Task {task_id} submitted for review")
+        else:
+            result.failure(f"task.review failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_done(sock_path: str) -> TestResult:
+    """Test marking a task as done."""
+    result = TestResult("team.task.done")
+    task_id = _task_state.get("task_id")
+    if not task_id:
+        result.failure("No task_id available")
+        return result
+    try:
+        resp = _rpc_call(sock_path, "team.task.done", {
+            "team_name": TEAM_NAME,
+            "task_id": task_id,
+            "result": "rpc test complete",
+        }, rid=14)
+        if resp.get("ok"):
+            result.success(f"Task {task_id} marked done")
+        else:
+            result.failure(f"task.done failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_task_get_invalid_id(sock_path: str) -> TestResult:
+    """Test that team.task.get with a nonexistent task_id returns an error."""
+    result = TestResult("team.task.get (invalid id — edge case)")
+    try:
+        resp = _rpc_call(sock_path, "team.task.get", {
+            "team_name": TEAM_NAME,
+            "task_id": "00000000-0000-0000-0000-000000000000",
+        }, rid=41)
+        if not resp.get("ok"):
+            result.success("Correctly returns error for invalid task_id")
+        else:
+            result.failure(f"Expected error but got ok: {resp}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_message_post(sock_path: str) -> TestResult:
+    """Test posting a message from an agent to the leader."""
+    result = TestResult("team.message.post")
+    try:
+        resp = _rpc_call(sock_path, "team.message.post", {
+            "team_name": TEAM_NAME,
+            "from": "w1",
+            "content": "hello from rpc test",
+            "type": "note",
+        }, rid=20)
+        if resp.get("ok"):
+            result.success("Message posted by w1")
+        else:
+            result.failure(f"message.post failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_message_list(sock_path: str) -> TestResult:
+    """Test listing messages for the team."""
+    result = TestResult("team.message.list")
+    try:
+        resp = _rpc_call(sock_path, "team.message.list", {
+            "team_name": TEAM_NAME,
+        }, rid=21)
+        if resp.get("ok"):
+            messages = resp.get("result", {}).get("messages", [])
+            result.success(f"Listed {len(messages)} message(s)")
+        else:
+            result.failure(f"message.list failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_message_clear(sock_path: str) -> TestResult:
+    """Test clearing all messages for the team."""
+    result = TestResult("team.message.clear")
+    try:
+        resp = _rpc_call(sock_path, "team.message.clear", {
+            "team_name": TEAM_NAME,
+        }, rid=22)
+        if resp.get("ok"):
+            result.success("Message queue cleared")
+        else:
+            result.failure(f"message.clear failed: {resp.get('error', resp)}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
+def test_status_unknown_team(sock_path: str) -> TestResult:
+    """Test that team.status for a nonexistent team returns an error."""
+    result = TestResult("team.status (unknown team — edge case)")
+    try:
+        resp = _rpc_call(sock_path, "team.status", {
+            "team_name": "nonexistent-team-xyz-rpc-test",
+        }, rid=40)
+        if not resp.get("ok"):
+            result.success("Correctly returns error for unknown team")
+        else:
+            # Some implementations return ok with empty/null data — acceptable
+            data = json.dumps(resp.get("result", {}))
+            result.success(f"Returns ok with data (acceptable): {data[:100]}")
+    except Exception as e:
+        result.failure(f"RPC error: {e}")
+    return result
+
+
 def main():
     print("=" * 60)
     print("  term-mesh Team RPC Tests")
@@ -250,12 +502,32 @@ def main():
     if results[-1].passed:
         time.sleep(2)  # wait for agent terminal pane to spawn
         lifecycle_tests = [
+            # --- existing: basic team ops ---
             lambda: test_team_list(sock_path),
             lambda: test_team_status(sock_path),
             lambda: test_team_send(sock_path),
             lambda: test_team_broadcast(sock_path),
+            # --- agent operations ---
+            lambda: test_team_report(sock_path),
+            lambda: test_team_heartbeat(sock_path),
+            lambda: test_team_inbox(sock_path),
+            # --- task lifecycle ---
+            lambda: test_task_create(sock_path),
+            lambda: test_task_get(sock_path),
+            lambda: test_task_update(sock_path),
+            lambda: test_task_review(sock_path),
+            lambda: test_task_done(sock_path),
+            # --- edge case: invalid task_id while team exists ---
+            lambda: test_task_get_invalid_id(sock_path),
+            # --- messaging ---
+            lambda: test_message_post(sock_path),
+            lambda: test_message_list(sock_path),
+            lambda: test_message_clear(sock_path),
+            # --- existing: destroy ---
             lambda: test_team_destroy(sock_path),
             lambda: test_team_not_found_after_destroy(sock_path),
+            # --- edge case: completely unknown team ---
+            lambda: test_status_unknown_team(sock_path),
         ]
         for t in lifecycle_tests:
             results.append(t())

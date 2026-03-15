@@ -53,33 +53,33 @@ tm-agent status
 ### Message queue
 | Command | Example | Description |
 |---------|---------|-------------|
-| `msg-list` | `/team msg-list --from explorer` | List messages |
-| `msg '<text>'` | `/team msg 'update please'` | Send message |
-| `msg-clear` | `/team msg-clear` | Clear message queue |
+| `msg list` | `/team msg list --from-agent explorer` | List messages |
+| `msg send '<text>'` | `/team msg send 'update please'` | Send message |
+| `msg clear` | `/team msg clear` | Clear message queue |
 
 ### Task board
 | Command | Example | Description |
 |---------|---------|-------------|
-| `task-create '<title>'` | `/team task-create 'fix login' --assign explorer` | Create task |
-| `tasks` | `/team tasks` | List all tasks |
-| `task-get <id>` | `/team task-get T-1` | Get task details |
-| `task-done <id> '<result>'` | `/team task-done T-1 'done'` | Mark task complete |
-| `task-review <id>` | `/team task-review T-1` | Submit for review |
-| `task-reassign <id> <agent>` | `/team task-reassign T-1 executor` | Reassign task |
-| `task-unblock <id>` | `/team task-unblock T-1` | Unblock a task |
-| `task-clear` | `/team task-clear` | Clear all tasks |
+| `task create '<title>'` | `/team task create 'fix login' --assign explorer` | Create task |
+| `task list` | `/team task list` | List all tasks |
+| `task get <id>` | `/team task get T-1` | Get task details |
+| `task done <id> '<result>'` | `/team task done T-1 'done'` | Mark task complete |
+| `task review <id>` | `/team task review T-1` | Submit for review |
+| `task reassign <id> <agent>` | `/team task reassign T-1 executor` | Reassign task |
+| `task unblock <id>` | `/team task unblock T-1` | Unblock a task |
+| `task clear` | `/team task clear` | Clear all tasks |
 
 ### Agent-side tools (for reference)
 
 Agents use `tm-agent` directly (same binary):
 
 ```
-tm-agent task-start <task_id>
-tm-agent task-done <task_id> '<result>'
-tm-agent task-block <task_id> '<reason>'
+tm-agent task start <task_id>
+tm-agent task done <task_id> '<result>'
+tm-agent task block <task_id> '<reason>'
 tm-agent heartbeat '<summary>'
 tm-agent report '<summary>'
-tm-agent msg '<text>'
+tm-agent msg send '<text>'
 tm-agent reply '<text>'
 tm-agent inbox
 tm-agent status

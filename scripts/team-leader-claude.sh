@@ -201,21 +201,21 @@ tm-agent wait --mode review_ready --timeout 120
 
 Agents can post messages. Read the message queue:
 \`\`\`bash
-tm-agent msg-list
-tm-agent msg-list --from <agent_name>
+tm-agent msg list
+tm-agent msg list --from-agent <agent_name>
 \`\`\`
 
 ## Task Board
 
 Create and track tasks for agents:
 \`\`\`bash
-tm-agent task-create '<title>' --assign <agent_name> --priority 2
-tm-agent tasks
-tm-agent task-get <id>
-tm-agent task-start <id> --assign <agent_name>
-tm-agent task-block <id> '<reason>'
-tm-agent task-review <id> '<summary>'
-tm-agent task-done <id> '<result summary>'
+tm-agent task create '<title>' --assign <agent_name> --priority 2
+tm-agent task list
+tm-agent task get <id>
+tm-agent task start <id> --assign <agent_name>
+tm-agent task block <id> '<reason>'
+tm-agent task review <id> '<summary>'
+tm-agent task done <id> '<result summary>'
 \`\`\`
 
 ## Your Role

@@ -31,7 +31,6 @@ use crate::watcher::WatcherHandle;
 
 pub struct HttpState {
     pub monitor_rx: watch::Receiver<Option<SystemSnapshot>>,
-    #[allow(dead_code)]
     pub monitor_handle: MonitorHandle,
     pub watcher_handle: WatcherHandle,
     pub sessions: SessionStore,
@@ -536,7 +535,7 @@ async fn team_tasks_create_handler(
                 ).await;
                 if let Some(assignee) = req.assignee.as_deref() {
                     let assignee_text = format!(
-                        "New assigned task: {}\nTask id: {task_id}\nStatus: {}\n\nA new task has been assigned to you.\nWhen you begin work, run:\ntm-agent task-start {task_id}\n",
+                        "New assigned task: {}\nTask id: {task_id}\nStatus: {}\n\nA new task has been assigned to you.\nWhen you begin work, run:\ntm-agent task start {task_id}\n",
                         result.get("title").and_then(|v| v.as_str()).unwrap_or(""),
                         result.get("status").and_then(|v| v.as_str()).unwrap_or("assigned")
                     );

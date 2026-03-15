@@ -173,10 +173,6 @@ pub fn list(params: serde_json::Value) -> Result<Vec<WorktreeInfo>, String> {
     Ok(result)
 }
 
-/// Check if a worktree name follows the term-mesh convention.
-pub fn is_term_mesh_worktree(name: &str) -> bool {
-    name.starts_with("term-mesh_wt_")
-}
 
 fn worktree_branch(repo: &Repository, wt_name: &str) -> String {
     // Get path from git worktree metadata
@@ -419,12 +415,6 @@ mod tests {
         (dir, path_str)
     }
 
-    #[test]
-    fn is_term_mesh_worktree_name() {
-        assert!(is_term_mesh_worktree("term-mesh_wt_abcd1234"));
-        assert!(!is_term_mesh_worktree("other_worktree"));
-        assert!(!is_term_mesh_worktree(""));
-    }
 
     #[test]
     fn create_and_list_worktree() {

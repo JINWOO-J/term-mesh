@@ -18,11 +18,11 @@ const DEFAULT_AGENT_COLORS: &[&str] = &["green", "blue", "yellow", "magenta", "c
 
 const REPORT_SUFFIX: &str = concat!(
     "\n\n[IMPORTANT] Use the team task lifecycle while you work:\n",
-    "1. If you are starting assigned work, run `tm-agent task-start <task_id>`.\n",
+    "1. If you are starting assigned work, run `tm-agent task start <task_id>`.\n",
     "2. While you are actively working, periodically run `tm-agent heartbeat '<short progress summary>'`.\n",
-    "3. If you are blocked, run `tm-agent task-block <task_id> '<reason>'`.\n",
-    "4. If you are ready for leader validation, run `tm-agent task-review <task_id> '<summary>'`.\n",
-    "5. When the task is actually done, run `tm-agent task-done <task_id> '<result>'`.\n",
+    "3. If you are blocked, run `tm-agent task block <task_id> '<reason>'`.\n",
+    "4. If you are ready for leader validation, run `tm-agent task review <task_id> '<summary>'`.\n",
+    "5. When the task is actually done, run `tm-agent task done <task_id> '<result>'`.\n",
     "If the leader did not give you a task id, report that and ask for one.\n",
     "\n",
     "[IMPORTANT] When you finish this task, you MUST use your bash/execute tool to run this SINGLE command:\n",
@@ -48,18 +48,18 @@ Fallback: `./scripts/tm-agent.sh` (bash, ~10ms). \
 NEVER use `./scripts/team.py` \u{2014} it has been removed.\n\
 \n\
 Task lifecycle:\n\
-1. Begin task: `tm-agent task-start <task_id>`\n\
+1. Begin task: `tm-agent task start <task_id>`\n\
 2. Progress heartbeat: `tm-agent heartbeat '<short summary>'`\n\
-3. If blocked: `tm-agent task-block <task_id> '<reason>'`\n\
-4. If ready for review: `tm-agent task-review <task_id> '<summary>'`\n\
-5. When done: `tm-agent task-done <task_id> '<result>'`\n\
+3. If blocked: `tm-agent task block <task_id> '<reason>'`\n\
+4. If ready for review: `tm-agent task review <task_id> '<summary>'`\n\
+5. When done: `tm-agent task done <task_id> '<result>'`\n\
 \n\
 Communication:\n\
-- Send message to leader: `tm-agent msg '<text>'`\n\
-- Send message to another agent: `tm-agent msg '<text>' --to <agent_name>`\n\
+- Send message to leader: `tm-agent msg send '<text>'`\n\
+- Send message to another agent: `tm-agent msg send '<text>' --to <agent_name>`\n\
 - Check your inbox: `tm-agent inbox`\n\
 - Check team status: `tm-agent status`\n\
-- Check tasks: `tm-agent tasks`\n\
+- Check tasks: `tm-agent task list`\n\
 - Report result: `tm-agent report '<summary>'`\n\
 \n\
 Environment:\n\
@@ -86,37 +86,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    // ── Agent-side (existing) ──────────────────────────────────────
+    // ── Agent-side ─────────────────────────────────────────────────
     /// Submit a result report
     Report { content: Option<String> },
     /// Send heartbeat (alias: ping)
     Ping { summary: Option<String> },
     /// Send heartbeat
     Heartbeat { summary: Option<String> },
-    /// Send a message (to leader by default, --to for specific agent)
-    Msg {
-        content: String,
-        #[arg(long)]
-        to: Option<String>,
-    },
-    /// Mark task as in_progress
-    TaskStart { task_id: String },
-    /// Mark task as done with optional result
-    TaskDone { task_id: String, result: Option<String> },
-    /// Mark task as blocked with reason
-    TaskBlock { task_id: String, reason: Option<String> },
     /// Show team status
     Status,
     /// Check agent inbox
     Inbox,
-    /// List all tasks
-    Tasks,
     /// Send multiple JSON-RPC payloads over a single connection
     Batch { payloads: Vec<String> },
     /// Send raw JSON-RPC payload
     Raw { payload: String },
 
-    // ── Simple RPC wrappers (new) ──────────────────────────────────
+    // ── Grouped subcommands ────────────────────────────────────────
+    /// Task operations (create, start, done, block, review, list, ...)
+    #[command(subcommand)]
+    Task(TaskCommands),
+    /// Message operations (send, list, clear)
+    #[command(subcommand)]
+    Msg(MsgCommands),
+
+    // ── Simple RPC wrappers ────────────────────────────────────────
     /// Destroy the current team
     Destroy,
     /// List all teams
@@ -138,56 +132,8 @@ enum Commands {
     ResultStatus,
     /// Collect all results
     ResultCollect,
-    /// List messages
-    MsgList {
-        #[arg(long, name = "from")]
-        from_agent: Option<String>,
-        #[arg(long)]
-        to: Option<String>,
-        #[arg(long)]
-        limit: Option<u32>,
-    },
-    /// Clear message queue
-    MsgClear,
-    /// Create a task
-    TaskCreate {
-        title: String,
-        #[arg(long)]
-        assign: Option<String>,
-        #[arg(long)]
-        desc: Option<String>,
-        #[arg(long)]
-        priority: Option<u32>,
-        #[arg(long, num_args = 1..)]
-        accept: Vec<String>,
-        #[arg(long, num_args = 1..)]
-        deps: Vec<String>,
-    },
-    /// Get task details
-    TaskGet { id: String },
-    /// Update task status
-    TaskUpdate {
-        id: String,
-        status: String,
-        result: Option<String>,
-    },
-    /// Submit task for review
-    TaskReview { id: String, summary: Option<String> },
-    /// Reassign task to another agent
-    TaskReassign { id: String, agent: String },
-    /// Unblock a task
-    TaskUnblock { id: String },
-    /// Split a task into subtasks
-    TaskSplit {
-        id: String,
-        title: String,
-        #[arg(long)]
-        assign: Option<String>,
-    },
-    /// Clear all tasks
-    TaskClear,
 
-    // ── Orchestration (new) ────────────────────────────────────────
+    // ── Orchestration ──────────────────────────────────────────────
     /// Create a new agent team
     Create {
         count: Option<u32>,
@@ -256,6 +202,76 @@ enum Commands {
         #[arg(long)]
         from: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum TaskCommands {
+    /// Create a task
+    Create {
+        title: String,
+        #[arg(long)]
+        assign: Option<String>,
+        #[arg(long)]
+        desc: Option<String>,
+        #[arg(long)]
+        priority: Option<u32>,
+        #[arg(long, num_args = 1..)]
+        accept: Vec<String>,
+        #[arg(long, num_args = 1..)]
+        deps: Vec<String>,
+    },
+    /// Mark task as in_progress
+    Start { task_id: String },
+    /// Mark task as done with optional result
+    Done { task_id: String, result: Option<String> },
+    /// Mark task as blocked with reason
+    Block { task_id: String, reason: Option<String> },
+    /// Submit task for review
+    Review { id: String, summary: Option<String> },
+    /// Get task details
+    Get { id: String },
+    /// List all tasks
+    List,
+    /// Update task status
+    Update {
+        id: String,
+        status: String,
+        result: Option<String>,
+    },
+    /// Reassign task to another agent
+    Reassign { id: String, agent: String },
+    /// Unblock a task
+    Unblock { id: String },
+    /// Split a task into subtasks
+    Split {
+        id: String,
+        title: String,
+        #[arg(long)]
+        assign: Option<String>,
+    },
+    /// Clear all tasks
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum MsgCommands {
+    /// Send a message (to leader by default, --to for specific agent)
+    Send {
+        content: String,
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// List messages
+    List {
+        #[arg(long, name = "from")]
+        from_agent: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+    },
+    /// Clear message queue
+    Clear,
 }
 
 // ── Socket / RPC infrastructure ──────────────────────────────────────
@@ -406,11 +422,11 @@ fn format_task_instruction(task: &Value, instruction: &str, no_report: bool) -> 
     lines.push(instruction.trim().to_string());
     lines.push(String::new());
     lines.push("Use the task lifecycle commands with this task id:".to_string());
-    lines.push(format!("- tm-agent task-start {task_id}"));
+    lines.push(format!("- tm-agent task start {task_id}"));
     lines.push("- tm-agent heartbeat '<short progress summary>'".to_string());
-    lines.push(format!("- tm-agent task-block {task_id} '<reason>'"));
-    lines.push(format!("- tm-agent task-review {task_id} '<summary>'"));
-    lines.push(format!("- tm-agent task-done {task_id} '<result>'"));
+    lines.push(format!("- tm-agent task block {task_id} '<reason>'"));
+    lines.push(format!("- tm-agent task review {task_id} '<summary>'"));
+    lines.push(format!("- tm-agent task done {task_id} '<result>'"));
 
     let body = lines.join("\n");
     append_report_suffix(body.trim(), no_report)
@@ -461,34 +477,102 @@ fn main() {
                 "summary": summary.as_deref().unwrap_or("alive"),
             }))
         }
-        Commands::Msg { content, to } => {
-            let mut params = json!({
-                "team_name": team,
-                "from": agent,
-                "content": content,
-                "type": "note",
-            });
-            if let Some(target) = to {
-                params["to"] = json!(target);
+        Commands::Msg(sub) => {
+            match sub {
+                MsgCommands::Send { content, to } => {
+                    let mut params = json!({
+                        "team_name": team,
+                        "from": agent,
+                        "content": content,
+                        "type": "note",
+                    });
+                    if let Some(target) = to {
+                        params["to"] = json!(target);
+                    }
+                    rpc_call(&sock, "team.message.post", params)
+                }
+                MsgCommands::List { from_agent, to, limit } => {
+                    let mut params = json!({ "team_name": team });
+                    if let Some(f) = from_agent { params["from"] = json!(f); }
+                    if let Some(t) = to { params["to"] = json!(t); }
+                    if let Some(l) = limit { params["limit"] = json!(l); }
+                    rpc_call(&sock, "team.message.list", params)
+                }
+                MsgCommands::Clear => {
+                    rpc_call(&sock, "team.message.clear", json!({ "team_name": team }))
+                }
             }
-            rpc_call(&sock, "team.message.post", params)
         }
-        Commands::TaskStart { task_id } => {
-            rpc_call(&sock, "team.task.update", json!({
-                "team_name": team, "task_id": task_id, "status": "in_progress",
-            }))
-        }
-        Commands::TaskDone { task_id, result } => {
-            rpc_call(&sock, "team.task.done", json!({
-                "team_name": team, "task_id": task_id,
-                "result": result.as_deref().unwrap_or("done"),
-            }))
-        }
-        Commands::TaskBlock { task_id, reason } => {
-            rpc_call(&sock, "team.task.block", json!({
-                "team_name": team, "task_id": task_id,
-                "blocked_reason": reason.as_deref().unwrap_or("blocked"),
-            }))
+        Commands::Task(sub) => {
+            match sub {
+                TaskCommands::Start { task_id } => {
+                    rpc_call(&sock, "team.task.update", json!({
+                        "team_name": team, "task_id": task_id, "status": "in_progress",
+                    }))
+                }
+                TaskCommands::Done { task_id, result } => {
+                    rpc_call(&sock, "team.task.done", json!({
+                        "team_name": team, "task_id": task_id,
+                        "result": result.as_deref().unwrap_or("done"),
+                    }))
+                }
+                TaskCommands::Block { task_id, reason } => {
+                    rpc_call(&sock, "team.task.block", json!({
+                        "team_name": team, "task_id": task_id,
+                        "blocked_reason": reason.as_deref().unwrap_or("blocked"),
+                    }))
+                }
+                TaskCommands::Create { title, assign, desc, priority, accept, deps } => {
+                    let mut params = json!({ "team_name": team, "title": title });
+                    if let Some(a) = assign { params["assignee"] = json!(a); }
+                    if let Some(d) = desc { params["description"] = json!(d); }
+                    if let Some(p) = priority { params["priority"] = json!(p); }
+                    if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
+                    if !deps.is_empty() { params["depends_on"] = json!(deps); }
+                    rpc_call(&sock, "team.task.create", params)
+                }
+                TaskCommands::Get { id } => {
+                    rpc_call(&sock, "team.task.get", json!({
+                        "team_name": team, "task_id": id,
+                    }))
+                }
+                TaskCommands::List => {
+                    rpc_call(&sock, "team.task.list", json!({ "team_name": team }))
+                }
+                TaskCommands::Update { id, status, result } => {
+                    let mut params = json!({
+                        "team_name": team, "task_id": id, "status": status,
+                    });
+                    if let Some(r) = result { params["result"] = json!(r); }
+                    rpc_call(&sock, "team.task.update", params)
+                }
+                TaskCommands::Review { id, summary } => {
+                    rpc_call(&sock, "team.task.review", json!({
+                        "team_name": team, "task_id": id,
+                        "summary": summary.as_deref().unwrap_or(""),
+                    }))
+                }
+                TaskCommands::Reassign { id, agent: ref target } => {
+                    rpc_call(&sock, "team.task.reassign", json!({
+                        "team_name": team, "task_id": id, "assignee": target,
+                    }))
+                }
+                TaskCommands::Unblock { id } => {
+                    rpc_call(&sock, "team.task.unblock", json!({
+                        "team_name": team, "task_id": id,
+                    }))
+                }
+                TaskCommands::Split { id, title, assign } => {
+                    let mut params = json!({
+                        "team_name": team, "task_id": id, "title": title,
+                    });
+                    if let Some(a) = assign { params["assignee"] = json!(a); }
+                    rpc_call(&sock, "team.task.split", params)
+                }
+                TaskCommands::Clear => {
+                    rpc_call(&sock, "team.task.clear", json!({ "team_name": team }))
+                }
+            }
         }
         Commands::Status => {
             rpc_call(&sock, "team.status", json!({ "team_name": team }))
@@ -497,9 +581,6 @@ fn main() {
             rpc_call(&sock, "team.inbox", json!({
                 "team_name": team, "agent_name": agent,
             }))
-        }
-        Commands::Tasks => {
-            rpc_call(&sock, "team.task.list", json!({ "team_name": team }))
         }
         Commands::Batch { payloads } => {
             match rpc_batch(&sock, &payloads) {
@@ -555,7 +636,7 @@ fn main() {
             }))
         }
         Commands::Reports => {
-            rpc_call(&sock, "team.reports", json!({ "team_name": team }))
+            rpc_call(&sock, "team.result.collect", json!({ "team_name": team }))
         }
         Commands::ResultStatus => {
             rpc_call(&sock, "team.result.status", json!({ "team_name": team }))
@@ -563,64 +644,6 @@ fn main() {
         Commands::ResultCollect => {
             rpc_call(&sock, "team.result.collect", json!({ "team_name": team }))
         }
-        Commands::MsgList { from_agent, to, limit } => {
-            let mut params = json!({ "team_name": team });
-            if let Some(f) = from_agent { params["from"] = json!(f); }
-            if let Some(t) = to { params["to"] = json!(t); }
-            if let Some(l) = limit { params["limit"] = json!(l); }
-            rpc_call(&sock, "team.message.list", params)
-        }
-        Commands::MsgClear => {
-            rpc_call(&sock, "team.message.clear", json!({ "team_name": team }))
-        }
-        Commands::TaskCreate { title, assign, desc, priority, accept, deps } => {
-            let mut params = json!({ "team_name": team, "title": title });
-            if let Some(a) = assign { params["assignee"] = json!(a); }
-            if let Some(d) = desc { params["description"] = json!(d); }
-            if let Some(p) = priority { params["priority"] = json!(p); }
-            if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
-            if !deps.is_empty() { params["depends_on"] = json!(deps); }
-            rpc_call(&sock, "team.task.create", params)
-        }
-        Commands::TaskGet { id } => {
-            rpc_call(&sock, "team.task.get", json!({
-                "team_name": team, "task_id": id,
-            }))
-        }
-        Commands::TaskUpdate { id, status, result } => {
-            let mut params = json!({
-                "team_name": team, "task_id": id, "status": status,
-            });
-            if let Some(r) = result { params["result"] = json!(r); }
-            rpc_call(&sock, "team.task.update", params)
-        }
-        Commands::TaskReview { id, summary } => {
-            rpc_call(&sock, "team.task.review", json!({
-                "team_name": team, "task_id": id,
-                "summary": summary.as_deref().unwrap_or(""),
-            }))
-        }
-        Commands::TaskReassign { id, agent: ref target } => {
-            rpc_call(&sock, "team.task.reassign", json!({
-                "team_name": team, "task_id": id, "agent_name": target,
-            }))
-        }
-        Commands::TaskUnblock { id } => {
-            rpc_call(&sock, "team.task.unblock", json!({
-                "team_name": team, "task_id": id,
-            }))
-        }
-        Commands::TaskSplit { id, title, assign } => {
-            let mut params = json!({
-                "team_name": team, "task_id": id, "title": title,
-            });
-            if let Some(a) = assign { params["assignee"] = json!(a); }
-            rpc_call(&sock, "team.task.split", params)
-        }
-        Commands::TaskClear => {
-            rpc_call(&sock, "team.task.clear", json!({ "team_name": team }))
-        }
-
         // ── Orchestration commands ──────────────────────────────
         Commands::Create { count, claude_leader, model, kiro, codex, gemini } => {
             run_create(&sock, &team, count.unwrap_or(2), claude_leader, &model, &kiro, &codex, &gemini);

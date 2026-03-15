@@ -1,6 +1,29 @@
 # Team Management P0/P1 Spec
 
-Last updated: March 9, 2026
+Last updated: March 14, 2026
+
+## Implementation Status (P0)
+
+✅ **Completed:**
+- `tm-agent` unified CLI (Rust, ~2ms latency) replacing `team.py` and `tm-rpc`
+- Task creation with title, assignee, priority, acceptance criteria, dependencies
+- Task lifecycle: queued, assigned, in_progress, blocked, review_ready, completed, failed
+- Task commands: create, start, done, block, review, get, list, update, reassign, unblock, split, clear
+- Message operations: send, list, clear with optional --to and --from filtering
+- Dashboard with task board, agent list, and message panel
+- Leader and worker agent initialization prompts with task lifecycle guidance
+- Model picker with CLI-dependent model selection (claude, codex, gemini)
+
+🟡 **In Progress:**
+- Dashboard "Needs Attention" prioritization card
+- Stale task detection (heartbeat-based)
+- Per-agent active task and heartbeat tracking
+
+❌ **Not Yet Started (P1 scope):**
+- Task dependencies blocking/unblocking automation
+- Workflow presets (Bug Triage, Feature Build, Refactor + Verify, Release Prep)
+- Task reassignment without creating replacement
+- Brief agent command with active task + heartbeat + recent messages + terminal tail
 
 This document defines the first productization pass for term-mesh multi-agent team management.
 
@@ -192,11 +215,11 @@ Update `tm-agent` CLI ([daemon/term-mesh-cli/src/tm_agent.rs](/Users/jinwoo/work
 
 New commands:
 1. `tm-agent inbox`
-2. `tm-agent task-get <id>`
-3. `tm-agent task-block <id> <reason>`
-4. `tm-agent task-review <id> <summary>`
-5. `tm-agent task-start <id>`
-6. `tm-agent task-done <id> [result]`
+2. `tm-agent task get <id>`
+3. `tm-agent task block <id> <reason>`
+4. `tm-agent task review <id> <summary>`
+5. `tm-agent task start <id>`
+6. `tm-agent task done <id> [result]`
 
 CLI behavior changes:
 1. `task create` should support `--desc`, `--accept`, `--priority`, and `--deps`.
@@ -292,9 +315,9 @@ API behavior:
 ### P1 CLI Surface
 
 New commands:
-1. `tm-agent task-reassign <id> <agent>`
-2. `tm-agent task-split <id> '<title>' --assign <agent>`
-3. `tm-agent task-unblock <id>`
+1. `tm-agent task reassign <id> <agent>`
+2. `tm-agent task split <id> '<title>' --assign <agent>`
+3. `tm-agent task unblock <id>`
 4. `tm-agent heartbeat '<summary>'`
 5. `tm-agent brief <agent>`
 

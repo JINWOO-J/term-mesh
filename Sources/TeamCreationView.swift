@@ -5,6 +5,13 @@ struct TeamAgentRow: Identifiable {
     let id = UUID()
     var preset: AgentRolePreset
     var customInstructions: String  // overrides preset instructions if non-empty
+    var providerBadge: ProviderBadge = .none
+
+    enum ProviderBadge: Equatable {
+        case none
+        case best(reason: String)
+        case fallback(wanted: String)
+    }
 }
 
 /// Sheet for creating a new multi-agent team.
@@ -12,6 +19,7 @@ struct TeamCreationView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var presetManager = AgentRolePresetManager.shared
     @ObservedObject var templateManager = TeamTemplateManager.shared
+    @ObservedObject var providerDetector = ProviderDetector.shared
 
     var onCreate: ((_ teamName: String, _ leaderMode: String, _ agents: [TeamAgentRow]) -> Void)?
 
@@ -27,6 +35,7 @@ struct TeamCreationView: View {
     @State private var selectedWorkflowName: String?
     @State private var hoveredAgentId: UUID?
     @State private var bulkModel = "sonnet"
+    @State private var selectedSmartPresetId: String?
 
     /// A team name is only truly duplicate if the entry exists AND its workspace
     /// tab is still open.  When the user closes a workspace tab manually the team
@@ -53,18 +62,18 @@ struct TeamCreationView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     teamSettings
                     Divider().padding(.vertical, 2)
-                    workflowButtons
+                    presetButtons
                     Divider().padding(.vertical, 2)
                     agentList
                     Divider().padding(.vertical, 2)
-                    presetButtons
+                    workflowButtons
                 }
                 .padding(20)
             }
             Divider()
             footer
         }
-        .frame(width: 560, height: 700)
+        .frame(width: 720, height: 850)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             leaderMode = defaultLeaderMode
@@ -299,6 +308,7 @@ struct TeamCreationView: View {
                     set: { newCli in
                         let oldCli = agents[index].preset.cli
                         agents[index].preset.cli = newCli
+                        agents[index].providerBadge = .none  // clear badge on manual change
                         // Reset model to CLI default when switching CLI families
                         if AgentRolePreset.models(for: oldCli) != AgentRolePreset.models(for: newCli) {
                             agents[index].preset.model = AgentRolePreset.defaultModel(for: newCli)
@@ -321,6 +331,36 @@ struct TeamCreationView: View {
                     }
                 }
                 .frame(width: 130)
+
+                // Provider badge
+                switch agent.providerBadge {
+                case .best(let reason):
+                    HStack(spacing: 2) {
+                        Text("\u{26A1}")
+                            .font(.system(size: 9))
+                        Text(reason)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.green)
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.green.opacity(0.1)))
+                    .help("Optimal provider for this role")
+                case .fallback(let wanted):
+                    HStack(spacing: 2) {
+                        Text("\u{21A9}")
+                            .font(.system(size: 9))
+                        Text("install \(wanted)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.orange.opacity(0.1)))
+                    .help("Install \(wanted) CLI for optimal performance")
+                case .none:
+                    EmptyView()
+                }
 
                 Spacer()
 
@@ -399,7 +439,7 @@ struct TeamCreationView: View {
         }
     }
 
-    // MARK: - Quick Presets
+    // MARK: - Quick Presets (legacy, simple role-only)
 
     /// Named team preset: a display name + list of role names to compose.
     private struct TeamPreset {
@@ -409,23 +449,11 @@ struct TeamCreationView: View {
     }
 
     private static let teamPresets: [TeamPreset] = [
-        // --- Basic ---
         TeamPreset(name: "2 Agents", icon: "person.2", roles: ["explorer", "executor"]),
         TeamPreset(name: "3 Agents", icon: "person.3", roles: ["explorer", "executor", "reviewer"]),
-
-        // --- Workflows ---
-        TeamPreset(name: "Deep Search", icon: "magnifyingglass", roles: ["explorer", "researcher", "architect"]),
         TeamPreset(name: "Debug Squad", icon: "ladybug", roles: ["debugger", "tester", "explorer"]),
-        TeamPreset(name: "Code Review", icon: "checkmark.seal", roles: ["reviewer", "security", "tester"]),
-        TeamPreset(name: "Refactor", icon: "arrow.triangle.2.circlepath", roles: ["refactorer", "reviewer", "tester"]),
-        TeamPreset(name: "Feature Build", icon: "hammer", roles: ["planner", "executor", "tester", "reviewer"]),
-        TeamPreset(name: "Full Stack", icon: "rectangle.stack", roles: ["frontend", "backend", "tester", "reviewer"]),
+        TeamPreset(name: "Deep Search", icon: "magnifyingglass", roles: ["explorer", "researcher", "architect"]),
         TeamPreset(name: "Ship It", icon: "shippingbox", roles: ["executor", "tester", "writer", "devops"]),
-        TeamPreset(name: "Research", icon: "book", roles: ["researcher", "architect", "planner"]),
-        TeamPreset(name: "Performance", icon: "gauge.high", roles: ["perf", "syseng", "debugger"]),
-        TeamPreset(name: "Operations", icon: "server.rack", roles: ["syseng", "devops", "infra", "security"]),
-        TeamPreset(name: "Security Audit", icon: "lock.shield", roles: ["security", "reviewer", "explorer"]),
-        TeamPreset(name: "Full Team", icon: "person.3.sequence", roles: ["planner", "explorer", "executor", "reviewer", "tester"]),
         TeamPreset(name: "Super Team", icon: "star.circle", roles: [
             "planner", "architect", "explorer",
             "executor", "frontend", "backend",
@@ -478,28 +506,166 @@ struct TeamCreationView: View {
     }
 
     private var presetButtons: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Team Presets")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-
-            LazyVGrid(columns: [
-                GridItem(.adaptive(minimum: 100), spacing: 6)
-            ], spacing: 6) {
-                ForEach(Self.teamPresets, id: \.name) { preset in
-                    Button(action: { applyTeamPreset(preset) }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: preset.icon)
-                                .font(.caption2)
-                            Text(preset.name)
-                                .font(.caption)
+        VStack(alignment: .leading, spacing: 10) {
+            // Smart Presets — provider-aware
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Smart Presets")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    // Provider detection status
+                    HStack(spacing: 4) {
+                        ForEach(ProviderDetector.allCLIs, id: \.self) { cli in
+                            HStack(spacing: 2) {
+                                Circle()
+                                    .fill(providerDetector.isAvailable(cli) ? Color.green : Color.gray.opacity(0.4))
+                                    .frame(width: 6, height: 6)
+                                Text(cli.capitalized)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(providerDetector.isAvailable(cli) ? .primary : .tertiary)
+                            }
                         }
-                        .frame(maxWidth: .infinity)
+                        Button(action: { providerDetector.scan() }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 9))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Rescan installed providers")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                }
+
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 200), spacing: 8)
+                ], spacing: 8) {
+                    ForEach(SmartTeamPreset.builtIn) { preset in
+                        smartPresetCard(preset)
+                    }
                 }
             }
+
+            Divider().padding(.vertical, 2)
+
+            // Simple presets (quick)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Quick Presets")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [
+                    GridItem(.adaptive(minimum: 100), spacing: 6)
+                ], spacing: 6) {
+                    ForEach(Self.teamPresets, id: \.name) { preset in
+                        Button(action: { applyTeamPreset(preset) }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: preset.icon)
+                                    .font(.caption2)
+                                Text(preset.name)
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func smartPresetCard(_ preset: SmartTeamPreset) -> some View {
+        let resolved = preset.resolve(with: providerDetector)
+        let bestCount = resolved.filter { $0.status == .best }.count
+        let fbCount = resolved.filter { if case .fallback = $0.status { return true }; return false }.count
+        let isSelected = selectedSmartPresetId == preset.id
+
+        return Button(action: { applySmartPreset(preset) }) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: preset.icon)
+                        .font(.subheadline)
+                    Text(preset.name)
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text("\(resolved.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.quaternary))
+                }
+
+                Text(preset.description)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                // Resolved agents preview
+                HStack(spacing: 4) {
+                    ForEach(Array(resolved.enumerated()), id: \.offset) { _, agent in
+                        HStack(spacing: 2) {
+                            Text(agent.role)
+                                .font(.system(size: 9, design: .monospaced))
+                            if agent.status == .best {
+                                Text("\u{26A1}")
+                                    .font(.system(size: 8))
+                            } else if case .fallback = agent.status {
+                                Text("\u{21A9}")
+                                    .font(.system(size: 8))
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(badgeBackground(agent.status))
+                        )
+                    }
+                }
+
+                // Status line
+                if bestCount > 0 || fbCount > 0 {
+                    HStack(spacing: 8) {
+                        if bestCount > 0 {
+                            HStack(spacing: 2) {
+                                Text("\u{26A1}")
+                                    .font(.system(size: 8))
+                                Text("\(bestCount) optimal")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        if fbCount > 0 {
+                            HStack(spacing: 2) {
+                                Text("\u{21A9}")
+                                    .font(.system(size: 8))
+                                Text("\(fbCount) fallback")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 2 : 1)
+        )
+    }
+
+    private func badgeBackground(_ status: ResolvedAgent.Status) -> Color {
+        switch status {
+        case .best: return Color.green.opacity(0.15)
+        case .fallback: return Color.orange.opacity(0.15)
+        case .normal: return Color.secondary.opacity(0.08)
         }
     }
 
@@ -547,9 +713,40 @@ struct TeamCreationView: View {
         }
     }
 
+    private func applySmartPreset(_ preset: SmartTeamPreset) {
+        let available = presetManager.presets
+        let resolved = preset.resolve(with: providerDetector)
+        selectedSmartPresetId = preset.id
+        selectedWorkflowName = nil
+        leaderMode = preset.leaderMode
+
+        agents = resolved.compactMap { agent in
+            guard var rolePreset = available.first(where: { $0.name == agent.role })
+                    ?? available.first else { return nil as TeamAgentRow? }
+            rolePreset.cli = agent.cli
+            rolePreset.model = agent.model
+
+            let badge: TeamAgentRow.ProviderBadge
+            switch agent.status {
+            case .best:
+                badge = .best(reason: agent.reason)
+            case .fallback(let wanted):
+                badge = .fallback(wanted: wanted)
+            case .normal:
+                badge = .none
+            }
+            return TeamAgentRow(preset: rolePreset, customInstructions: "", providerBadge: badge)
+        }
+
+        if teamName == "my-team" || teamName.isEmpty {
+            teamName = preset.id
+        }
+    }
+
     private func applyTeamPreset(_ preset: TeamPreset) {
         let available = presetManager.presets
         selectedWorkflowName = nil
+        selectedSmartPresetId = nil
         agents = preset.roles.compactMap { roleName in
             if let match = available.first(where: { $0.name == roleName }) {
                 return TeamAgentRow(preset: match, customInstructions: "")
@@ -562,6 +759,7 @@ struct TeamCreationView: View {
     private func applyWorkflowPreset(_ preset: WorkflowPresetDefinition) {
         let available = presetManager.presets
         selectedWorkflowName = preset.name
+        selectedSmartPresetId = nil
         leaderMode = preset.leaderMode
         agents = preset.roles.compactMap { roleName in
             let presetRole = available.first(where: { $0.name == roleName }) ?? available.first

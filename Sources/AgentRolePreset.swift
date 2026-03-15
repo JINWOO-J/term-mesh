@@ -606,3 +606,250 @@ class TeamTemplateManager: ObservableObject {
         save()
     }
 }
+
+// MARK: - Provider Detection
+
+/// Detects which AI CLI providers are installed on the system.
+class ProviderDetector: ObservableObject {
+    static let shared = ProviderDetector()
+
+    @Published private(set) var available: Set<String> = ["claude"]
+
+    static let allCLIs = ["claude", "codex", "gemini", "kiro"]
+
+    private static let searchPaths: [String: [String]] = {
+        let home = NSHomeDirectory()
+        return [
+            "claude": [
+                (home as NSString).appendingPathComponent(".local/bin/claude"),
+            ],
+            "codex": [
+                "/opt/homebrew/bin/codex",
+                "/usr/local/bin/codex",
+                (home as NSString).appendingPathComponent(".local/bin/codex"),
+                (home as NSString).appendingPathComponent(".cargo/bin/codex"),
+            ],
+            "gemini": [
+                "/opt/homebrew/bin/gemini",
+                "/usr/local/bin/gemini",
+                (home as NSString).appendingPathComponent(".local/bin/gemini"),
+            ],
+            "kiro": [
+                (home as NSString).appendingPathComponent(".local/bin/kiro-cli"),
+                "/usr/local/bin/kiro-cli",
+                "/opt/homebrew/bin/kiro-cli",
+            ],
+        ]
+    }()
+
+    init() { scan() }
+
+    func scan() {
+        let fm = FileManager.default
+        var result: Set<String> = ["claude"]
+
+        for (cli, paths) in Self.searchPaths {
+            // Check custom path from Settings first
+            let key = "cliPath.\(cli)"
+            if let custom = UserDefaults.standard.string(forKey: key),
+               !custom.isEmpty, fm.isExecutableFile(atPath: custom) {
+                result.insert(cli)
+                continue
+            }
+            // Then check standard paths
+            if paths.contains(where: { fm.isExecutableFile(atPath: $0) }) {
+                result.insert(cli)
+            }
+        }
+        available = result
+    }
+
+    func isAvailable(_ cli: String) -> Bool {
+        cli == "claude" || available.contains(cli)
+    }
+
+    /// Resolve: try primary, then fallback, then claude (always available).
+    func resolve(primary: String, fallback: String) -> String {
+        if isAvailable(primary) { return primary }
+        if isAvailable(fallback) { return fallback }
+        return "claude"
+    }
+
+    /// Human-readable summary: "Claude, Codex" or "Claude only"
+    var summary: String {
+        let sorted = Self.allCLIs.filter { available.contains($0) }
+        return sorted.map(\.capitalized).joined(separator: ", ")
+    }
+}
+
+// MARK: - Smart Team Presets
+
+/// Provider preference for a single agent slot in a smart preset.
+struct ProviderPreference {
+    let role: String
+    let primaryCli: String
+    let primaryModel: String?   // nil = use CLI default
+    let fallbackCli: String
+    let fallbackModel: String?  // nil = use CLI default
+    let reason: String          // why this provider is optimal for this role
+}
+
+/// Resolved agent slot after provider detection.
+struct ResolvedAgent {
+    let role: String
+    let cli: String
+    let model: String
+    let status: Status
+    let reason: String
+
+    enum Status: Equatable {
+        case normal                     // primary == fallback (no badge)
+        case best                       // optimal provider detected & used
+        case fallback(wanted: String)   // primary unavailable, using fallback
+    }
+}
+
+/// A team preset with per-role optimal provider assignments and automatic fallback.
+struct SmartTeamPreset: Identifiable {
+    let id: String
+    let name: String
+    let icon: String
+    let description: String
+    let leaderMode: String
+    let agents: [ProviderPreference]
+
+    /// Resolve all agent slots against detected providers.
+    func resolve(with detector: ProviderDetector) -> [ResolvedAgent] {
+        agents.map { pref in
+            let primaryOK = detector.isAvailable(pref.primaryCli)
+            let usedCli = primaryOK
+                ? pref.primaryCli
+                : detector.resolve(primary: pref.primaryCli, fallback: pref.fallbackCli)
+            let usedModel = primaryOK
+                ? (pref.primaryModel ?? AgentRolePreset.defaultModel(for: pref.primaryCli))
+                : (pref.fallbackModel ?? AgentRolePreset.defaultModel(for: usedCli))
+
+            let status: ResolvedAgent.Status
+            if primaryOK && pref.primaryCli != pref.fallbackCli {
+                status = .best
+            } else if primaryOK {
+                status = .normal
+            } else {
+                status = .fallback(wanted: pref.primaryCli)
+            }
+
+            return ResolvedAgent(
+                role: pref.role, cli: usedCli, model: usedModel,
+                status: status, reason: pref.reason
+            )
+        }
+    }
+
+    /// Count how many agents use their optimal provider.
+    func bestCount(with detector: ProviderDetector) -> Int {
+        resolve(with: detector).filter { $0.status == .best }.count
+    }
+
+    static let builtIn: [SmartTeamPreset] = [
+        SmartTeamPreset(
+            id: "standard",
+            name: "Standard",
+            icon: "person.3",
+            description: "General development — explore, code, review",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "explorer", primaryCli: "claude", primaryModel: "haiku",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Fast lookups"),
+                ProviderPreference(role: "executor", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Best general coding"),
+                ProviderPreference(role: "reviewer", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Fast code review"),
+            ]
+        ),
+        SmartTeamPreset(
+            id: "architect",
+            name: "Architect",
+            icon: "building.columns",
+            description: "Spec-driven design + implementation",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "architect", primaryCli: "kiro", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "opus", reason: "Spec-driven design"),
+                ProviderPreference(role: "executor", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Implementation"),
+                ProviderPreference(role: "reviewer", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Fast review"),
+                ProviderPreference(role: "tester", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Test writing speed"),
+            ]
+        ),
+        SmartTeamPreset(
+            id: "fullstack",
+            name: "Full Stack",
+            icon: "rectangle.stack",
+            description: "Frontend + backend with optimal providers",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "explorer", primaryCli: "gemini", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "haiku", reason: "1M context"),
+                ProviderPreference(role: "frontend", primaryCli: "gemini", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "WebDev Arena #1"),
+                ProviderPreference(role: "backend", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "API / logic"),
+                ProviderPreference(role: "reviewer", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Fast review"),
+                ProviderPreference(role: "tester", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Test coverage"),
+            ]
+        ),
+        SmartTeamPreset(
+            id: "refactor",
+            name: "Refactor",
+            icon: "arrow.triangle.2.circlepath",
+            description: "Large-scale refactoring with deep analysis",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "explorer", primaryCli: "gemini", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "1M context analysis"),
+                ProviderPreference(role: "refactorer", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Multi-file changes"),
+                ProviderPreference(role: "reviewer", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Change verification"),
+                ProviderPreference(role: "tester", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Regression tests"),
+            ]
+        ),
+        SmartTeamPreset(
+            id: "quality",
+            name: "Quality",
+            icon: "checkmark.shield",
+            description: "Quality-focused with spec and security review",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "architect", primaryCli: "kiro", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Spec → test gen"),
+                ProviderPreference(role: "tester", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Fast test writing"),
+                ProviderPreference(role: "reviewer", primaryCli: "codex", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Review + safety"),
+                ProviderPreference(role: "security", primaryCli: "claude", primaryModel: "opus",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "Deep security audit"),
+            ]
+        ),
+        SmartTeamPreset(
+            id: "aws",
+            name: "AWS Infra",
+            icon: "cloud",
+            description: "AWS infrastructure with Kiro native integration",
+            leaderMode: "claude",
+            agents: [
+                ProviderPreference(role: "architect", primaryCli: "kiro", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "AWS native"),
+                ProviderPreference(role: "infra", primaryCli: "kiro", primaryModel: nil,
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "IAM Autopilot"),
+                ProviderPreference(role: "executor", primaryCli: "claude", primaryModel: "sonnet",
+                                   fallbackCli: "claude", fallbackModel: "sonnet", reason: "CDK / CF coding"),
+            ]
+        ),
+    ]
+}

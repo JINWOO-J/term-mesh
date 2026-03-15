@@ -150,29 +150,29 @@ tm-agent wait --timeout 120 --mode any
 tm-agent brief <agent>
 
 # Agent task lifecycle
-tm-agent task-start <task_id>
-tm-agent task-done <task_id> '<result>'
-tm-agent task-block <task_id> '<reason>'
-tm-agent task-review <task_id> '<summary>'
+tm-agent task start <task_id>
+tm-agent task done <task_id> '<result>'
+tm-agent task block <task_id> '<reason>'
+tm-agent task review <task_id> '<summary>'
 tm-agent heartbeat '<progress summary>'
 tm-agent report '<result summary>'
 tm-agent reply '<one-paragraph summary>'
 
 # Messaging
-tm-agent msg '<text>'                    # to leader
-tm-agent msg '<text>' --to <agent_name>  # to another agent
-tm-agent inbox                           # check messages
-tm-agent msg-list --from <agent>         # list messages
-tm-agent msg-clear                       # clear queue
+tm-agent msg send '<text>'                    # to leader
+tm-agent msg send '<text>' --to <agent_name>  # to another agent
+tm-agent inbox                                # check messages
+tm-agent msg list --from-agent <agent>        # list messages
+tm-agent msg clear                            # clear queue
 
 # Task board
-tm-agent tasks                           # list all tasks
-tm-agent task-create '<title>' --assign <agent>
-tm-agent task-get <id>
-tm-agent task-update <id> <status>
-tm-agent task-reassign <id> <agent>
-tm-agent task-unblock <id>
-tm-agent task-clear
+tm-agent task list                        # list all tasks
+tm-agent task create '<title>' --assign <agent>
+tm-agent task get <id>
+tm-agent task update <id> <status>
+tm-agent task reassign <id> <agent>
+tm-agent task unblock <id>
+tm-agent task clear
 ```
 
 ## E2E mac UI tests

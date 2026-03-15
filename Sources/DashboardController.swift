@@ -21,6 +21,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     private var uiTimer: Timer?
     private var trackingTimer: Timer?
     private var trackedPIDs: Set<Int32> = []
+    private var messageHandler: DashboardMessageHandler?
 
     /// Project roots currently being watched — keyed by tab ID to avoid duplicates.
     private var watchedProjects: [UUID: String] = [:]
@@ -33,6 +34,11 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     /// Reference to the tab manager (set from AppDelegate.configure)
     weak var tabManager: TabManager? {
         didSet { startTracking() }
+    }
+
+    deinit {
+        trackingTimer?.invalidate()
+        uiTimer?.invalidate()
     }
 
     // MARK: - Always-On Tracking
@@ -48,6 +54,13 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         }
     }
 
+    /// Stop background tracking and clean up resources.
+    func stopTracking() {
+        trackingTimer?.invalidate()
+        trackingTimer = nil
+        notifiedAlertPIDs.removeAll()
+    }
+
     // MARK: - Dashboard Window
 
     func showDashboard() {
@@ -60,12 +73,15 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
 
         // Register native message handlers for process control
-        let handler = DashboardMessageHandler(controller: self)
-        config.userContentController.add(handler, name: "stopProcess")
-        config.userContentController.add(handler, name: "resumeProcess")
-        config.userContentController.add(handler, name: "setAutoStop")
-        config.userContentController.add(handler, name: "teamTaskAction")
-        config.userContentController.add(handler, name: "teamTaskCreate")
+        // Keep handler as a property to prevent deallocation
+        self.messageHandler = DashboardMessageHandler(controller: self)
+        if let handler = self.messageHandler {
+            config.userContentController.add(handler, name: "stopProcess")
+            config.userContentController.add(handler, name: "resumeProcess")
+            config.userContentController.add(handler, name: "setAutoStop")
+            config.userContentController.add(handler, name: "teamTaskAction")
+            config.userContentController.add(handler, name: "teamTaskCreate")
+        }
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.navigationDelegate = self
@@ -105,6 +121,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         window?.close()
         window = nil
         webView = nil
+        messageHandler = nil
     }
 
     // MARK: - UI Polling (only when dashboard window is open)

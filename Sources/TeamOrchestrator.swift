@@ -357,11 +357,11 @@ final class TeamOrchestrator {
 
                 Operational rules:
                 1. Work should be tracked with task ids.
-                2. When you begin a task, run `tm-agent task-start <task_id>`.
+                2. When you begin a task, run `tm-agent task start <task_id>`.
                 3. While actively working, periodically run `tm-agent heartbeat '<short progress summary>'`.
-                4. If blocked, run `tm-agent task-block <task_id> '<reason>'`.
-                5. If ready for validation, run `tm-agent task-review <task_id> '<summary>'`.
-                6. When accepted as done, run `tm-agent task-done <task_id> '<result>'`.
+                4. If blocked, run `tm-agent task block <task_id> '<reason>'`.
+                5. If ready for validation, run `tm-agent task review <task_id> '<summary>'`.
+                6. When accepted as done, run `tm-agent task done <task_id> '<result>'`.
                 When you complete any task, you MUST use your bash/execute tool to run:
                 tm-agent report '<summary of your result>'
                 Do NOT just write the result as text — actually execute the shell command.
@@ -644,19 +644,19 @@ final class TeamOrchestrator {
 
         ## Message Channel
         ```
-        \(tmAgent) msg list
-        \(tmAgent) msg list --from <agent_name>
+        \(tmAgent) msg-list
+        \(tmAgent) msg-list --from <agent_name>
         ```
 
         ## Task Board
         ```
-        \(tmAgent) task create '<title>' --assign <agent_name> --priority 2
-        \(tmAgent) task list
-        \(tmAgent) task get <id>
-        \(tmAgent) task start <id> --assign <agent_name>
-        \(tmAgent) task block <id> '<reason>'
-        \(tmAgent) task review <id> '<summary>'
-        \(tmAgent) task done <id> '<result>'
+        \(tmAgent) task-create '<title>' --assign <agent_name> --priority 2
+        \(tmAgent) tasks
+        \(tmAgent) task-get <id>
+        \(tmAgent) task-start <id> --assign <agent_name>
+        \(tmAgent) task-block <id> '<reason>'
+        \(tmAgent) task-review <id> '<summary>'
+        \(tmAgent) task-done <id> '<result>'
         ```
 
         ## Your Role
@@ -773,19 +773,19 @@ final class TeamOrchestrator {
 
         ## Message Channel
         ```
-        \(tmAgent) msg list
-        \(tmAgent) msg list --from <agent_name>
+        \(tmAgent) msg-list
+        \(tmAgent) msg-list --from <agent_name>
         ```
 
         ## Task Board
         ```
-        \(tmAgent) task create '<title>' --assign <agent_name> --priority 2
-        \(tmAgent) task list
-        \(tmAgent) task get <id>
-        \(tmAgent) task start <id> --assign <agent_name>
-        \(tmAgent) task block <id> '<reason>'
-        \(tmAgent) task review <id> '<summary>'
-        \(tmAgent) task done <id> '<result>'
+        \(tmAgent) task-create '<title>' --assign <agent_name> --priority 2
+        \(tmAgent) tasks
+        \(tmAgent) task-get <id>
+        \(tmAgent) task-start <id> --assign <agent_name>
+        \(tmAgent) task-block <id> '<reason>'
+        \(tmAgent) task-review <id> '<summary>'
+        \(tmAgent) task-done <id> '<result>'
         ```
         \(worktreeSection)
 
@@ -887,10 +887,10 @@ final class TeamOrchestrator {
         lines.append("Resume or start this assigned task now.")
         lines.append("")
         lines.append("Use the task lifecycle commands with this task id:")
-        lines.append("- tm-agent task-start \(task.id)")
-        lines.append("- tm-agent task-block \(task.id) '<reason>'")
-        lines.append("- tm-agent task-review \(task.id) '<summary>'")
-        lines.append("- tm-agent task-done \(task.id) '<result>'")
+        lines.append("- tm-agent task start \(task.id)")
+        lines.append("- tm-agent task block \(task.id) '<reason>'")
+        lines.append("- tm-agent task review \(task.id) '<summary>'")
+        lines.append("- tm-agent task done \(task.id) '<result>'")
         return lines.joined(separator: "\n")
     }
 
@@ -907,7 +907,7 @@ final class TeamOrchestrator {
         lines.append("")
         lines.append("A new task has been assigned to you.")
         lines.append("When you begin work, run:")
-        lines.append("tm-agent task-start \(task.id)")
+        lines.append("tm-agent task start \(task.id)")
         return lines.joined(separator: "\n")
     }
 
@@ -952,15 +952,22 @@ final class TeamOrchestrator {
             panel.sendInputText(trimmed)
         }
 
-        // Primary Enter
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay) { [weak panel] in
-            panel?.sendInputText("\n")
+        // Primary Enter — use STRONG reference [panel] to prevent deallocation
+        // during GCD scheduling under high concurrent load (10+ agents).
+        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay) { [panel] in
+            panel.sendInputText("\n")
+            #if DEBUG
+            dlog("[team.sendTextToPanel.enter1] panelId=\(panelId.uuidString.prefix(8)) delay=\(enterDelay)")
+            #endif
         }
 
         // Safety retry: if primary Enter was missed (e.g. TUI was busy),
         // send another Enter later. Double-Enter on an idle prompt is harmless.
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay + 0.25) { [weak panel] in
-            panel?.sendInputText("\n")
+        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay + 0.25) { [panel] in
+            panel.sendInputText("\n")
+            #if DEBUG
+            dlog("[team.sendTextToPanel.enter2] panelId=\(panelId.uuidString.prefix(8)) retry")
+            #endif
         }
 
         #if DEBUG
@@ -970,13 +977,16 @@ final class TeamOrchestrator {
     }
 
     /// Broadcast text to all agents in a team.
-    /// Staggers Enter delivery: agent 0 at 50ms, agent 1 at 100ms, etc.
-    /// Each agent also gets a retry Enter 150ms after its primary.
+    /// Staggers Enter delivery to prevent concurrent panel deallocation under high load.
+    /// Each agent gets a primary Enter at delay + (index * 50ms), plus a retry 250ms later.
     func broadcast(teamName: String, text: String, tabManager: TabManager) -> Int {
         guard let team = teams[teamName] else { return 0 }
         var count = 0
         for (index, agent) in team.agents.enumerated() {
-            let enterDelay = 0.10 + Double(index) * 0.05
+            // Base delay 150ms; stagger by 50ms per agent to spread out GCD queue load.
+            // Even for 10+ agents, the latest agent will have delay ~650ms, leaving time
+            // before any main-thread starvation.
+            let enterDelay = 0.15 + Double(index) * 0.05
             if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager, enterDelay: enterDelay) {
                 count += 1
             }

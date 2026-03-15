@@ -3,7 +3,9 @@
     "allow": [
       "Bash(grep:*)",
       "Bash(python3:*)",
-      "Bash(log show:*)"
+      "Bash(log show:*)",
+      "mcp__mem-mesh__search",
+      "WebSearch"
     ]
   }
 }

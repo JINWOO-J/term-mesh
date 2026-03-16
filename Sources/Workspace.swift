@@ -997,6 +997,10 @@ final class Workspace: Identifiable, ObservableObject {
         dlog("split.created pane=\(paneId.id.uuidString.prefix(5)) orientation=\(orientation)")
 #endif
 
+        // Equalize divider positions so all panes in the same orientation chain
+        // get equal space (e.g., 3 horizontal panes → 33:33:33 instead of 50:25:25).
+        equalizeSplitDividers()
+
         // Suppress the old view's becomeFirstResponder side-effects during SwiftUI reparenting.
         // Without this, reparenting triggers onFocus + ghostty_surface_set_focus on the old view,
         // stealing focus from the new panel and creating model/surface divergence.
@@ -1015,6 +1019,52 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         return newPanel
+    }
+
+    // MARK: - Split Equalization
+
+    /// Equalize divider positions so all leaf panes in same-orientation split
+    /// chains get equal space (e.g., 3 horizontal panes → 33:33:33).
+    private func equalizeSplitDividers() {
+        let tree = bonsplitController.treeSnapshot()
+        let updates = computeEqualizedDividers(tree)
+        for (splitId, position) in updates {
+            bonsplitController.setDividerPosition(position, forSplit: splitId)
+        }
+    }
+
+    private func computeEqualizedDividers(_ node: ExternalTreeNode) -> [(UUID, CGFloat)] {
+        guard case .split(let split) = node else { return [] }
+        var updates: [(UUID, CGFloat)] = []
+
+        let firstLeaves = countLeavesInOrientationChain(split.first, orientation: split.orientation)
+        let secondLeaves = countLeavesInOrientationChain(split.second, orientation: split.orientation)
+        let total = firstLeaves + secondLeaves
+
+        if total > 1, let splitId = UUID(uuidString: split.id) {
+            let newPosition = CGFloat(firstLeaves) / CGFloat(total)
+            updates.append((splitId, newPosition))
+        }
+
+        updates += computeEqualizedDividers(split.first)
+        updates += computeEqualizedDividers(split.second)
+        return updates
+    }
+
+    /// Count leaf panes reachable through same-orientation splits.
+    /// A split with a different orientation is treated as a single unit.
+    private func countLeavesInOrientationChain(_ node: ExternalTreeNode, orientation: String) -> Int {
+        switch node {
+        case .pane:
+            return 1
+        case .split(let split):
+            if split.orientation == orientation {
+                return countLeavesInOrientationChain(split.first, orientation: orientation)
+                     + countLeavesInOrientationChain(split.second, orientation: orientation)
+            } else {
+                return 1
+            }
+        }
     }
 
     /// Create a new surface (nested tab) in the specified pane with a terminal panel.

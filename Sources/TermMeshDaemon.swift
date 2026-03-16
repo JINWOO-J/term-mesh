@@ -305,6 +305,121 @@ final class TermMeshDaemon: ObservableObject {
         #endif
     }
 
+    // MARK: - Restart
+
+    /// Stop and re-start the daemon process.
+    func restartDaemon(completion: @escaping () -> Void) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            // Stop synchronously (fast — pkill + socket cleanup)
+            DispatchQueue.main.sync { self.stopDaemon() }
+            // Brief pause so the socket file is fully released
+            Thread.sleep(forTimeInterval: 0.3)
+            self.startDaemon()
+            // Wait for the daemon to become responsive
+            for _ in 0..<20 {
+                if self.ping() { break }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            DispatchQueue.main.async { completion() }
+        }
+    }
+
+    // MARK: - Daemon Status
+
+    struct DaemonStatus {
+        let connected: Bool
+        let pid: Int?
+        let uptimeSecs: Int?
+        let binaryPath: String?
+        let binaryExists: Bool
+        let socketPath: String
+        let socketExists: Bool
+        let logPath: String
+        let logExists: Bool
+        let appVariant: String       // "Release", "Debug", "Staging", "Nightly", "Debug (tag)"
+        let bundleIdentifier: String
+        let subsystems: [SubsystemStatus]
+    }
+
+    struct SubsystemStatus: Identifiable {
+        let id: String   // key name
+        let name: String  // display name
+        let status: String  // "running", "disabled", "starting", etc.
+        let detail: String?
+    }
+
+    /// Query the daemon for its full status.
+    func daemonStatus() -> DaemonStatus {
+        let fm = FileManager.default
+        let binPath = daemonBinaryPath()
+        let sockPath = socketPath
+        let logPath = "/tmp/term-meshd.log"
+        let bundleId = Bundle.main.bundleIdentifier ?? "unknown"
+        let variant = Self.resolveAppVariant()
+
+        let base = { (connected: Bool, pid: Int?, uptime: Int?, subs: [SubsystemStatus]) in
+            DaemonStatus(
+                connected: connected, pid: pid, uptimeSecs: uptime,
+                binaryPath: binPath, binaryExists: binPath != nil && fm.fileExists(atPath: binPath!),
+                socketPath: sockPath, socketExists: fm.fileExists(atPath: sockPath),
+                logPath: logPath, logExists: fm.fileExists(atPath: logPath),
+                appVariant: variant, bundleIdentifier: bundleId,
+                subsystems: subs
+            )
+        }
+
+        guard let response = rpcCall(method: "daemon.status", params: [:]) as? [String: Any] else {
+            return base(false, nil, nil, [])
+        }
+
+        let pid = (response["pid"] as? NSNumber)?.intValue
+        let uptime = (response["uptime_secs"] as? NSNumber)?.intValue
+        var subs: [SubsystemStatus] = []
+
+        if let subsystems = response["subsystems"] as? [String: Any] {
+            let order = [
+                ("socket", "Unix Socket"),
+                ("http", "HTTP Dashboard"),
+                ("monitor", "Resource Monitor"),
+                ("watcher", "File Watcher"),
+                ("agents", "Agent Manager"),
+            ]
+            for (key, displayName) in order {
+                guard let info = subsystems[key] as? [String: Any] else { continue }
+                let status = info["status"] as? String ?? "unknown"
+                var detail: String?
+                if let addr = info["addr"] as? String { detail = addr }
+                if let count = info["tracked_pids"] as? Int { detail = "\(count) tracked PIDs" }
+                if let count = info["watched_paths"] as? Int { detail = "\(count) watched paths" }
+                if let count = info["active_sessions"] as? Int { detail = "\(count) active sessions" }
+                subs.append(SubsystemStatus(id: key, name: displayName, status: status, detail: detail))
+            }
+        }
+
+        return base(true, pid, uptime, subs)
+    }
+
+    /// Determine the current app variant from bundle identifier and build config.
+    static func resolveAppVariant() -> String {
+        let bundleId = Bundle.main.bundleIdentifier ?? ""
+        if bundleId == "com.termmesh.app.nightly" { return "Nightly" }
+        if SocketControlSettings.isStagingBundleIdentifier(bundleId) { return "Staging" }
+        if SocketControlSettings.isDebugLikeBundleIdentifier(bundleId) {
+            // Tagged debug builds have bundle IDs like com.termmesh.app.debug.doctor-test
+            let suffix = bundleId.replacingOccurrences(of: "com.termmesh.app.debug", with: "")
+            if suffix.hasPrefix("."), suffix.count > 1 {
+                return "Debug (\(String(suffix.dropFirst())))"
+            }
+            return "Debug"
+        }
+        #if DEBUG
+        return "Debug"
+        #else
+        return "Release"
+        #endif
+    }
+
     // MARK: - RPC Calls
 
     /// Create a worktree sandbox for the given repo path.

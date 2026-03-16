@@ -1764,6 +1764,186 @@ struct SettingsView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    // MARK: - Services / Doctor
+
+    private var daemonStatusSubtitle: String {
+        guard let status = daemonStatusInfo else { return "Checking..." }
+        if !status.connected {
+            if !status.binaryExists { return "Binary not found. Build the daemon first." }
+            if !status.socketExists { return "Socket missing. Daemon may not be running." }
+            return "Not responding on \(status.socketPath)"
+        }
+        if let pid = status.pid, let uptime = status.uptimeSecs {
+            return "PID \(pid) — up \(formatUptime(uptime))"
+        }
+        return "Connected"
+    }
+
+    private var resolvedDaemon: (any DaemonService)? {
+        daemonService ?? TermMeshDaemon.shared
+    }
+
+    private func refreshDaemonStatus() {
+        let daemon = resolvedDaemon
+        DispatchQueue.global(qos: .userInitiated).async {
+            let status = daemon?.daemonStatus()
+            DispatchQueue.main.async { daemonStatusInfo = status }
+        }
+    }
+
+    private func loadDaemonLogTail() {
+        let logPath = "/tmp/term-meshd.log"
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let data = FileManager.default.contents(atPath: logPath),
+                  let content = String(data: data, encoding: .utf8) else {
+                let fallback = AttributedString("(no log file found)")
+                DispatchQueue.main.async { daemonLogTail = fallback }
+                return
+            }
+            let lines = content.components(separatedBy: .newlines)
+            let tail = lines.suffix(50).joined(separator: "\n")
+            let attributed = parseAnsiLog(tail)
+            DispatchQueue.main.async { daemonLogTail = attributed }
+        }
+    }
+
+    /// Parse ANSI escape codes into an AttributedString with colors.
+    private func parseAnsiLog(_ raw: String) -> AttributedString {
+        var result = AttributedString()
+        let defaultColor = Color.gray
+
+        // ANSI SGR code → Color mapping
+        func colorForCode(_ code: Int) -> Color? {
+            switch code {
+            case 0: return nil                // reset
+            case 2: return nil                // dim — handled via opacity
+            case 22: return nil               // reset dim
+            case 30: return .black
+            case 31: return .red
+            case 32: return .green
+            case 33: return .yellow
+            case 34: return .blue
+            case 35: return .purple
+            case 36: return .cyan
+            case 37: return .white
+            case 90: return .gray
+            case 91: return Color(.systemRed)
+            case 92: return Color(.systemGreen)
+            case 93: return Color(.systemYellow)
+            case 94: return Color(.systemBlue)
+            case 95: return Color(.systemPurple)
+            case 96: return Color(.systemTeal)
+            default: return nil
+            }
+        }
+
+        var currentColor: Color = defaultColor
+        var isDim = false
+
+        // Split by ESC[ sequences: \x1b[ or \033[
+        let pattern = "\u{1b}\\[([0-9;]*)m"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return AttributedString(raw)
+        }
+
+        let nsString = raw as NSString
+        var lastEnd = 0
+
+        let matches = regex.matches(in: raw, range: NSRange(location: 0, length: nsString.length))
+
+        for match in matches {
+            // Append text before this escape sequence
+            if match.range.location > lastEnd {
+                let textRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let text = nsString.substring(with: textRange)
+                var segment = AttributedString(text)
+                segment.foregroundColor = isDim ? currentColor.opacity(0.5) : currentColor
+                result.append(segment)
+            }
+
+            // Parse SGR codes
+            let codesStr = nsString.substring(with: match.range(at: 1))
+            let codes = codesStr.split(separator: ";").compactMap { Int($0) }
+            if codes.isEmpty {
+                // bare ESC[m is reset
+                currentColor = defaultColor
+                isDim = false
+            }
+            for code in codes {
+                if code == 0 {
+                    currentColor = defaultColor
+                    isDim = false
+                } else if code == 2 {
+                    isDim = true
+                } else if code == 22 {
+                    isDim = false
+                } else if let color = colorForCode(code) {
+                    currentColor = color
+                }
+            }
+
+            lastEnd = match.range.location + match.range.length
+        }
+
+        // Append remaining text
+        if lastEnd < nsString.length {
+            let text = nsString.substring(from: lastEnd)
+            var segment = AttributedString(text)
+            segment.foregroundColor = isDim ? currentColor.opacity(0.5) : currentColor
+            result.append(segment)
+        }
+
+        return result
+    }
+
+    private func formatUptime(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        if h > 0 { return "\(h)h \(m)m \(s)s" }
+        if m > 0 { return "\(m)m \(s)s" }
+        return "\(s)s"
+    }
+
+    private func copyDiagnostics() {
+        var lines: [String] = []
+        lines.append("term-mesh diagnostics")
+        lines.append("=====================")
+        lines.append("Date: \(ISO8601DateFormatter().string(from: Date()))")
+        lines.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        lines.append("App: \(appVersion) (\(buildNumber))")
+
+        if let status = daemonStatusInfo {
+            lines.append("Variant: \(status.appVariant)")
+            lines.append("Bundle ID: \(status.bundleIdentifier)")
+            lines.append("")
+            lines.append("Daemon: \(status.connected ? "connected" : "not connected")")
+            if let pid = status.pid { lines.append("PID: \(pid)") }
+            if let uptime = status.uptimeSecs { lines.append("Uptime: \(formatUptime(uptime))") }
+            lines.append("Binary: \(status.binaryPath ?? "(not found)") [\(status.binaryExists ? "exists" : "MISSING")]")
+            lines.append("Socket: \(status.socketPath) [\(status.socketExists ? "exists" : "MISSING")]")
+            lines.append("Log: \(status.logPath) [\(status.logExists ? "exists" : "MISSING")]")
+
+            if !status.subsystems.isEmpty {
+                lines.append("")
+                lines.append("Subsystems:")
+                for sub in status.subsystems {
+                    var line = "  \(sub.name): \(sub.status)"
+                    if let d = sub.detail { line += " (\(d))" }
+                    lines.append(line)
+                }
+            }
+        } else {
+            lines.append("Daemon: status not available")
+        }
+
+        let text = lines.joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     private func resetAllSettings() {
         appearanceMode = AppearanceSettings.defaultMode.rawValue
         socketControlMode = SocketControlSettings.defaultMode.rawValue

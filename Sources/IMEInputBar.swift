@@ -399,6 +399,8 @@ struct IMEInputBar: View {
                 helpSection("Terminal") {
                     helpRow("Esc", "Send Escape to terminal")
                     helpRow("⇧Tab", "Send Shift+Tab (accept)")
+                    helpRow("⌥↑↓←→", "Arrow to terminal")
+                    helpRow("⌥Tab", "Tab to terminal")
                 }
                 helpSection("IME Box") {
                     helpRow("⌘Esc", "Close")
@@ -677,6 +679,31 @@ final class IMETextView: NSTextView {
                 sendKeyHandler?(event.keyCode, 0)
                 lastEscapeTime = now
             }
+            return
+        }
+        // Option+ArrowUp → forward plain Up arrow to terminal (e.g. Claude menu navigation)
+        if event.keyCode == 126 && event.modifierFlags.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, 0)
+            return
+        }
+        // Option+ArrowDown → forward plain Down arrow to terminal
+        if event.keyCode == 125 && event.modifierFlags.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, 0)
+            return
+        }
+        // Option+ArrowLeft → forward Alt+Left to terminal (word-level cursor movement)
+        if event.keyCode == 123 && event.modifierFlags.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
+            return
+        }
+        // Option+ArrowRight → forward Alt+Right to terminal (word-level cursor movement)
+        if event.keyCode == 124 && event.modifierFlags.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
+            return
+        }
+        // Option+Tab → forward Meta+Tab to terminal (e.g. Claude thinking toggle)
+        if event.keyCode == 48 && event.modifierFlags.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
             return
         }
         // ArrowUp → history (when cursor is on first line and not composing IME)

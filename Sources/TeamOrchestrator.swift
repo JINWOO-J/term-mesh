@@ -106,15 +106,10 @@ final class TeamOrchestrator {
     ) -> (cols: Int, rows: Int) {
         guard count > 1 else { return (1, 1) }
 
-        let agentWidth: CGFloat
-        let agentHeight: CGFloat = containerSize.height
-        if hasLeader {
-            agentWidth = containerSize.width * CGFloat(count) / CGFloat(count + 1)
-        } else {
-            agentWidth = containerSize.width
-        }
+        let totalWidth: CGFloat = containerSize.width
+        let totalHeight: CGFloat = containerSize.height
 
-        guard agentWidth > 0, agentHeight > 0 else {
+        guard totalWidth > 0, totalHeight > 0 else {
             if count <= 3 { return (1, count) }
             if count <= 8 { return (2, Int(ceil(Double(count) / 2.0))) }
             return (3, Int(ceil(Double(count) / 3.0)))
@@ -125,8 +120,10 @@ final class TeamOrchestrator {
 
         for cols in 1...count {
             let rows = Int(ceil(Double(count) / Double(cols)))
-            let cellW = agentWidth / CGFloat(cols)
-            let cellH = agentHeight / CGFloat(rows)
+            // When there's a leader, it occupies one column-width slot in the equalized grid.
+            // So actual cell width = totalWidth / (cols + 1 leader slot).
+            let cellW = hasLeader ? totalWidth / CGFloat(cols + 1) : totalWidth / CGFloat(cols)
+            let cellH = totalHeight / CGFloat(rows)
             let ratio = max(cellW / cellH, cellH / cellW)
 
             if ratio < bestRatio {

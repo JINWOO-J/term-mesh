@@ -1496,13 +1496,12 @@ class TabManager: ObservableObject {
                     grid[i % numCols].append(i)
                 }
 
-                // Phase 1: Create the first pane in each column (right splits from leader)
-                // Split from the FIRST agent pane (not cascading) so columns stay equal width.
+                // Phase 1: Create the first pane in each column (right splits chained L→R)
+                // Each column splits from the previous column for natural left-to-right order.
                 var columnTopPanelIds: [UUID] = []
-                var firstAgentPanelId: UUID?
                 for col in 0..<numCols {
                     let sessionIdx = grid[col][0]
-                    let splitFrom = firstAgentPanelId ?? focusedPanelId
+                    let splitFrom = columnTopPanelIds.last ?? focusedPanelId
                     if let panelId = self.newSplit(
                         tabId: selectedTabId,
                         surfaceId: splitFrom,
@@ -1513,7 +1512,6 @@ class TabManager: ObservableObject {
                     ) {
                         bindSession(sessions[sessionIdx], panelId)
                         columnTopPanelIds.append(panelId)
-                        if firstAgentPanelId == nil { firstAgentPanelId = panelId }
                     }
                 }
 
@@ -1712,12 +1710,12 @@ class TabManager: ObservableObject {
                 grid[i % numCols].append(i)
             }
 
-            // The root pane is grid[0][0]. Split right for additional columns.
+            // The root pane is grid[0][0]. Chain splits L→R for natural column order.
             var columnTopPanelIds: [UUID] = [rootPanelId]  // col 0 = root pane
             for col in 1..<numCols {
                 let idx = grid[col][0]
                 if let panelId = self.newSplit(
-                    tabId: tabId, surfaceId: rootPanelId,
+                    tabId: tabId, surfaceId: columnTopPanelIds.last!,
                     direction: .right, focus: false,
                     workingDirectory: workDir, command: command,
                     environment: spawnEnv
@@ -1754,10 +1752,9 @@ class TabManager: ObservableObject {
             }
 
             var columnTopPanelIds: [UUID] = []
-            var firstPanelId: UUID?
             for col in 0..<numColsActual {
                 let idx = grid[col][0]
-                let splitFrom = firstPanelId ?? rootPanelId
+                let splitFrom = columnTopPanelIds.last ?? rootPanelId
                 if let panelId = self.newSplit(
                     tabId: tabId, surfaceId: splitFrom,
                     direction: .right, focus: false,
@@ -1766,7 +1763,6 @@ class TabManager: ObservableObject {
                 ) {
                     setTitle(panelId, idx)
                     columnTopPanelIds.append(panelId)
-                    if firstPanelId == nil { firstPanelId = panelId }
                 }
             }
 

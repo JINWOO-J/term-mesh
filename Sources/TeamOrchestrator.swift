@@ -419,7 +419,6 @@ final class TeamOrchestrator {
 
         // Build agent panes with Claude running directly via command parameter
         // This bypasses shell init (.zshrc/.zprofile) entirely for reliable startup.
-        var firstAgentPanelId: UUID?
         for (index, agent) in agents.enumerated() {
             let agentColor = agent.color.isEmpty ? colors[index % colors.count] : agent.color
             let agentId = "\(agent.name)@\(name)"
@@ -513,8 +512,8 @@ final class TeamOrchestrator {
 
             // Grid layout: agents are assigned to cells in column-major order.
             // col = index % numCols, row = index / numCols
-            // Row 0 agents split RIGHT (from first agent pane or leader).
-            // Row > 0 agents split DOWN from the agent above in the same column.
+            // Row 0: split RIGHT from previous column (creates natural L→R order).
+            // Row > 0: split DOWN from the agent above in the same column.
             let col = index % numCols
             let row = index / numCols
 
@@ -522,9 +521,15 @@ final class TeamOrchestrator {
             let orientation: SplitOrientation
 
             if row == 0 {
-                // First row: split right to create columns
+                // First row: split right from previous column (or leader for first)
+                // Chaining from previous column creates visual L→R order.
                 orientation = .horizontal
-                splitFrom = firstAgentPanelId ?? leaderPanelId
+                if col == 0 {
+                    splitFrom = leaderPanelId
+                } else {
+                    // Previous column's top panel: agent at index (col-1) in row 0
+                    splitFrom = members[col - 1].panelId
+                }
             } else {
                 // Subsequent rows: split down within the column
                 orientation = .vertical
@@ -547,7 +552,6 @@ final class TeamOrchestrator {
                 continue
             }
             let panelId = panel.id
-            if firstAgentPanelId == nil { firstAgentPanelId = panelId }
 
             // Set agent name as pane title (include branch if worktree)
             let colorEmoji = Self.colorEmoji(agentColor)

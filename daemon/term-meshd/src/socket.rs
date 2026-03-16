@@ -184,6 +184,48 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
         // --- General ---
         "ping" => Ok(serde_json::json!("pong")),
 
+        "daemon.status" => {
+            let uptime_secs = crate::START_TIME
+                .get()
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+
+            let has_snapshot = ctx.monitor_rx.borrow().is_some();
+            let watched_count = ctx.watcher_handle.snapshot().watched_paths.len();
+            let active_agents = ctx.agent_manager.list(false).len();
+            let tracked_pids = ctx.monitor_handle.tracked_pids().len();
+
+            let http_disabled = std::env::var("TERM_MESH_HTTP_DISABLED")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            let http_addr = std::env::var("TERM_MESH_HTTP_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:9876".to_string());
+
+            Ok(serde_json::json!({
+                "pid": std::process::id(),
+                "uptime_secs": uptime_secs,
+                "subsystems": {
+                    "socket": { "status": "running" },
+                    "http": {
+                        "status": if http_disabled { "disabled" } else { "running" },
+                        "addr": if http_disabled { None } else { Some(&http_addr) },
+                    },
+                    "monitor": {
+                        "status": if has_snapshot { "running" } else { "starting" },
+                        "tracked_pids": tracked_pids,
+                    },
+                    "watcher": {
+                        "status": "running",
+                        "watched_paths": watched_count,
+                    },
+                    "agents": {
+                        "status": "running",
+                        "active_sessions": active_agents,
+                    },
+                },
+            }))
+        }
+
         // --- Sessions (pushed by Swift app) ---
         "session.sync" => {
             #[derive(Deserialize)]

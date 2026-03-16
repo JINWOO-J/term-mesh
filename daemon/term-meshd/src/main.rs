@@ -8,8 +8,12 @@ mod worktree;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
+
+/// Global start time for uptime reporting.
+static START_TIME: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("term_meshd=debug".parse()?))
         .init();
 
+    START_TIME.get_or_init(Instant::now);
     tracing::info!("term-meshd starting");
 
     // 1. Detect orphan worktrees from previous crashed sessions

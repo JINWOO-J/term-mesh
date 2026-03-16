@@ -61,6 +61,9 @@ struct SettingsView: View {
     @State private var socketPasswordStatusIsError = false
     @State private var workspaceTabDefaultEntries = WorkspaceTabColorSettings.defaultPaletteWithOverrides()
     @State private var workspaceTabCustomColors = WorkspaceTabColorSettings.customColors()
+    @State private var daemonStatusInfo: TermMeshDaemon.DaemonStatus?
+    @State private var isDaemonRestarting = false
+    @State private var daemonLogTail: AttributedString?
 
     private var selectedWorkspacePlacement: NewWorkspacePlacement {
         NewWorkspacePlacement(rawValue: newWorkspacePlacement) ?? WorkspacePlacementSettings.defaultPlacement
@@ -714,6 +717,248 @@ struct SettingsView: View {
                     }
                     }
 
+                    if settingsMatch("services", "daemon", "doctor", "status", "restart", "subsystem", "log") {
+                    SettingsSectionHeader(title: "Services")
+                    SettingsCard {
+                        // -- App variant & identity --
+                        if let status = daemonStatusInfo {
+                            SettingsCardRow(
+                                "App Variant",
+                                subtitle: "\(status.bundleIdentifier)"
+                            ) {
+                                Text(status.appVariant)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+
+                            SettingsCardDivider()
+                        }
+
+                        // -- Daemon connection status row --
+                        SettingsCardRow(
+                            "Daemon (term-meshd)",
+                            subtitle: daemonStatusSubtitle
+                        ) {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(daemonStatusInfo?.connected == true ? Color.green : Color.red)
+                                    .frame(width: 8, height: 8)
+                                Text(daemonStatusInfo?.connected == true ? "Running" : "Stopped")
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        SettingsCardDivider()
+
+                        // -- Socket & Binary paths (always visible) --
+                        if let status = daemonStatusInfo {
+                            SettingsCardRow(
+                                "Socket",
+                                subtitle: status.socketPath
+                            ) {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(status.socketExists ? Color.green : Color.red)
+                                        .frame(width: 7, height: 7)
+                                    Text(status.socketExists ? "Exists" : "Missing")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsCardRow(
+                                "Binary",
+                                subtitle: status.binaryPath ?? "(not found)"
+                            ) {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(status.binaryExists ? Color.green : Color.red)
+                                        .frame(width: 7, height: 7)
+                                    if status.binaryExists, let binPath = status.binaryPath {
+                                        Button {
+                                            NSWorkspace.shared.selectFile(binPath, inFileViewerRootedAtPath: "")
+                                        } label: {
+                                            Image(systemName: "folder")
+                                                .font(.system(size: 11))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Reveal in Finder")
+                                    } else {
+                                        Text("Missing")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.red)
+                                    }
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsCardRow(
+                                "Log",
+                                subtitle: status.logPath
+                            ) {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(status.logExists ? Color.green : Color.gray)
+                                        .frame(width: 7, height: 7)
+                                    Text(status.logExists ? "Exists" : "No log")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        if let status = daemonStatusInfo, status.connected {
+                            SettingsCardDivider()
+
+                            // -- PID & Uptime --
+                            if let pid = status.pid {
+                                SettingsCardRow("PID") {
+                                    Text("\(pid)")
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                                SettingsCardDivider()
+                            }
+
+                            if let uptime = status.uptimeSecs {
+                                SettingsCardRow("Uptime") {
+                                    Text(formatUptime(uptime))
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                }
+                                SettingsCardDivider()
+                            }
+
+                            // -- Subsystem rows --
+                            ForEach(status.subsystems) { sub in
+                                SettingsCardRow(
+                                    sub.name,
+                                    subtitle: sub.detail
+                                ) {
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(sub.status == "running" ? Color.green : (sub.status == "disabled" ? Color.gray : Color.orange))
+                                            .frame(width: 7, height: 7)
+                                        Text(sub.status.capitalized)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                SettingsCardDivider()
+                            }
+                        }
+
+                        // -- Action buttons --
+                        HStack(spacing: 10) {
+                            Spacer(minLength: 0)
+
+                            if daemonStatusInfo?.connected == true {
+                                Button {
+                                    isDaemonRestarting = true
+                                    resolvedDaemon?.restartDaemon {
+                                        refreshDaemonStatus()
+                                        isDaemonRestarting = false
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        if isDaemonRestarting {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                                .scaleEffect(0.7)
+                                        }
+                                        Text("Restart")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(isDaemonRestarting)
+
+                                Button("Stop") {
+                                    resolvedDaemon?.stopDaemon()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                        refreshDaemonStatus()
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            } else {
+                                Button("Start") {
+                                    resolvedDaemon?.startDaemon()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                        refreshDaemonStatus()
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            Button("Refresh") {
+                                refreshDaemonStatus()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+
+                        SettingsCardDivider()
+
+                        // -- Log viewer --
+                        SettingsCardRow("Recent Log") {
+                            Button("View Log") {
+                                loadDaemonLogTail()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        if let logContent = daemonLogTail {
+                            ScrollView(.vertical) {
+                                Text(logContent)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                            }
+                            .frame(maxHeight: 200)
+                            .background(Color.black.opacity(0.85))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 10)
+                        }
+
+                        SettingsCardDivider()
+
+                        // -- Copy diagnostics --
+                        HStack {
+                            Spacer(minLength: 0)
+                            Button {
+                                copyDiagnostics()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "doc.on.clipboard")
+                                        .font(.system(size: 10))
+                                    Text("Copy Diagnostics")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Copy system diagnostics to clipboard for bug reports")
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                    .onAppear { refreshDaemonStatus() }
+                    }
+
                     if settingsMatch("browser", "search", "engine", "theme", "link", "history", "http", "insecure", "suggestion") {
                     SettingsSectionHeader(title: "Browser")
                     SettingsCard {
@@ -948,6 +1193,7 @@ struct SettingsView: View {
                             || settingsMatch("workspace", "color", "indicator", "palette", "custom")
                             || settingsMatch("automation", "socket", "claude", "port", "integration", "password")
                             || sectionVisible(["agent", "team"], rowKeywords: [["leader"], ["model"], ["directory"]])
+                            || settingsMatch("services", "daemon", "doctor", "status", "restart", "subsystem", "log")
                             || settingsMatch("browser", "search", "engine", "theme", "link", "history", "http", "insecure", "suggestion")
                             || settingsMatch("keyboard", "shortcut", "keybinding", "hotkey")
                             || settingsMatch("reset", "clear", "defaults")
@@ -1115,6 +1361,186 @@ struct SettingsView: View {
         } message: {
             Text("This disables ancestry and password checks and opens the socket to all local users. Only enable when you understand the risk.")
         }
+    }
+
+    // MARK: - Services / Doctor
+
+    private var daemonStatusSubtitle: String {
+        guard let status = daemonStatusInfo else { return "Checking..." }
+        if !status.connected {
+            if !status.binaryExists { return "Binary not found. Build the daemon first." }
+            if !status.socketExists { return "Socket missing. Daemon may not be running." }
+            return "Not responding on \(status.socketPath)"
+        }
+        if let pid = status.pid, let uptime = status.uptimeSecs {
+            return "PID \(pid) — up \(formatUptime(uptime))"
+        }
+        return "Connected"
+    }
+
+    private var resolvedDaemon: (any DaemonService)? {
+        daemonService ?? TermMeshDaemon.shared
+    }
+
+    private func refreshDaemonStatus() {
+        let daemon = resolvedDaemon
+        DispatchQueue.global(qos: .userInitiated).async {
+            let status = daemon?.daemonStatus()
+            DispatchQueue.main.async { daemonStatusInfo = status }
+        }
+    }
+
+    private func loadDaemonLogTail() {
+        let logPath = "/tmp/term-meshd.log"
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let data = FileManager.default.contents(atPath: logPath),
+                  let content = String(data: data, encoding: .utf8) else {
+                let fallback = AttributedString("(no log file found)")
+                DispatchQueue.main.async { daemonLogTail = fallback }
+                return
+            }
+            let lines = content.components(separatedBy: .newlines)
+            let tail = lines.suffix(50).joined(separator: "\n")
+            let attributed = parseAnsiLog(tail)
+            DispatchQueue.main.async { daemonLogTail = attributed }
+        }
+    }
+
+    /// Parse ANSI escape codes into an AttributedString with colors.
+    private func parseAnsiLog(_ raw: String) -> AttributedString {
+        var result = AttributedString()
+        let defaultColor = Color.gray
+
+        // ANSI SGR code → Color mapping
+        func colorForCode(_ code: Int) -> Color? {
+            switch code {
+            case 0: return nil                // reset
+            case 2: return nil                // dim — handled via opacity
+            case 22: return nil               // reset dim
+            case 30: return .black
+            case 31: return .red
+            case 32: return .green
+            case 33: return .yellow
+            case 34: return .blue
+            case 35: return .purple
+            case 36: return .cyan
+            case 37: return .white
+            case 90: return .gray
+            case 91: return Color(.systemRed)
+            case 92: return Color(.systemGreen)
+            case 93: return Color(.systemYellow)
+            case 94: return Color(.systemBlue)
+            case 95: return Color(.systemPurple)
+            case 96: return Color(.systemTeal)
+            default: return nil
+            }
+        }
+
+        var currentColor: Color = defaultColor
+        var isDim = false
+
+        // Split by ESC[ sequences: \x1b[ or \033[
+        let pattern = "\u{1b}\\[([0-9;]*)m"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return AttributedString(raw)
+        }
+
+        let nsString = raw as NSString
+        var lastEnd = 0
+
+        let matches = regex.matches(in: raw, range: NSRange(location: 0, length: nsString.length))
+
+        for match in matches {
+            // Append text before this escape sequence
+            if match.range.location > lastEnd {
+                let textRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let text = nsString.substring(with: textRange)
+                var segment = AttributedString(text)
+                segment.foregroundColor = isDim ? currentColor.opacity(0.5) : currentColor
+                result.append(segment)
+            }
+
+            // Parse SGR codes
+            let codesStr = nsString.substring(with: match.range(at: 1))
+            let codes = codesStr.split(separator: ";").compactMap { Int($0) }
+            if codes.isEmpty {
+                // bare ESC[m is reset
+                currentColor = defaultColor
+                isDim = false
+            }
+            for code in codes {
+                if code == 0 {
+                    currentColor = defaultColor
+                    isDim = false
+                } else if code == 2 {
+                    isDim = true
+                } else if code == 22 {
+                    isDim = false
+                } else if let color = colorForCode(code) {
+                    currentColor = color
+                }
+            }
+
+            lastEnd = match.range.location + match.range.length
+        }
+
+        // Append remaining text
+        if lastEnd < nsString.length {
+            let text = nsString.substring(from: lastEnd)
+            var segment = AttributedString(text)
+            segment.foregroundColor = isDim ? currentColor.opacity(0.5) : currentColor
+            result.append(segment)
+        }
+
+        return result
+    }
+
+    private func formatUptime(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        let s = seconds % 60
+        if h > 0 { return "\(h)h \(m)m \(s)s" }
+        if m > 0 { return "\(m)m \(s)s" }
+        return "\(s)s"
+    }
+
+    private func copyDiagnostics() {
+        var lines: [String] = []
+        lines.append("term-mesh diagnostics")
+        lines.append("=====================")
+        lines.append("Date: \(ISO8601DateFormatter().string(from: Date()))")
+        lines.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        lines.append("App: \(appVersion) (\(buildNumber))")
+
+        if let status = daemonStatusInfo {
+            lines.append("Variant: \(status.appVariant)")
+            lines.append("Bundle ID: \(status.bundleIdentifier)")
+            lines.append("")
+            lines.append("Daemon: \(status.connected ? "connected" : "not connected")")
+            if let pid = status.pid { lines.append("PID: \(pid)") }
+            if let uptime = status.uptimeSecs { lines.append("Uptime: \(formatUptime(uptime))") }
+            lines.append("Binary: \(status.binaryPath ?? "(not found)") [\(status.binaryExists ? "exists" : "MISSING")]")
+            lines.append("Socket: \(status.socketPath) [\(status.socketExists ? "exists" : "MISSING")]")
+            lines.append("Log: \(status.logPath) [\(status.logExists ? "exists" : "MISSING")]")
+
+            if !status.subsystems.isEmpty {
+                lines.append("")
+                lines.append("Subsystems:")
+                for sub in status.subsystems {
+                    var line = "  \(sub.name): \(sub.status)"
+                    if let d = sub.detail { line += " (\(d))" }
+                    lines.append(line)
+                }
+            }
+        } else {
+            lines.append("Daemon: status not available")
+        }
+
+        let text = lines.joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func resetAllSettings() {

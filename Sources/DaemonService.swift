@@ -14,7 +14,9 @@ protocol DaemonService: AnyObject {
     // MARK: - Lifecycle
     func startDaemon()
     func stopDaemon()
+    func restartDaemon(completion: @escaping () -> Void)
     func ping() -> Bool
+    func daemonStatus() -> TermMeshDaemon.DaemonStatus
 
     // MARK: - Worktree
     func createWorktree(repoPath: String, branch: String?, baseBranch: String?) -> WorktreeInfo?

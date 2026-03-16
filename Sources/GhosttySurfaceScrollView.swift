@@ -642,7 +642,16 @@ final class GhosttySurfaceScrollView: NSView {
         let rootView = IMEInputBar(
             onSubmit: { [weak self] text in
                 guard let self = self else { return }
-                self.surfaceView.sendIMEText(text)
+                // Image paths (from IME paste) must go through bracketed paste
+                // (ghostty_surface_text) so Claude Code recognizes them as images
+                // ([Image #1]) instead of treating the path as typed text.
+                if text.range(of: #"/tmp/clipboard-\d+\.png"#, options: .regularExpression) != nil,
+                   let surface = self.surfaceView.terminalSurface {
+                    surface.sendText(text)
+                    surface.sendSurfaceKeyPress(keycode: 0x24, text: "\r")
+                } else {
+                    self.surfaceView.sendIMEText(text)
+                }
             },
             onBroadcast: { text in
                 NotificationCenter.default.post(

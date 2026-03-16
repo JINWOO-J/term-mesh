@@ -34,10 +34,14 @@ const REPORT_SUFFIX: &str = concat!(
 );
 
 const BROADCAST_SUFFIX: &str = concat!(
-    "\n\n[IMPORTANT] When you finish this task, you MUST run this SINGLE command to report your result:\n",
+    "\n\n[IMPORTANT] When you finish this task, you MUST use your bash/execute tool to run this SINGLE command:\n",
+    "```\n",
     "tm-agent reply '<one-paragraph summary of your result>'\n",
+    "```\n",
     "This sends the result to the leader AND registers it as a report in one step.\n",
-    "Do NOT run separate msg send + report commands. Just use `reply` once.",
+    "Do NOT run separate msg send + report commands. Just use `reply` once.\n",
+    "Do NOT just write the result as text — actually execute the shell command using your tool.\n",
+    "This allows the leader to detect task completion automatically.",
 );
 
 fn agent_init_prompt(agent: &str, workdir: &str, socket: &str) -> String {
@@ -190,6 +194,22 @@ enum Commands {
         mode: String,
         #[arg(long)]
         task: Option<String>,
+        /// Comma-separated list of agent names to wait for (default: all agents)
+        #[arg(long)]
+        agents: Option<String>,
+    },
+    /// Delegate a task to all agents (broadcast with task tracking)
+    FanOut {
+        text: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        priority: Option<u32>,
+        #[arg(long)]
+        no_report: bool,
+        /// Comma-separated list of agents to target (default: all)
+        #[arg(long)]
+        agents: Option<String>,
     },
     /// Get concise agent status (status + task + messages + terminal)
     Brief {
@@ -684,8 +704,13 @@ fn main() {
             run_delegate(&sock, &team, target, &text, title, priority, &accept, &deps, desc, no_report);
             return;
         }
-        Commands::Wait { timeout, interval, mode, task } => {
-            run_wait(&sock, &team, timeout, interval, &mode, task.as_deref());
+        Commands::FanOut { text, title, priority, no_report, agents } => {
+            run_fan_out(&sock, &team, &text, title, priority, no_report, &agents);
+            return;
+        }
+        Commands::Wait { timeout, interval, mode, task, agents } => {
+            let filter = parse_cli_flag(&agents);
+            run_wait(&sock, &team, timeout, interval, &mode, task.as_deref(), &filter);
             return;
         }
         Commands::Brief { agent: ref target, lines } => {
@@ -892,10 +917,62 @@ fn run_delegate(
     if !sent["ok"].as_bool().unwrap_or(false) { process::exit(1); }
 }
 
-fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str, task_id: Option<&str>) {
+fn run_fan_out(
+    sock: &PathBuf, team: &str, text: &str,
+    title: Option<String>, priority: Option<u32>, no_report: bool,
+    agents_flag: &Option<String>,
+) {
+    // Get all agent names from team status
+    let all_agents: Vec<String> = match rpc_call(sock, "team.status", json!({ "team_name": team })) {
+        Ok(r) => {
+            r["result"]["agents"].as_array()
+                .map(|arr| arr.iter().filter_map(|a| a["name"].as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        }
+        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+    };
+
+    // Filter agents if --agents flag provided
+    let filter = parse_cli_flag(agents_flag);
+    let targets: Vec<&str> = if filter.is_empty() {
+        all_agents.iter().map(|s| s.as_str()).collect()
+    } else {
+        all_agents.iter().filter(|a| filter.contains(a.as_str())).map(|s| s.as_str()).collect()
+    };
+
+    if targets.is_empty() {
+        eprintln!("Error: no matching agents found");
+        process::exit(1);
+    }
+
+    eprintln!("Fan-out: delegating to {} agents: {}", targets.len(), targets.join(", "));
+
+    let mut sent_agents: Vec<String> = Vec::new();
+    for target in &targets {
+        let t = title.clone().unwrap_or_else(|| task_title_from_text(text));
+        run_delegate(sock, team, target, text, Some(t), priority, &[], &[], None, no_report);
+        sent_agents.push(target.to_string());
+    }
+
+    eprintln!("Fan-out complete: {} tasks created and delegated.", sent_agents.len());
+    println!("{}", pretty(&json!({
+        "fan_out": {
+            "team_name": team,
+            "agents": sent_agents,
+            "count": sent_agents.len(),
+        }
+    })));
+}
+
+fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str, task_id: Option<&str>, agent_filter: &std::collections::HashSet<String>) {
     // Prevent infinite loop: clamp interval to at least 1 second
     let interval = interval.max(1);
-    eprintln!("Waiting for agents in team '{team}' (timeout: {timeout}s, mode: {mode})...");
+    let filter_label = if agent_filter.is_empty() {
+        "all".to_string()
+    } else {
+        agent_filter.iter().cloned().collect::<Vec<_>>().join(",")
+    };
+    eprintln!("Waiting for agents in team '{team}' (timeout: {timeout}s, mode: {mode}, agents: {filter_label})...");
 
     let mut agent_names: Vec<String> = Vec::new();
     if mode == "msg" || mode == "any" {
@@ -903,6 +980,7 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
             if let Some(agents) = r["result"]["agents"].as_array() {
                 agent_names = agents.iter()
                     .filter_map(|a| a["name"].as_str().map(String::from))
+                    .filter(|n| agent_filter.is_empty() || agent_filter.contains(n))
                     .collect();
             }
         }
@@ -919,10 +997,26 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
             match rpc_call(sock, "team.result.status", json!({ "team_name": team })) {
                 Ok(r) => {
                     let res = &r["result"];
-                    let done = res["completed"].as_u64().unwrap_or(0);
-                    let total = res["total"].as_u64().unwrap_or(0);
-                    report_done = res["all_done"].as_bool().unwrap_or(false);
-                    report_progress = format!("{done}/{total}");
+                    if agent_filter.is_empty() {
+                        let done = res["completed"].as_u64().unwrap_or(0);
+                        let total = res["total"].as_u64().unwrap_or(0);
+                        report_done = res["all_done"].as_bool().unwrap_or(false);
+                        report_progress = format!("{done}/{total}");
+                    } else if let Some(agents) = res["agents"].as_array() {
+                        let filtered: Vec<&Value> = agents.iter()
+                            .filter(|a| {
+                                a["agent_name"].as_str()
+                                    .map(|n| agent_filter.contains(n))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+                        let total = filtered.len() as u64;
+                        let done = filtered.iter()
+                            .filter(|a| a["has_result"].as_bool().unwrap_or(false))
+                            .count() as u64;
+                        report_done = total > 0 && done >= total;
+                        report_progress = format!("{done}/{total}");
+                    }
                 }
                 Err(e) => eprintln!("  Warning: result.status RPC failed: {e}"),
             }
@@ -1046,15 +1140,22 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
             "idle" => {
                 if let Ok(r) = rpc_call(sock, "team.status", json!({ "team_name": team })) {
                     if let Some(agents) = r["result"]["agents"].as_array() {
-                        let idle_count = agents.iter()
+                        let filtered: Vec<&Value> = if agent_filter.is_empty() {
+                            agents.iter().collect()
+                        } else {
+                            agents.iter()
+                                .filter(|a| a["name"].as_str().map(|n| agent_filter.contains(n)).unwrap_or(false))
+                                .collect()
+                        };
+                        let idle_count = filtered.iter()
                             .filter(|a| a["agent_state"].as_str() == Some("idle")).count();
-                        let active_count = agents.iter()
+                        let active_count = filtered.iter()
                             .filter(|a| matches!(a["agent_state"].as_str(), Some("running" | "blocked" | "review_ready")))
                             .count();
                         let total = idle_count + active_count;
                         eprintln!("  [{elapsed}/{timeout}s] idle={idle_count}/{total}");
                         if total > 0 && idle_count == total {
-                            let idle_agents: Vec<&Value> = agents.iter()
+                            let idle_agents: Vec<&&Value> = filtered.iter()
                                 .filter(|a| a["agent_state"].as_str() == Some("idle")).collect();
                             println!("{}", pretty(&json!({
                                 "result": { "team_name": team, "agents": idle_agents, "count": idle_count }

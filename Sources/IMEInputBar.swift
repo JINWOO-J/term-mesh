@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Settings
 
 enum IMEInputBarSettings {
-    static let defaultFontSize: Double = 14
+    static let defaultFontSize: Double = 12
     static let defaultHeight: Double = 90
 
     static var fontSize: CGFloat {

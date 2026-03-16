@@ -105,26 +105,31 @@ rm -f term-mesh-notary.zip
 echo "App notarized"
 
 # --- Create and notarize DMG ---
+VERSION="${TAG#v}"
+DMG_RELEASE="term-mesh-macos.dmg"
+DMG_VERSIONED="term-mesh-${VERSION}-macos.dmg"
 echo "Creating DMG..."
-rm -f term-mesh-macos.dmg
-create-dmg --codesign "$SIGN_HASH" term-mesh-macos.dmg "$APP_PATH"
+rm -f "$DMG_RELEASE" "$DMG_VERSIONED"
+create-dmg --codesign "$SIGN_HASH" "$APP_PATH" ./
+mv ./term-mesh*.dmg "$DMG_RELEASE"
 echo "Notarizing DMG..."
-xcrun notarytool submit term-mesh-macos.dmg \
+xcrun notarytool submit "$DMG_RELEASE" \
   --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-xcrun stapler staple term-mesh-macos.dmg
-xcrun stapler validate term-mesh-macos.dmg
-echo "DMG notarized"
+xcrun stapler staple "$DMG_RELEASE"
+xcrun stapler validate "$DMG_RELEASE"
+cp "$DMG_RELEASE" "$DMG_VERSIONED"
+echo "DMG notarized: $DMG_RELEASE + $DMG_VERSIONED"
 
 # --- Generate Sparkle appcast ---
 echo "Generating appcast..."
-./scripts/sparkle_generate_appcast.sh term-mesh-macos.dmg "$TAG" appcast.xml
+./scripts/sparkle_generate_appcast.sh "$DMG_RELEASE" "$TAG" appcast.xml
 
 # --- Create GitHub release (if needed) and upload ---
 if gh release view "$TAG" >/dev/null 2>&1; then
   echo "Release $TAG already exists"
   EXISTING_ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)"
   HAS_CONFLICTING_ASSET="false"
-  for asset in term-mesh-macos.dmg appcast.xml; do
+  for asset in "$DMG_RELEASE" "$DMG_VERSIONED" appcast.xml; do
     if printf '%s\n' "$EXISTING_ASSETS" | grep -Fxq "$asset"; then
       HAS_CONFLICTING_ASSET="true"
       break
@@ -139,14 +144,14 @@ if gh release view "$TAG" >/dev/null 2>&1; then
 
   if [[ "$ALLOW_OVERWRITE" == "true" ]]; then
     echo "Uploading with overwrite enabled for existing release $TAG..."
-    gh release upload "$TAG" term-mesh-macos.dmg appcast.xml --clobber
+    gh release upload "$TAG" "$DMG_RELEASE" "$DMG_VERSIONED" appcast.xml --clobber
   else
     echo "Uploading to existing release $TAG..."
-    gh release upload "$TAG" term-mesh-macos.dmg appcast.xml
+    gh release upload "$TAG" "$DMG_RELEASE" "$DMG_VERSIONED" appcast.xml
   fi
 else
   echo "Creating release $TAG and uploading..."
-  gh release create "$TAG" term-mesh-macos.dmg appcast.xml --title "$TAG" --notes "See CHANGELOG.md for details"
+  gh release create "$TAG" "$DMG_RELEASE" "$DMG_VERSIONED" appcast.xml --title "$TAG" --notes "See CHANGELOG.md for details"
 fi
 
 # --- Verify ---
@@ -154,8 +159,7 @@ gh release view "$TAG"
 
 # --- Update Homebrew cask (skip for nightlies) ---
 if [[ "$TAG" != *"-nightly"* ]]; then
-  VERSION="${TAG#v}"
-  DMG_SHA256=$(shasum -a 256 term-mesh-macos.dmg | cut -d' ' -f1)
+  DMG_SHA256=$(shasum -a 256 "$DMG_RELEASE" | cut -d' ' -f1)
   echo "Updating homebrew cask to $VERSION (SHA: $DMG_SHA256)..."
   CASK_FILE="homebrew-cmux/Casks/term-mesh.rb"
   if [ -f "$CASK_FILE" ]; then
@@ -201,7 +205,7 @@ CASKEOF
 fi
 
 # --- Cleanup ---
-rm -rf build/ term-mesh-macos.dmg appcast.xml
+rm -rf build/ "$DMG_RELEASE" "$DMG_VERSIONED" appcast.xml
 echo ""
 echo "=== Release $TAG complete ==="
 say "term-mesh release complete"

@@ -130,13 +130,19 @@ final class TermMeshDaemon: ObservableObject {
             }
 
             process.environment = env
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+
+            // Log daemon stdout/stderr to /tmp/term-meshd.log for debugging
+            let logPath = "/tmp/term-meshd.log"
+            FileManager.default.createFile(atPath: logPath, contents: nil)
+            let logHandle = FileHandle(forWritingAtPath: logPath)
+            logHandle?.seekToEndOfFile()
+            process.standardOutput = logHandle ?? FileHandle.nullDevice
+            process.standardError = logHandle ?? FileHandle.nullDevice
 
             do {
                 try process.run()
                 self.daemonProcess = process
-                Logger.daemon.info("daemon started (pid: \(process.processIdentifier, privacy: .public))")
+                Logger.daemon.info("daemon started (pid: \(process.processIdentifier, privacy: .public), binary: \(binaryPath, privacy: .public))")
             } catch {
                 Logger.daemon.error("failed to start daemon: \(error, privacy: .public)")
             }

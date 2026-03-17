@@ -1,8 +1,11 @@
 # vim:ft=zsh
 #
-# Compatibility shim: with the current integration model, term-mesh restores
-# ZDOTDIR in .zshenv so this file should never be reached. If it is, restore
-# ZDOTDIR and behave like vanilla zsh by sourcing the user's .zprofile.
+# ZDOTDIR wrapper: source the user's .zprofile, then restore ZDOTDIR to the
+# integration dir so that .zshrc also loads from here (where we can finally
+# inject term-mesh integration after Ghostty's always block has run).
+
+# Save integration dir before restoring user ZDOTDIR.
+builtin typeset _termmesh_integ_dir="$ZDOTDIR"
 
 if [[ -n "${GHOSTTY_ZSH_ZDOTDIR+X}" ]]; then
     builtin export ZDOTDIR="$GHOSTTY_ZSH_ZDOTDIR"
@@ -19,4 +22,9 @@ fi
 
 builtin typeset _termmesh_file="${ZDOTDIR-$HOME}/.zprofile"
 [[ ! -r "$_termmesh_file" ]] || builtin source -- "$_termmesh_file"
-builtin unset _termmesh_file
+
+# Restore ZDOTDIR to integration dir so .zshrc loads from here.
+if [[ -n "$_termmesh_integ_dir" ]]; then
+    builtin export ZDOTDIR="$_termmesh_integ_dir"
+fi
+builtin unset _termmesh_file _termmesh_integ_dir

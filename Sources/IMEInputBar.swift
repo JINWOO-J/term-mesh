@@ -794,7 +794,7 @@ final class IMETextView: NSTextView {
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
         if pb.string(forType: .string) != nil || pb.string(forType: NSPasteboard.PasteboardType("public.utf8-plain-text")) != nil {
-            super.paste(sender)
+            pasteAsPlainText(sender)
             return
         }
         if let path = GhosttyPasteboardHelper.saveClipboardImageToTempFile(from: pb),
@@ -817,7 +817,7 @@ final class IMETextView: NSTextView {
             delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
             return
         }
-        super.paste(sender)
+        pasteAsPlainText(sender)
     }
 
     /// Returns text with image attachments replaced by their file paths.

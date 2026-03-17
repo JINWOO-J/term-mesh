@@ -62,12 +62,11 @@ final class Workspace: Identifiable, ObservableObject {
     // MARK: - Pane Zoom
 
     /// Whether any pane is currently zoomed (delegates to bonsplit's native zoom).
-    /// TODO: Enable when bonsplit adds isSplitZoomed/togglePaneZoom
-    var isPaneZoomed: Bool { false }
+    var isPaneZoomed: Bool { bonsplitController.isSplitZoomed }
 
     /// Toggle zoom on the focused pane. If already zoomed, restores original layout.
     func togglePaneZoom() {
-        // TODO: bonsplitController.togglePaneZoom()
+        bonsplitController.togglePaneZoom()
         objectWillChange.send()
     }
 

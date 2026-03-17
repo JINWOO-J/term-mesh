@@ -10,6 +10,7 @@ import WebKit
 
 struct ContentView: View {
     @ObservedObject var updateViewModel: UpdateViewModel
+    @ObservedObject private var rainbowBanner = RainbowBannerStore.shared
     let windowId: UUID
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject var notificationStore: TerminalNotificationStore
@@ -415,6 +416,15 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             customTitlebar
         }
+        .overlay(alignment: .top) {
+            if rainbowBanner.isVisible {
+                RainbowBannerView(keyword: rainbowBanner.keyword)
+                    .padding(.top, titlebarPadding)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(500)
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: rainbowBanner.isVisible)
     }
 
     private var terminalContentWithSidebarDropOverlay: some View {

@@ -409,6 +409,9 @@ class TerminalController {
         case "notify_target":
             return notifyTarget(args)
 
+        case "rainbow_banner":
+            return triggerRainbowBanner(args)
+
         case "list_notifications":
             return listNotifications()
 

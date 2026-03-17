@@ -630,6 +630,7 @@ extension TerminalController {
           notify_target <workspace_id> <surface_id> <payload> - Notify by workspace+surface
           list_notifications              - List all notifications
           clear_notifications             - Clear all notifications
+          rainbow_banner [keyword]        - Show rainbow banner overlay (keywords: ULTRATHINK, MEGATHINK, IMPORTANT, CRITICAL, RAINBOW)
           set_app_focus <active|inactive|clear> - Override app focus state
           simulate_app_active             - Trigger app active handler
           set_status <key> <value> [--icon=X] [--color=#hex] [--tab=X] - Set a status entry
@@ -1605,6 +1606,18 @@ extension TerminalController {
             )
         }
         return result
+    }
+
+    func triggerRainbowBanner(_ args: String) -> String {
+        let keywords = ["ULTRATHINK", "MEGATHINK", "IMPORTANT", "CRITICAL", "RAINBOW"]
+        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
+        // If a specific keyword is passed, use it; otherwise default to "RAINBOW".
+        let keyword = trimmed.isEmpty ? "RAINBOW" : trimmed.uppercased()
+        let display = keywords.first(where: { keyword.contains($0) }) ?? keyword
+        DispatchQueue.main.async {
+            RainbowBannerStore.shared.trigger(keyword: display)
+        }
+        return "OK"
     }
 
     func listNotifications() -> String {

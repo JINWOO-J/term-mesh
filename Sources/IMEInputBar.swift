@@ -523,6 +523,7 @@ struct IMETextEditor: NSViewRepresentable {
             }
             textView.string = text
             textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
+            textView.applyRainbowKeywords()
         }
         // Update colors when appearance changes
         textView.textColor = NSColor.textColor
@@ -829,5 +830,77 @@ final class IMETextView: NSTextView {
     override func insertText(_ string: Any, replacementRange: NSRange) {
         super.insertText(string, replacementRange: replacementRange)
         composingHandler?(false)
+    }
+
+    // MARK: - Rainbow keyword coloring
+
+    private static let rainbowKeywords: [String] = [
+        "ULTRATHINK", "MEGATHINK", "IMPORTANT", "CRITICAL", "RAINBOW",
+    ]
+
+    private static let rainbowColors: [NSColor] = [
+        .systemRed, .systemOrange, .systemYellow, .systemGreen, .cyan, .systemBlue, .systemPurple,
+    ]
+
+    private var isApplyingRainbow = false
+
+    override func didChangeText() {
+        super.didChangeText()
+        guard !isApplyingRainbow, !hasMarkedText() else { return }
+        isApplyingRainbow = true
+        applyRainbowKeywords()
+        isApplyingRainbow = false
+    }
+
+    /// Scans committed text for rainbow keywords and applies per-character gradient colors.
+    /// Safe to call externally (e.g. after programmatic `string =` assignment).
+    /// Skips any active IME composing (marked) range.
+    func applyRainbowKeywords() {
+        guard let storage = textStorage else { return }
+        let len = storage.length
+        guard len > 0 else { return }
+        let markedRange = self.markedRange()
+        let fullString = storage.string as NSString
+
+        storage.beginEditing()
+
+        // Reset foreground color to default outside the marked (composing) range
+        if markedRange.location == NSNotFound || markedRange.length == 0 {
+            storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+                                 range: NSRange(location: 0, length: len))
+        } else {
+            if markedRange.location > 0 {
+                storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+                                     range: NSRange(location: 0, length: markedRange.location))
+            }
+            let afterLoc = markedRange.location + markedRange.length
+            if afterLoc < len {
+                storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+                                     range: NSRange(location: afterLoc, length: len - afterLoc))
+            }
+        }
+
+        // Apply rainbow colors per character for each keyword match
+        for keyword in IMETextView.rainbowKeywords {
+            var searchRange = NSRange(location: 0, length: len)
+            while searchRange.length > 0 {
+                let found = fullString.range(of: keyword, options: .caseInsensitive, range: searchRange)
+                guard found.location != NSNotFound else { break }
+                let nextLoc = found.location + found.length
+                searchRange = NSRange(location: nextLoc, length: len - nextLoc)
+
+                // Skip if overlapping with active IME composing range
+                if markedRange.location != NSNotFound && markedRange.length > 0,
+                   NSIntersectionRange(found, markedRange).length > 0 { continue }
+
+                for i in 0..<found.length {
+                    let charRange = NSRange(location: found.location + i, length: 1)
+                    let color = IMETextView.rainbowColors[i % IMETextView.rainbowColors.count]
+                    storage.addAttribute(.foregroundColor, value: color, range: charRange)
+                }
+            }
+        }
+
+        storage.endEditing()
     }
 }

@@ -359,6 +359,14 @@ final class TeamOrchestrator {
                 Logger.team.info("shared worktree for team '\(name, privacy: .public)': \(info.path, privacy: .public)")
             case .failure(let error):
                 Logger.team.error("shared worktree failed: \(error, privacy: .public), using original directory")
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Worktree Creation Failed"
+                    alert.informativeText = "Shared worktree for team '\(name)' could not be created: \(error). Agents will use the original directory."
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
             }
         }
 
@@ -506,6 +514,14 @@ final class TeamOrchestrator {
                     Logger.team.info("worktree for \(agent.name, privacy: .public): \(info.path, privacy: .public) [\(info.branch, privacy: .public)]")
                 case .failure(let error):
                     Logger.team.error("worktree failed for \(agent.name, privacy: .public): \(error, privacy: .public), using original directory")
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Worktree Creation Failed"
+                        alert.informativeText = "Worktree for agent '\(agent.name)' could not be created: \(error). Agent will use the original directory."
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
                 }
             }
 

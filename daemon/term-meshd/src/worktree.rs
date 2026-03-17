@@ -58,7 +58,39 @@ pub fn create(params: serde_json::Value) -> Result<WorktreeInfo, String> {
             .map_err(|e| format!("HEAD is not a commit: {e}"))?
     };
 
-    // Create branch
+    // Create branch (delete stale branch+worktree first if it already exists)
+    if repo.find_branch(&branch_name, git2::BranchType::Local).is_ok() {
+        // Check if there's an existing worktree using this branch and prune it
+        if let Ok(wt_names) = repo.worktrees() {
+            for existing_wt in wt_names.iter().flatten() {
+                if let Ok(wt) = repo.find_worktree(existing_wt) {
+                    let wt_path = wt.path().to_path_buf();
+                    if let Ok(wt_repo) = Repository::open(&wt_path) {
+                        if let Ok(head) = wt_repo.head() {
+                            if head.shorthand() == Some(&branch_name) {
+                                let _ = wt.prune(Some(
+                                    git2::WorktreePruneOptions::new()
+                                        .working_tree(true)
+                                        .valid(true),
+                                ));
+                                if wt_path.exists() {
+                                    let _ = std::fs::remove_dir_all(&wt_path);
+                                }
+                                tracing::info!("pruned stale worktree '{existing_wt}' for branch '{branch_name}'");
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Delete the stale branch so we can recreate it from current HEAD
+        let mut branch = repo.find_branch(&branch_name, git2::BranchType::Local)
+            .map_err(|e| format!("cannot find branch '{branch_name}': {e}"))?;
+        branch.delete()
+            .map_err(|e| format!("cannot delete stale branch '{branch_name}': {e}"))?;
+        tracing::info!("deleted stale branch '{branch_name}' for re-creation");
+    }
     repo.branch(&branch_name, &commit, false)
         .map_err(|e| format!("cannot create branch '{branch_name}': {e}"))?;
 
@@ -520,6 +552,32 @@ mod tests {
         let result = create(params);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cannot open repo"));
+    }
+
+    #[test]
+    fn create_reuses_stale_branch() {
+        let (_dir, repo_path) = init_temp_repo();
+
+        // First creation with a named branch
+        let params = serde_json::json!({
+            "repo_path": repo_path,
+            "branch": "team/test-team",
+        });
+        let info1 = create(params).unwrap();
+        assert_eq!(info1.branch, "team/test-team");
+        assert!(std::path::Path::new(&info1.path).exists());
+
+        // Second creation with the same branch name should succeed
+        // (stale branch+worktree get cleaned up automatically)
+        let params2 = serde_json::json!({
+            "repo_path": repo_path,
+            "branch": "team/test-team",
+        });
+        let info2 = create(params2).unwrap();
+        assert_eq!(info2.branch, "team/test-team");
+        assert!(std::path::Path::new(&info2.path).exists());
+        // Should be a different worktree
+        assert_ne!(info1.name, info2.name);
     }
 
     #[test]

@@ -77,7 +77,7 @@ struct TeamCreationView: View {
             Divider()
             footer
         }
-        .frame(width: 720, height: 850)
+        .frame(width: 880, height: 850)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             leaderMode = defaultLeaderMode
@@ -607,7 +607,7 @@ struct TeamCreationView: View {
                 }
 
                 LazyVGrid(columns: [
-                    GridItem(.adaptive(minimum: 200), spacing: 8)
+                    GridItem(.adaptive(minimum: 250), spacing: 8)
                 ], spacing: 8) {
                     ForEach(SmartTeamPreset.builtIn) { preset in
                         smartPresetCard(preset)

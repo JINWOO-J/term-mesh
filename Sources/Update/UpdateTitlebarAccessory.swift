@@ -214,6 +214,12 @@ final class PlusMenuRightClickNSView: NSView {
     var onRightClick: (() -> Void)?
     var onLayout: (() -> Void)?
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Only intercept right-clicks; let left-clicks pass through to the SwiftUI Button underneath.
+        guard let event = NSApp.currentEvent, event.type == .rightMouseDown else { return nil }
+        return super.hitTest(point)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
         onRightClick?()
     }

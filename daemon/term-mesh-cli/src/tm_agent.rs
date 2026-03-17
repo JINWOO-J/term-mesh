@@ -525,9 +525,13 @@ fn format_task_instruction(
     }
     let task_id = task["id"].as_str().unwrap_or("");
     lines.push(String::new());
+    lines.push("[FORMAT COMPLIANCE] Follow the leader's instructions EXACTLY as given. \
+If a specific output format is requested, reproduce it precisely — \
+do not paraphrase, summarize, or restructure the format.".to_string());
+    lines.push(String::new());
     lines.push(instruction.trim().to_string());
     lines.push(String::new());
-    lines.push("Use the task lifecycle commands with this task id:".to_string());
+    lines.push("You MUST follow this task lifecycle:".to_string());
     lines.push(format!("- tm-agent task start {task_id}"));
     lines.push("- tm-agent heartbeat '<short progress summary>'".to_string());
     lines.push(format!("- tm-agent task block {task_id} '<reason>'"));
@@ -935,6 +939,28 @@ fn main() {
                 report_params["result_path"] = json!(path.to_string_lossy());
             }
             let _ = rpc_call(&sock, "team.report", report_params);
+            // Auto-complete the active task for this agent
+            if let Ok(status_resp) = rpc_call(&sock, "team.status", json!({"team_name": &team})) {
+                if let Some(agents) = status_resp["result"]["agents"].as_array() {
+                    for a in agents {
+                        if a["name"].as_str() == Some(sender.as_str()) {
+                            if let Some(tid) = a["active_task_id"].as_str() {
+                                if a["active_task_status"].as_str() != Some("completed") {
+                                    let mut update = json!({
+                                        "team_name": &team, "task_id": tid,
+                                        "status": "completed", "result": &summary,
+                                    });
+                                    if let Some(ref path) = result_path {
+                                        update["result_path"] = json!(path.to_string_lossy());
+                                    }
+                                    let _ = rpc_call(&sock, "team.task.update", update);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
             return;
         }
     };

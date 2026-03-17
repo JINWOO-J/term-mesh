@@ -643,6 +643,12 @@ final class IMETextView: NSTextView {
         if event.keyCode == 36 && event.modifierFlags.contains(.command) {
             if hasMarkedText() {
                 super.keyDown(with: event)
+                if !hasMarkedText() {
+                    if string.hasSuffix("\n") {
+                        string = String(string.dropLast())
+                    }
+                    submitAndCloseHandler?()
+                }
                 return
             }
             submitAndCloseHandler?()
@@ -652,6 +658,15 @@ final class IMETextView: NSTextView {
         if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
             if hasMarkedText() {
                 super.keyDown(with: event)
+                // IME confirmed composition via super.keyDown. If no longer composing,
+                // strip any trailing newline that NSTextView's insertNewline added,
+                // then submit immediately so the user doesn't need a second Enter.
+                if !hasMarkedText() {
+                    if string.hasSuffix("\n") {
+                        string = String(string.dropLast())
+                    }
+                    submitHandler?()
+                }
                 return
             }
             submitHandler?()

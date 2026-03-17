@@ -174,9 +174,13 @@ final class TermMeshDaemon: ObservableObject {
         let pipe = Pipe()
         lsof.standardOutput = pipe
         lsof.standardError = FileHandle.nullDevice
+        let lsofDone = DispatchSemaphore(value: 0)
+        lsof.terminationHandler = { _ in lsofDone.signal() }
         try? lsof.run()
-        lsof.waitUntilExit()
-        let pidData = pipe.fileHandleForReading.readDataToEndOfFile()
+        let lsofTimedOut = lsofDone.wait(timeout: .now() + 2.0) == .timedOut
+        if lsofTimedOut { lsof.terminate() }
+        // On timeout skip reading to avoid blocking on a stale pipe.
+        let pidData = lsofTimedOut ? Data() : pipe.fileHandleForReading.readDataToEndOfFile()
         if let pidStr = String(data: pidData, encoding: .utf8) {
             for line in pidStr.split(separator: "\n") {
                 if let pid = Int32(line.trimmingCharacters(in: .whitespaces)) {

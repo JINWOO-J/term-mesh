@@ -245,7 +245,7 @@ extension TerminalController {
             let lines = paneIds.map { paneId in
                 let selected = paneId == focusedPaneId ? "*" : " "
                 let tabCount = tab.bonsplitController.tabs(inPane: paneId).count
-                let ref = v2EnsureHandleRef(kind: .pane, uuid: paneId.id)
+                let ref = self.v2EnsureHandleRef(kind: .pane, uuid: paneId.id)
                 return "\(selected) \(ref): \(paneId) [\(tabCount) tabs]"
             }
             result = lines.isEmpty ? "No panes" : lines.joined(separator: "\n")
@@ -280,7 +280,7 @@ extension TerminalController {
                 if let uuid = UUID(uuidString: paneArg),
                    let paneId = paneIds.first(where: { $0.id == uuid }) {
                     targetPaneId = paneId
-                } else if let uuid = v2ResolveHandleRef(paneArg),
+                } else if let uuid = self.v2ResolveHandleRef(paneArg),
                           let paneId = paneIds.first(where: { $0.id == uuid }) {
                     targetPaneId = paneId
                 } else {
@@ -301,7 +301,7 @@ extension TerminalController {
                 let selected = bonsplitTab.id == selectedTab?.id ? "*" : " "
                 let panelId = tab.panelIdFromSurfaceId(bonsplitTab.id)
                 let panelIdStr = panelId?.uuidString ?? "unknown"
-                let ref = panelId.map { v2EnsureHandleRef(kind: .surface, uuid: $0) } ?? "surface:?"
+                let ref = panelId.map { self.v2EnsureHandleRef(kind: .surface, uuid: $0) } ?? "surface:?"
                 return "\(selected) \(ref): \(bonsplitTab.title) [panel:\(panelIdStr)]"
             }
             result = lines.isEmpty ? "No tabs in pane" : lines.joined(separator: "\n")
@@ -330,7 +330,7 @@ extension TerminalController {
                let paneId = paneIds.first(where: { $0.id == uuid }) {
                 tab.bonsplitController.focusPane(paneId)
                 result = "OK"
-            } else if let uuid = v2ResolveHandleRef(paneArg),
+            } else if let uuid = self.v2ResolveHandleRef(paneArg),
                       let paneId = paneIds.first(where: { $0.id == uuid }) {
                 tab.bonsplitController.focusPane(paneId)
                 result = "OK"
@@ -390,7 +390,7 @@ extension TerminalController {
 	                return
 	            }
 
-	            guard let panelId = resolveSurfaceId(from: surfaceArg, tab: tab),
+	            guard let panelId = self.resolveSurfaceId(from: surfaceArg, tab: tab),
 	                  let bonsplitTabId = tab.surfaceIdFromPanelId(panelId) else {
 	                result = "ERROR: Surface not found"
 	                return

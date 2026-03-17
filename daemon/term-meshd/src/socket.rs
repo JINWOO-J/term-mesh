@@ -296,18 +296,56 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
         }
 
         // --- Worktree (F-01) ---
-        "worktree.create" => worktree::create(req.params.clone())
-            .map(|v| serde_json::to_value(v).unwrap()),
-        "worktree.remove" => worktree::remove(req.params.clone())
-            .map(|_| serde_json::json!("ok")),
-        "worktree.list" => worktree::list(req.params.clone())
-            .map(|v| serde_json::to_value(v).unwrap()),
-        "worktree.status" => worktree::status(req.params.clone())
-            .map(|v| serde_json::to_value(v).unwrap()),
-        "worktree.safe_remove" => worktree::safe_remove(req.params.clone())
-            .map(|_| serde_json::json!("ok")),
-        "worktree.list_branches" => worktree::list_branches(req.params.clone())
-            .map(|v| serde_json::to_value(v).unwrap()),
+        // Wrapped in spawn_blocking: these call git via Command::output() (blocking I/O)
+        // and must not run on the async tokio runtime thread.
+        "worktree.create" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::create(params).map(|v| serde_json::to_value(v).unwrap())
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
+        "worktree.remove" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::remove(params).map(|_| serde_json::json!("ok"))
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
+        "worktree.list" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::list(params).map(|v| serde_json::to_value(v).unwrap())
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
+        "worktree.status" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::status(params).map(|v| serde_json::to_value(v).unwrap())
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
+        "worktree.safe_remove" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::safe_remove(params).map(|_| serde_json::json!("ok"))
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
+        "worktree.list_branches" => {
+            let params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                worktree::list_branches(params).map(|v| serde_json::to_value(v).unwrap())
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        }
 
         // --- Resource Monitor (F-03/F-04) ---
         "monitor.snapshot" => {

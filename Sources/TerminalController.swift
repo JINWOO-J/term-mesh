@@ -1462,7 +1462,9 @@ class TerminalController {
             if didStart {
                 // body() already started before we could cancel — wait for it
                 // to finish so the caller can safely read captured results.
-                sema.wait()
+                // Use a generous secondary timeout so a hanging body() can't
+                // block this thread indefinitely.
+                _ = sema.wait(timeout: .now() + timeout * 4)
                 return true
             }
             return false

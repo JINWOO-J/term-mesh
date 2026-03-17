@@ -1012,7 +1012,7 @@ struct SettingsView: View {
                         SettingsCardRow("Base Directory", subtitle: "Where worktrees are created") {
                             HStack(spacing: 8) {
                                 TextField("", text: Binding(
-                                    get: { daemonService?.worktreeBaseDir ?? "" },
+                                    get: { daemonService?.worktreeBaseDir ?? TermMeshDaemon.defaultWorktreeBaseDir },
                                     set: { daemonService?.worktreeBaseDir = $0 }
                                 ))
                                 .textFieldStyle(.roundedBorder)
@@ -1025,7 +1025,7 @@ struct SettingsView: View {
                                 .foregroundColor(.secondary)
 
                                 Button("Open") {
-                                    let path = daemonService?.worktreeBaseDir ?? ""
+                                    let path = daemonService?.worktreeBaseDir ?? TermMeshDaemon.defaultWorktreeBaseDir
                                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
                                 }
                                 .buttonStyle(.plain)
@@ -1043,6 +1043,8 @@ struct SettingsView: View {
                             .toggleStyle(.switch)
                         }
         }
+
+        WorktreeManagerSection(baseDir: daemonService?.worktreeBaseDir ?? TermMeshDaemon.defaultWorktreeBaseDir)
     }
 
     // MARK: - Section: Dashboard
@@ -2082,6 +2084,254 @@ private struct ShortcutSettingRow: View {
                 }
             }
     }
+}
+
+// MARK: - Worktree Manager Section
+
+private struct WorktreeManagerSection: View {
+    let baseDir: String
+
+    struct FoundWorktree: Identifiable {
+        var id: String { path }
+        let path: String
+        let name: String
+        let branch: String
+        let repoName: String
+    }
+
+    @State private var worktrees: [FoundWorktree] = []
+    @State private var isScanning = false
+    @State private var hasScanResult = false
+    @State private var confirmDelete: FoundWorktree? = nil
+    @State private var errorMessage: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Worktrees on Disk")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                Spacer()
+                Button(isScanning ? "Scanning…" : "Refresh") {
+                    Task { await scan() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isScanning)
+            }
+            .padding(.horizontal, 2)
+
+            if isScanning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Scanning \(baseDir)…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if hasScanResult {
+                if worktrees.isEmpty {
+                    Text("No worktrees found.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
+                } else {
+                    SettingsCard {
+                        ForEach(Array(worktrees.enumerated()), id: \.element.id) { index, wt in
+                            if index > 0 { SettingsCardDivider() }
+                            WorktreeRow(worktree: wt) {
+                                confirmDelete = wt
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let err = errorMessage {
+                Text(err)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.top, 2)
+            }
+        }
+        .confirmationDialog(
+            "Delete Worktree?",
+            isPresented: Binding(
+                get: { confirmDelete != nil },
+                set: { if !$0 { confirmDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let wt = confirmDelete {
+                Button("Delete \"\(wt.name)\"", role: .destructive) { forceDelete(wt) }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: {
+            if let wt = confirmDelete {
+                Text("This will permanently remove the directory:\n\(wt.path)\n\nNote: Run `git worktree prune` in the parent repo to clean up any remaining git metadata.")
+            }
+        }
+        // Re-scan when baseDir changes (e.g. user edits the base directory setting)
+        .task(id: baseDir) { await scan() }
+    }
+
+    @MainActor
+    private func scan() async {
+        isScanning = true
+        errorMessage = nil
+        let dir = baseDir.isEmpty ? TermMeshDaemon.defaultWorktreeBaseDir : baseDir
+        let found = await Task.detached(priority: .userInitiated) {
+            scanWorktreeDirectory(dir)
+        }.value
+        worktrees = found
+        hasScanResult = true
+        isScanning = false
+    }
+
+    /// Delete a worktree directory off-main to avoid UI blocking on large trees.
+    /// Note: This only removes the filesystem directory. If the parent repo still
+    /// has a .git/worktrees/<name> reference, run `git worktree prune` in the
+    /// parent repo to clean up stale metadata.
+    private func forceDelete(_ wt: FoundWorktree) {
+        confirmDelete = nil
+        let path = wt.path
+        let wtId = wt.id
+        Task.detached(priority: .userInitiated) {
+            do {
+                try FileManager.default.removeItem(atPath: path)
+                await MainActor.run {
+                    worktrees.removeAll { $0.id == wtId }
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to delete: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+}
+
+private struct WorktreeRow: View {
+    let worktree: WorktreeManagerSection.FoundWorktree
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text(worktree.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                }
+                Text(worktree.path)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 4) {
+                    Text("branch:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(worktree.branch)
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 6) {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: worktree.path))
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Open in Finder")
+
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.red)
+                .help("Delete worktree directory")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+    }
+}
+
+private func scanWorktreeDirectory(_ baseDir: String) -> [WorktreeManagerSection.FoundWorktree] {
+    let fm = FileManager.default
+    var isDir: ObjCBool = false
+    guard fm.fileExists(atPath: baseDir, isDirectory: &isDir), isDir.boolValue else { return [] }
+
+    var results: [WorktreeManagerSection.FoundWorktree] = []
+    guard let repoDirs = try? fm.contentsOfDirectory(atPath: baseDir) else { return [] }
+
+    for repoName in repoDirs.sorted() {
+        let repoDir = (baseDir as NSString).appendingPathComponent(repoName)
+        var isDirFlag: ObjCBool = false
+        guard fm.fileExists(atPath: repoDir, isDirectory: &isDirFlag), isDirFlag.boolValue else { continue }
+        guard let wtNames = try? fm.contentsOfDirectory(atPath: repoDir) else { continue }
+
+        for wtName in wtNames.sorted() {
+            guard wtName.hasPrefix("term-mesh_wt_") else { continue }
+            let wtPath = (repoDir as NSString).appendingPathComponent(wtName)
+            var isWtDir: ObjCBool = false
+            guard fm.fileExists(atPath: wtPath, isDirectory: &isWtDir), isWtDir.boolValue else { continue }
+            let branch = readWorktreeBranch(at: wtPath)
+            results.append(WorktreeManagerSection.FoundWorktree(
+                path: wtPath,
+                name: wtName,
+                branch: branch,
+                repoName: repoName
+            ))
+        }
+    }
+    return results
+}
+
+/// Reads the branch name from a git worktree directory.
+/// A worktree has a `.git` FILE containing `gitdir: /path/to/.git/worktrees/{name}`,
+/// and the actual HEAD is inside that linked gitdir.
+private func readWorktreeBranch(at path: String) -> String {
+    let gitFile = (path as NSString).appendingPathComponent(".git")
+    if let content = try? String(contentsOfFile: gitFile, encoding: .utf8) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("gitdir: ") {
+            let gitDir = String(trimmed.dropFirst("gitdir: ".count))
+            let linkedHead = (gitDir as NSString).appendingPathComponent("HEAD")
+            if let head = try? String(contentsOfFile: linkedHead, encoding: .utf8) {
+                return parseBranchFromHead(head)
+            }
+        }
+    }
+    // Fallback: try HEAD directly (bare worktree layout)
+    let headFile = (path as NSString).appendingPathComponent("HEAD")
+    if let head = try? String(contentsOfFile: headFile, encoding: .utf8) {
+        return parseBranchFromHead(head)
+    }
+    return "unknown"
+}
+
+private func parseBranchFromHead(_ content: String) -> String {
+    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("ref: refs/heads/") {
+        return String(trimmed.dropFirst("ref: refs/heads/".count))
+    }
+    if trimmed.hasPrefix("ref: ") {
+        return String(trimmed.dropFirst("ref: ".count))
+    }
+    // Detached HEAD — show abbreviated hash
+    return trimmed.isEmpty ? "unknown" : "detached:\(trimmed.prefix(8))"
 }
 
 struct SettingsRootView: View {

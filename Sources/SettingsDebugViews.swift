@@ -37,7 +37,7 @@ enum SettingsAboutWindowKind: String, CaseIterable, Identifiable {
     var minimumSize: NSSize {
         switch self {
         case .settings:
-            return NSSize(width: 420, height: 360)
+            return NSSize(width: 820, height: 560)
         case .about:
             return NSSize(width: 360, height: 520)
         }

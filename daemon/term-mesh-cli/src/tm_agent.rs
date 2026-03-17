@@ -680,7 +680,7 @@ fn main() {
                     let result_text = result.as_deref().unwrap_or("done");
                     // Write full result to file, send truncated summary via socket
                     let result_path = write_result_file(&team, &format!("{task_id}.md"), result_text).ok();
-                    let summary = truncate_summary(result_text, 500);
+                    let summary = truncate_summary(result_text, 1500);
                     let mut params = json!({
                         "team_name": team, "task_id": task_id,
                         "result": summary,
@@ -922,7 +922,7 @@ fn main() {
             let content = text.join(" ");
             // Write full result to file, send truncated summary via socket
             let result_path = write_result_file(&team, &format!("{sender}-reply.md"), &content).ok();
-            let summary = truncate_summary(&content, 500);
+            let summary = truncate_summary(&content, 1500);
             let mut msg_params = json!({
                 "team_name": team, "from": sender, "content": summary,
                 "to": "leader", "type": "report",

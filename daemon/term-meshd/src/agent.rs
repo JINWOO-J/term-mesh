@@ -88,6 +88,8 @@ pub enum TaskStatus {
     Pending,
     Assigned,
     InProgress,
+    Blocked,
+    ReviewReady,
     Completed,
     Failed,
     Cancelled,
@@ -99,6 +101,8 @@ impl TaskStatus {
             Self::Pending => "pending",
             Self::Assigned => "assigned",
             Self::InProgress => "in_progress",
+            Self::Blocked => "blocked",
+            Self::ReviewReady => "review_ready",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -110,6 +114,8 @@ impl TaskStatus {
             "pending" => Some(Self::Pending),
             "assigned" => Some(Self::Assigned),
             "in_progress" => Some(Self::InProgress),
+            "blocked" => Some(Self::Blocked),
+            "review_ready" => Some(Self::ReviewReady),
             "completed" => Some(Self::Completed),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
@@ -128,6 +134,13 @@ impl TaskStatus {
                 | (Self::InProgress, Self::Completed)
                 | (Self::InProgress, Self::Failed)
                 | (Self::InProgress, Self::Cancelled)
+                | (Self::InProgress, Self::Blocked)
+                | (Self::InProgress, Self::ReviewReady)
+                | (Self::Blocked, Self::InProgress)
+                | (Self::Blocked, Self::Cancelled)
+                | (Self::ReviewReady, Self::Completed)
+                | (Self::ReviewReady, Self::InProgress)
+                | (Self::ReviewReady, Self::Cancelled)
         )
     }
 }

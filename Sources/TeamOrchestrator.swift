@@ -336,6 +336,35 @@ final class TeamOrchestrator {
             ? claudeAgentEnv
             : baseEnv.merging(["CLAUDECODE": ""]) { _, new in new }
 
+        // Worktree isolation based on team-level mode.
+        // Created early so both leader and agent panels can use the worktree path.
+        let useWorktrees = worktreeMode != "off"
+        let gitRepoRoot = useWorktrees ? daemon.findGitRoot(from: workingDirectory) : nil
+
+        // Shared mode: create ONE worktree for the whole team
+        var sharedWorkDir: String?
+        var sharedWtName: String?
+        var sharedWtPath: String?
+        var sharedWtBranch: String?
+
+        if worktreeMode == "shared", let repoRoot = gitRepoRoot {
+            let branchName = "team/\(name)"
+            let result = daemon.createWorktreeWithError(repoPath: repoRoot, branch: branchName)
+            switch result {
+            case .success(let info):
+                sharedWorkDir = info.path
+                sharedWtName = info.name
+                sharedWtPath = info.path
+                sharedWtBranch = info.branch
+                Logger.team.info("shared worktree for team '\(name, privacy: .public)': \(info.path, privacy: .public)")
+            case .failure(let error):
+                Logger.team.error("shared worktree failed: \(error, privacy: .public), using original directory")
+            }
+        }
+
+        // Leader working directory: use shared worktree when active
+        let leaderWorkDir = sharedWorkDir ?? workingDirectory
+
         // First panel = leader console (left side)
         // Close the default panel and create a new one with the leader script as command
         guard let defaultPanelId = workspace.focusedPanelId else {
@@ -396,6 +425,18 @@ final class TeamOrchestrator {
         dlog("[team] leaderMode=\(leaderMode) leaderCommand=\(leaderCommand ?? "nil")")
         #endif
 
+        // Build leader shell command with explicit cd when worktree is active
+        let leaderShellCommand: String? = leaderCommand.map { cmd in
+            if leaderWorkDir != workingDirectory {
+                let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+                let inner = "cd \"\(leaderWorkDir)\" && exec \(cmd); exec $SHELL"
+                let escaped = inner.replacingOccurrences(of: "'", with: "'\\''")
+                return "\(shell) -l -c '\(escaped)'"
+            } else {
+                return "\(cmd); exec $SHELL"
+            }
+        }
+
         // Replace default panel: split from it with leader command, then close the original
         guard let leaderPanel = workspace.newTerminalSplit(
             from: defaultPanelId,
@@ -403,8 +444,8 @@ final class TeamOrchestrator {
             insertFirst: true,
             focus: true,
             skipEqualization: true,
-            workingDirectory: workingDirectory,
-            command: leaderCommand.map { "\($0); exec $SHELL" },
+            workingDirectory: leaderWorkDir,
+            command: leaderShellCommand,
             environment: leaderEnv
         ) else {
             Logger.team.error("failed to create leader panel")
@@ -426,31 +467,6 @@ final class TeamOrchestrator {
 
         // Close the original empty panel
         workspace.closePanel(defaultPanelId)
-
-        // Worktree isolation based on team-level mode
-        let useWorktrees = worktreeMode != "off"
-        let gitRepoRoot = useWorktrees ? daemon.findGitRoot(from: workingDirectory) : nil
-
-        // Shared mode: create ONE worktree for the whole team
-        var sharedWorkDir: String?
-        var sharedWtName: String?
-        var sharedWtPath: String?
-        var sharedWtBranch: String?
-
-        if worktreeMode == "shared", let repoRoot = gitRepoRoot {
-            let branchName = "team/\(name)"
-            let result = daemon.createWorktreeWithError(repoPath: repoRoot, branch: branchName)
-            switch result {
-            case .success(let info):
-                sharedWorkDir = info.path
-                sharedWtName = info.name
-                sharedWtPath = info.path
-                sharedWtBranch = info.branch
-                Logger.team.info("shared worktree for team '\(name, privacy: .public)': \(info.path, privacy: .public)")
-            case .failure(let error):
-                Logger.team.error("shared worktree failed: \(error, privacy: .public), using original directory")
-            }
-        }
 
         // Compute optimal grid dimensions for agent panes
         let snapshot = workspace.bonsplitController.layoutSnapshot()
@@ -554,7 +570,19 @@ final class TeamOrchestrator {
                 )
             }
             // Wrap so the terminal stays open (drops to shell) if the CLI exits.
-            let shellCommand = "\(agentCommand); exec $SHELL"
+            // When a worktree is active, build a login-shell invocation with explicit
+            // `cd` to guarantee the agent CLI starts in the worktree directory.
+            // The " -l " token causes resolvedCommand in createSurface to skip its
+            // own exec-wrapping, giving us full control of the invocation.
+            let shellCommand: String
+            if agentWorkDir != workingDirectory {
+                let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+                let inner = "cd \"\(agentWorkDir)\" && exec \(agentCommand); exec $SHELL"
+                let escaped = inner.replacingOccurrences(of: "'", with: "'\\''")
+                shellCommand = "\(shell) -l -c '\(escaped)'"
+            } else {
+                shellCommand = "\(agentCommand); exec $SHELL"
+            }
             // Select the right environment: non-claude agents don't need CLAUDECODE
             let paneEnv = (agentCli == "claude" ? claudeAgentEnv : kiroAgentEnv)
                 .merging(["TERMMESH_AGENT_NAME": agent.name]) { _, new in new }

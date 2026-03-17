@@ -466,7 +466,13 @@ struct ContentView: View {
                     anchorView: fullscreenControlsViewModel.notificationsAnchorView
                 )
             },
-            onNewTab: { tabManager.addTab() }
+            onNewTab: { tabManager.addTab() },
+            onNewAgentTeam: {
+                NotificationCenter.default.post(name: .teamCreationRequested, object: nil)
+            },
+            onSpawnCLI: {
+                NotificationCenter.default.post(name: .spawnCLIRequested, object: nil)
+            }
         )
     }
 

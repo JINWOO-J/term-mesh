@@ -117,6 +117,111 @@ struct TitlebarControlsStyleConfig {
 
 final class TitlebarControlsViewModel: ObservableObject {
     weak var notificationsAnchorView: NSView?
+    weak var plusMenuAnchorView: NSView?
+
+    func showPlusMenu(
+        onNewTab: @escaping () -> Void,
+        onNewAgentTeam: (() -> Void)?,
+        onSpawnCLI: (() -> Void)?
+    ) {
+        let menu = NSMenu()
+
+        let newWorkspaceItem = ClosureMenuItem(title: "New Workspace", keyEquivalent: "t") {
+            onNewTab()
+        }
+        newWorkspaceItem.keyEquivalentModifierMask = .command
+        menu.addItem(newWorkspaceItem)
+
+        if let onNewAgentTeam {
+            let teamItem = ClosureMenuItem(title: "New Agent Team…", keyEquivalent: "t") {
+                onNewAgentTeam()
+            }
+            teamItem.keyEquivalentModifierMask = [.command, .option]
+            menu.addItem(teamItem)
+        }
+
+        if let onSpawnCLI {
+            let spawnItem = ClosureMenuItem(title: "Spawn CLI…", keyEquivalent: "a") {
+                onSpawnCLI()
+            }
+            spawnItem.keyEquivalentModifierMask = [.command, .shift]
+            menu.addItem(spawnItem)
+        }
+
+        guard let anchor = plusMenuAnchorView else {
+            #if DEBUG
+            dlog("titlebar.plusMenu anchor=nil — menu skipped")
+            #endif
+            return
+        }
+        let location = NSPoint(x: 0, y: anchor.bounds.maxY)
+        menu.popUp(positioning: nil, at: location, in: anchor)
+    }
+}
+
+private final class ClosureMenuItem: NSMenuItem {
+    private let closure: () -> Void
+
+    init(title: String, keyEquivalent: String, closure: @escaping () -> Void) {
+        self.closure = closure
+        super.init(title: title, action: #selector(invoke), keyEquivalent: keyEquivalent)
+        self.target = self
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func invoke() {
+        closure()
+    }
+}
+
+struct PlusMenuRightClickOverlay: NSViewRepresentable {
+    let onNewTab: () -> Void
+    let onNewAgentTeam: (() -> Void)?
+    let onSpawnCLI: (() -> Void)?
+    let viewModel: TitlebarControlsViewModel
+
+    func makeNSView(context: Context) -> PlusMenuRightClickNSView {
+        let view = PlusMenuRightClickNSView()
+        view.onRightClick = { [weak viewModel, onNewTab, onNewAgentTeam, onSpawnCLI] in
+            viewModel?.showPlusMenu(
+                onNewTab: onNewTab,
+                onNewAgentTeam: onNewAgentTeam,
+                onSpawnCLI: onSpawnCLI
+            )
+        }
+        view.onLayout = { [weak view, weak viewModel] in
+            guard let view else { return }
+            viewModel?.plusMenuAnchorView = view
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: PlusMenuRightClickNSView, context: Context) {
+        nsView.onRightClick = { [weak viewModel, onNewTab, onNewAgentTeam, onSpawnCLI] in
+            viewModel?.showPlusMenu(
+                onNewTab: onNewTab,
+                onNewAgentTeam: onNewAgentTeam,
+                onSpawnCLI: onSpawnCLI
+            )
+        }
+    }
+}
+
+final class PlusMenuRightClickNSView: NSView {
+    var onRightClick: (() -> Void)?
+    var onLayout: (() -> Void)?
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick?()
+    }
+
+    override func layout() {
+        super.layout()
+        onLayout?()
+    }
 }
 
 struct NotificationsAnchorView: NSViewRepresentable {
@@ -227,6 +332,8 @@ struct TitlebarControlsView: View {
     let onToggleSidebar: () -> Void
     let onToggleNotifications: () -> Void
     let onNewTab: () -> Void
+    var onNewAgentTeam: (() -> Void)?
+    var onSpawnCLI: (() -> Void)?
     @AppStorage("titlebarControlsStyle") private var styleRawValue = TitlebarControlsStyle.classic.rawValue
     @AppStorage(ShortcutHintDebugSettings.titlebarHintXKey) private var titlebarShortcutHintXOffset = ShortcutHintDebugSettings.defaultTitlebarHintX
     @AppStorage(ShortcutHintDebugSettings.titlebarHintYKey) private var titlebarShortcutHintYOffset = ShortcutHintDebugSettings.defaultTitlebarHintY
@@ -349,13 +456,29 @@ struct TitlebarControlsView: View {
                 #if DEBUG
                 dlog("titlebar.newTab")
                 #endif
-                onNewTab()
+                if NSEvent.modifierFlags.contains(.option) {
+                    viewModel.showPlusMenu(
+                        onNewTab: onNewTab,
+                        onNewAgentTeam: onNewAgentTeam,
+                        onSpawnCLI: onSpawnCLI
+                    )
+                } else {
+                    onNewTab()
+                }
             }) {
                 iconLabel(systemName: "plus", config: config)
             }
             .accessibilityIdentifier("titlebarControl.newTab")
             .accessibilityLabel("New Workspace")
-            .help(KeyboardShortcutSettings.Action.newTab.tooltip("New workspace"))
+            .help(KeyboardShortcutSettings.Action.newTab.tooltip("New workspace (⌥-click for more)"))
+            .overlay(
+                PlusMenuRightClickOverlay(
+                    onNewTab: onNewTab,
+                    onNewAgentTeam: onNewAgentTeam,
+                    onSpawnCLI: onSpawnCLI,
+                    viewModel: viewModel
+                )
+            )
         }
 
         let paddedContent = content.padding(config.groupPadding)
@@ -672,6 +795,12 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
         let toggleSidebar = { _ = AppDelegate.shared?.sidebarState?.toggle() }
         let toggleNotifications: () -> Void = { _ = AppDelegate.shared?.toggleNotificationsPopover(animated: true) }
         let newTab = { _ = AppDelegate.shared?.tabManager?.addTab() }
+        let newAgentTeam = {
+            NotificationCenter.default.post(name: .teamCreationRequested, object: nil)
+        }
+        let spawnCLI = {
+            NotificationCenter.default.post(name: .spawnCLIRequested, object: nil)
+        }
 
         hostingView = NonDraggableHostingView(
             rootView: TitlebarControlsView(
@@ -679,7 +808,9 @@ final class TitlebarControlsAccessoryViewController: NSTitlebarAccessoryViewCont
                 viewModel: viewModel,
                 onToggleSidebar: toggleSidebar,
                 onToggleNotifications: toggleNotifications,
-                onNewTab: newTab
+                onNewTab: newTab,
+                onNewAgentTeam: newAgentTeam,
+                onSpawnCLI: spawnCLI
             )
         )
 

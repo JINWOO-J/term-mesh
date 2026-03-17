@@ -1273,6 +1273,7 @@ extension Notification.Name {
     static let browserDidBecomeFirstResponderWebView = Notification.Name("browserDidBecomeFirstResponderWebView")
     static let browserFocusAddressBar = Notification.Name("browserFocusAddressBar")
     static let teamCreationRequested = Notification.Name("term-mesh.teamCreationRequested")
+    static let spawnCLIRequested = Notification.Name("term-mesh.spawnCLIRequested")
     static let browserMoveOmnibarSelection = Notification.Name("browserMoveOmnibarSelection")
     static let browserDidExitAddressBar = Notification.Name("browserDidExitAddressBar")
     static let browserDidFocusAddressBar = Notification.Name("browserDidFocusAddressBar")

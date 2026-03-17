@@ -213,6 +213,9 @@ struct TermMeshApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .teamCreationRequested)) { _ in
                     showTeamCreation = true
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .spawnCLIRequested)) { _ in
+                    showSpawnCLIDialog()
+                }
                 .sheet(isPresented: $showTeamCreation) {
                     TeamCreationView { teamName, leaderMode, leaderModel, agents in
                         let agentTuples = agents.map { row in

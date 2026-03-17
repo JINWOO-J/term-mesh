@@ -229,22 +229,83 @@
   .proc-btn.resume:hover { background: rgba(129, 154, 145, 0.14); }
   /* Event log */
   .event-log {
-    max-height: 160px;
+    max-height: 240px;
     overflow-y: auto;
     font-family: 'SF Mono', 'Menlo', monospace;
     font-size: 11px;
   }
+  .event-log.expanded {
+    max-height: 480px;
+  }
   .event-log .event {
-    padding: 2px 0;
+    padding: 3px 0;
     display: flex;
     gap: 8px;
+    align-items: center;
   }
-  .event .time { color: var(--text-dim); min-width: 65px; }
-  .event .kind { min-width: 48px; }
+  .event-log .event:hover {
+    background: rgba(59, 130, 246, 0.04);
+    border-radius: 3px;
+  }
+  .event .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .event .dot.create { background: var(--success); }
+  .event .dot.modify { background: var(--accent); }
+  .event .dot.remove { background: var(--danger); }
+  .event .time { color: var(--text-dim); min-width: 55px; }
+  .event .kind { min-width: 48px; font-weight: 500; }
   .event .kind.create { color: var(--success); }
   .event .kind.modify { color: var(--accent); }
   .event .kind.remove { color: var(--danger); }
   .event .path { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .show-more-btn {
+    display: block;
+    width: 100%;
+    padding: 6px;
+    margin-top: 4px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .show-more-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  /* Event filters */
+  .event-filters {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    align-items: center;
+  }
+  .event-filter-chip {
+    border: 1px solid rgba(129, 154, 145, 0.18);
+    background: rgba(255,255,255,0.9);
+    color: var(--text-dim);
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .event-filter-chip.active {
+    border-color: rgba(59, 130, 246, 0.24);
+    background: rgba(59, 130, 246, 0.08);
+    color: var(--accent-strong);
+  }
+  .event-filter-chip.create.active { border-color: var(--success); background: rgba(22,163,74,0.08); color: var(--success); }
+  .event-filter-chip.modify.active { border-color: var(--accent); background: rgba(59,130,246,0.08); color: var(--accent); }
+  .event-filter-chip.remove.active { border-color: var(--danger); background: rgba(220,107,95,0.08); color: var(--danger); }
   /* Folder tree heatmap */
   .tree-node { font-family: 'SF Mono', 'Menlo', monospace; font-size: 11px; }
   .tree-dir {
@@ -1166,22 +1227,37 @@
 
   <!-- File Activity Timeline -->
   <div class="card full section-anchor" id="file-activity">
-    <h2>File Activity Timeline (per minute)</h2>
-    <div class="chart-container" style="height:120px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <h2 style="margin-bottom:0">File Activity Timeline</h2>
+      <div class="event-filters" style="margin-bottom:0">
+        <span class="event-filter-chip" data-range="5" onclick="setTimelineRange(5)">5m</span>
+        <span class="event-filter-chip active" data-range="10" onclick="setTimelineRange(10)">10m</span>
+        <span class="event-filter-chip" data-range="30" onclick="setTimelineRange(30)">30m</span>
+      </div>
+    </div>
+    <div class="chart-container" style="height:150px">
       <canvas id="timelineChart"></canvas>
     </div>
+    <div id="timeline-summary" style="display:flex;gap:16px;margin-top:6px;font-size:11px;color:var(--text-dim)"></div>
   </div>
 
   <!-- File Heatmap Tree -->
-  <div class="card section-anchor" id="heatmap-card">
+  <div class="card full section-anchor" id="heatmap-card">
     <h2>File Heatmap</h2>
     <div id="heatmap"><div class="empty">No files tracked</div></div>
   </div>
 
   <!-- Event Log -->
-  <div class="card section-anchor" id="events-card">
+  <div class="card full section-anchor" id="events-card">
     <h2>Recent Events</h2>
+    <div class="event-filters" id="event-filters">
+      <span class="event-filter-chip active" data-filter="all" onclick="setEventFilter('all')">All</span>
+      <span class="event-filter-chip create" data-filter="create" onclick="setEventFilter('create')">Create</span>
+      <span class="event-filter-chip modify" data-filter="modify" onclick="setEventFilter('modify')">Modify</span>
+      <span class="event-filter-chip remove" data-filter="remove" onclick="setEventFilter('remove')">Remove</span>
+    </div>
     <div class="event-log" id="event-log"><div class="empty">No events</div></div>
+    <button class="show-more-btn" id="event-show-more" onclick="toggleEventExpand()">Show more ▼</button>
   </div>
 
   <!-- Messages -->
@@ -1200,6 +1276,8 @@ const MAX_HISTORY = 30;
 let cpuChart = null;
 let timelineChart = null;
 let watchedPaths = []; // tracks current watched project roots
+let activeEventFilter = 'all';
+let timelineRangeMinutes = 10;
 
 // ── Helpers ──
 function initChart() {
@@ -1563,6 +1641,12 @@ function updateHeatmap(data) {
   } else {
     const maxCount = Math.max(...data.top_files.map(f => f.event_count), 1);
     const tree = buildFileTree(data.top_files);
+    // Auto-expand top-level dirs on first render
+    if (expandedDirs.size === 0) {
+      for (const dirName of Object.keys(tree.dirs)) {
+        expandedDirs.add(dirName + '/');
+      }
+    }
     heatmapEl.innerHTML = renderTree(tree, maxCount);
   }
 
@@ -1570,7 +1654,7 @@ function updateHeatmap(data) {
   if (timelineChart && data.timeline) {
     const now = Date.now();
     const minuteMs = 60000;
-    // Build 10-minute range with labels
+    const rangeMinutes = timelineRangeMinutes;
     const labels = [];
     const createData = [];
     const modifyData = [];
@@ -1579,7 +1663,7 @@ function updateHeatmap(data) {
     for (const b of data.timeline) {
       bucketMap[b.minute_ms] = b;
     }
-    for (let i = 9; i >= 0; i--) {
+    for (let i = rangeMinutes - 1; i >= 0; i--) {
       const t = Math.floor((now - i * minuteMs) / minuteMs) * minuteMs;
       const d = new Date(t);
       labels.push(d.toLocaleTimeString('en-US', { hour12: false, minute: '2-digit', second: '2-digit' }).slice(0, 5));
@@ -1590,26 +1674,42 @@ function updateHeatmap(data) {
     }
     timelineChart.data.labels = labels;
     timelineChart.data.datasets = [
-      { label: 'Create', data: createData, backgroundColor: '#819a9180', borderRadius: 2 },
-      { label: 'Modify', data: modifyData, backgroundColor: '#a7c1a890', borderRadius: 2 },
-      { label: 'Remove', data: removeData, backgroundColor: '#8e7d6980', borderRadius: 2 },
+      { label: 'Create', data: createData, backgroundColor: '#819a91', borderRadius: 2 },
+      { label: 'Modify', data: modifyData, backgroundColor: '#a7c1a8', borderRadius: 2 },
+      { label: 'Remove', data: removeData, backgroundColor: '#8e7d69', borderRadius: 2 },
     ];
     timelineChart.update('none');
+    // Summary
+    const totalCreate = createData.reduce((a, b) => a + b, 0);
+    const totalModify = modifyData.reduce((a, b) => a + b, 0);
+    const totalRemove = removeData.reduce((a, b) => a + b, 0);
+    const summaryEl = document.getElementById('timeline-summary');
+    if (summaryEl) {
+      summaryEl.innerHTML = `
+        <span style="color:var(--success)">● Create: ${totalCreate}</span>
+        <span style="color:var(--accent)">● Modify: ${totalModify}</span>
+        <span style="color:var(--danger)">● Remove: ${totalRemove}</span>
+        <span style="margin-left:auto">Total: ${totalCreate + totalModify + totalRemove} events</span>
+      `;
+    }
   }
 
-  // Event log — show project-relative paths
+  // Event log — show project-relative paths with color dots
   const logEl = document.getElementById('event-log');
   if (data.recent_events.length === 0) {
     logEl.innerHTML = '<div class="empty">No events</div>';
   } else {
     logEl.innerHTML = data.recent_events.slice(0, 30).map(e => {
       const relPath = toRelativePath(e.path);
+      const ago = formatTimeAgo(e.timestamp_ms);
       return `<div class="event">
-        <span class="time">${formatTime(e.timestamp_ms)}</span>
+        <span class="dot ${e.kind}"></span>
+        <span class="time" title="${formatTime(e.timestamp_ms)}">${ago}</span>
         <span class="kind ${e.kind}">${e.kind}</span>
         <span class="path" title="${e.path}">${relPath}</span>
       </div>`;
     }).join('');
+    filterEvents();
   }
 }
 
@@ -1729,14 +1829,14 @@ function buildFileTree(files) {
 
 function heatColor(count, maxCount) {
   const ratio = count / maxCount;
-  const hue = Math.max(0, 120 - ratio * 120); // green→red
-  return `hsl(${hue},70%,50%)`;
+  const lightness = Math.max(35, 85 - ratio * 50); // light→dark blue intensity
+  return `hsl(210, 70%, ${lightness}%)`;
 }
 
 function heatBg(count, maxCount) {
   const ratio = count / maxCount;
-  const hue = Math.max(0, 120 - ratio * 120);
-  return `hsla(${hue},70%,50%,0.12)`;
+  const lightness = Math.max(35, 85 - ratio * 50);
+  return `hsla(210, 70%, ${lightness}%, 0.12)`;
 }
 
 function renderTree(node, maxCount, prefix) {
@@ -1790,6 +1890,43 @@ function toggleDir(dirId) {
     const arrow = parent.querySelector('.arrow');
     if (arrow) arrow.classList.toggle('open');
   }
+}
+
+// ── Event Filter ──
+function setEventFilter(filter) {
+  activeEventFilter = filter;
+  document.querySelectorAll('#event-filters .event-filter-chip').forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.filter === filter);
+  });
+  filterEvents();
+}
+
+function filterEvents() {
+  const events = document.querySelectorAll('#event-log .event');
+  events.forEach(ev => {
+    if (activeEventFilter === 'all') {
+      ev.style.display = '';
+    } else {
+      const kind = ev.querySelector('.kind')?.textContent?.trim();
+      ev.style.display = (kind === activeEventFilter) ? '' : 'none';
+    }
+  });
+}
+
+// ── Event Expand Toggle ──
+function toggleEventExpand() {
+  const el = document.getElementById('event-log');
+  const btn = document.getElementById('event-show-more');
+  el.classList.toggle('expanded');
+  btn.textContent = el.classList.contains('expanded') ? 'Show less ▲' : 'Show more ▼';
+}
+
+// ── Timeline Range ──
+function setTimelineRange(minutes) {
+  timelineRangeMinutes = minutes;
+  document.querySelectorAll('#file-activity .event-filter-chip').forEach(chip => {
+    chip.classList.toggle('active', parseInt(chip.dataset.range) === minutes);
+  });
 }
 
 // ── Process Control ──

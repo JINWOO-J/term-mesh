@@ -72,6 +72,12 @@ pub struct Context {
 }
 
 pub fn default_socket_path() -> PathBuf {
+    // Honor explicit socket path for tagged/isolated builds
+    if let Ok(p) = std::env::var("TERMMESH_DAEMON_UNIX_PATH") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
     let dir = dirs::runtime_dir()
         .or_else(|| std::env::var("TMPDIR").ok().map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("/tmp"));

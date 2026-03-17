@@ -81,6 +81,11 @@ final class TermMeshDaemon: ObservableObject {
     // MARK: - Socket Path
 
     var socketPath: String {
+        // Tagged/isolated builds use explicit daemon socket path
+        if let override_ = ProcessInfo.processInfo.environment["TERMMESH_DAEMON_UNIX_PATH"],
+           !override_.isEmpty {
+            return override_
+        }
         let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
         return (tmpDir as NSString).appendingPathComponent("term-meshd.sock")
     }
@@ -131,8 +136,9 @@ final class TermMeshDaemon: ObservableObject {
 
             process.environment = env
 
-            // Log daemon stdout/stderr to /tmp/term-meshd.log for debugging
-            let logPath = "/tmp/term-meshd.log"
+            // Log daemon stdout/stderr — isolated per tag
+            let tag = termMeshEnv("TAG") ?? ""
+            let logPath = tag.isEmpty ? "/tmp/term-meshd.log" : "/tmp/term-meshd-\(tag).log"
             FileManager.default.createFile(atPath: logPath, contents: nil)
             let logHandle = FileHandle(forWritingAtPath: logPath)
             logHandle?.seekToEndOfFile()
@@ -159,17 +165,29 @@ final class TermMeshDaemon: ObservableObject {
             Logger.daemon.info("daemon stopped (tracked process)")
         }
 
-        // Case 2: Always pkill to catch externally-started daemons too.
-        // Fast and reliable — no socket I/O or timeouts.
-        let kill = Process()
-        kill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        kill.arguments = ["term-meshd"]
-        try? kill.run()
-        kill.waitUntilExit()
-        Logger.daemon.info("daemon pkill sent")
+        // Case 2: Kill daemon listening on our socket (isolated — won't affect other instances).
+        // Use lsof to find the PID bound to our specific socket path.
+        let path = socketPath
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-t", path]
+        let pipe = Pipe()
+        lsof.standardOutput = pipe
+        lsof.standardError = FileHandle.nullDevice
+        try? lsof.run()
+        lsof.waitUntilExit()
+        let pidData = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let pidStr = String(data: pidData, encoding: .utf8) {
+            for line in pidStr.split(separator: "\n") {
+                if let pid = Int32(line.trimmingCharacters(in: .whitespaces)) {
+                    kill(pid, SIGTERM)
+                    Logger.daemon.info("daemon killed (pid: \(pid, privacy: .public), socket: \(path, privacy: .public))")
+                }
+            }
+        }
 
         // Clean up socket file
-        try? FileManager.default.removeItem(atPath: socketPath)
+        try? FileManager.default.removeItem(atPath: path)
     }
 
     // MARK: - Restart
@@ -779,31 +797,45 @@ final class TermMeshDaemon: ObservableObject {
     private func daemonBinaryPath() -> String? {
         let fm = FileManager.default
         let projectDir = termMeshEnv("PROJECT_DIR") ?? ""
+        let isTagged = termMeshEnv("TAG") != nil
 
-        // Option 1: Built in the daemon/ directory (development — debug then release)
+        // Option 0: Explicit binary path override
+        if let explicit = termMeshEnv("DAEMON_BINARY_PATH"),
+           fm.fileExists(atPath: explicit) { return explicit }
+
+        // Option 1: App bundle Resources/bin/ (tagged builds use their snapshot copy)
+        if let resourcePath = Bundle.main.resourcePath {
+            let resourceBinPath = (resourcePath as NSString).appendingPathComponent("bin/term-meshd")
+            if fm.fileExists(atPath: resourceBinPath) {
+                // Tagged builds always prefer bundle binary for isolation
+                if isTagged { return resourceBinPath }
+            }
+        }
+
+        // Option 2: Built in the daemon/ directory (untagged development — debug then release)
         for config in ["debug", "release"] {
             let path = projectDir + "/daemon/target/\(config)/term-meshd"
             if !path.hasPrefix("/daemon") && fm.fileExists(atPath: path) { return path }
         }
 
-        // Option 2a: In app bundle Resources/bin/ (release DMG layout)
+        // Option 3: App bundle fallback (release DMG layout, untagged)
         if let resourcePath = Bundle.main.resourcePath {
             let resourceBinPath = (resourcePath as NSString).appendingPathComponent("bin/term-meshd")
             if fm.fileExists(atPath: resourceBinPath) { return resourceBinPath }
         }
 
-        // Option 2b: Next to the app executable (legacy layout)
+        // Option 4: Next to the app executable (legacy layout)
         if let bundlePath = Bundle.main.executablePath {
             let dir = (bundlePath as NSString).deletingLastPathComponent
             let bundledPath = (dir as NSString).appendingPathComponent("term-meshd")
             if fm.fileExists(atPath: bundledPath) { return bundledPath }
         }
 
-        // Option 3: ~/bin/term-meshd (user install via make deploy)
+        // Option 5: ~/bin/term-meshd (user install via make deploy)
         let homeBin = (NSHomeDirectory() as NSString).appendingPathComponent("bin/term-meshd")
         if fm.fileExists(atPath: homeBin) { return homeBin }
 
-        // Option 4: Hardcoded project path (development fallback)
+        // Option 6: Hardcoded project path (development fallback)
         for config in ["release", "debug"] {
             let path = "/Users/jinwoo/work/project/cmux/daemon/target/\(config)/term-meshd"
             if fm.fileExists(atPath: path) { return path }

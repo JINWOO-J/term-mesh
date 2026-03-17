@@ -88,7 +88,7 @@ impl WatcherHandle {
         let state = self.state.lock().unwrap();
         let now = now_ms();
 
-        // Top 10 files by event count
+        // Top 20 files by event count
         let mut entries: Vec<HeatmapEntry> = state
             .event_counts
             .iter()
@@ -99,7 +99,7 @@ impl WatcherHandle {
             })
             .collect();
         entries.sort_by(|a, b| b.event_count.cmp(&a.event_count));
-        entries.truncate(10);
+        entries.truncate(20);
 
         // Last 50 events
         let recent = state
@@ -110,8 +110,8 @@ impl WatcherHandle {
             .cloned()
             .collect();
 
-        // Timeline: last 10 minutes, sorted by time
-        let timeline_cutoff = now.saturating_sub(10 * 60_000);
+        // Timeline: last 30 minutes, sorted by time
+        let timeline_cutoff = now.saturating_sub(30 * 60_000);
         let timeline_cutoff_minute = (timeline_cutoff / 60_000) * 60_000;
         let mut timeline: Vec<TimelineBucket> = state
             .timeline_buckets
@@ -285,8 +285,8 @@ mod tests {
         let state = make_watcher_state();
         {
             let mut s = state.lock().unwrap();
-            // Insert 15 files with different event counts
-            for i in 0..15 {
+            // Insert 25 files with different event counts
+            for i in 0..25 {
                 s.event_counts.insert(format!("/file_{i}"), (i + 1) as u64);
                 s.last_event_times.insert(format!("/file_{i}"), 1000 + i as u64);
             }
@@ -294,11 +294,11 @@ mod tests {
         let handle = make_handle(state);
         let snap = handle.snapshot();
 
-        // Should be truncated to 10
-        assert_eq!(snap.top_files.len(), 10);
+        // Should be truncated to 20
+        assert_eq!(snap.top_files.len(), 20);
         // Should be sorted descending by event_count
-        assert_eq!(snap.top_files[0].event_count, 15);
-        assert_eq!(snap.top_files[9].event_count, 6);
+        assert_eq!(snap.top_files[0].event_count, 25);
+        assert_eq!(snap.top_files[19].event_count, 6);
     }
 
     #[test]
@@ -334,8 +334,8 @@ mod tests {
             let mut s = state.lock().unwrap();
             // Recent bucket (should be included)
             s.timeline_buckets.insert(current_minute, (5, 10, 2));
-            // Very old bucket (should be excluded — more than 10 min ago)
-            s.timeline_buckets.insert(current_minute - 20 * minute, (1, 1, 1));
+            // Very old bucket (should be excluded — more than 30 min ago)
+            s.timeline_buckets.insert(current_minute - 40 * minute, (1, 1, 1));
         }
         let handle = make_handle(state);
         let snap = handle.snapshot();

@@ -8,5 +8,8 @@
       "WebSearch",
       "mcp__mem-mesh__pin_add"
     ]
+  },
+  "enabledPlugins": {
+    "oh-my-claudecode@omc": false
   }
 }

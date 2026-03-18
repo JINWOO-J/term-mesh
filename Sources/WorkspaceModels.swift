@@ -90,6 +90,66 @@ struct SidebarGitBranchState {
     var dirtyFileCount: Int?
 }
 
+// MARK: - Shell Integration Health
+
+enum ShellIntegrationSignal: String {
+    case reportPwd = "report_pwd"
+    case reportTty = "report_tty"
+    case reportGitBranch = "report_git_branch"
+}
+
+enum IntegrationStatus: String {
+    case starting
+    case healthy
+    case stale
+    case partial
+    case notLoaded
+
+    var label: String {
+        switch self {
+        case .starting: return "Starting"
+        case .healthy: return "Healthy"
+        case .stale: return "Stale"
+        case .partial: return "Partial"
+        case .notLoaded: return "Not Loaded"
+        }
+    }
+}
+
+struct ShellIntegrationHealth {
+    let createdAt: Date
+    var lastReportPwd: Date?
+    var lastReportTty: Date?
+    var lastReportGitBranch: Date?
+    var reportPwdCount: Int = 0
+    var reportTtyCount: Int = 0
+    var reportGitBranchCount: Int = 0
+
+    var status: IntegrationStatus {
+        let age = Date().timeIntervalSince(createdAt)
+        if age < 5.0 { return .starting }
+        if reportPwdCount == 0 && reportTtyCount == 0 { return .notLoaded }
+        if reportTtyCount > 0 && reportPwdCount == 0 { return .partial }
+        if let lastPwd = lastReportPwd, Date().timeIntervalSince(lastPwd) > 300 { return .stale }
+        return .healthy
+    }
+
+    mutating func record(_ signal: ShellIntegrationSignal) {
+        let now = Date()
+        switch signal {
+        case .reportPwd:
+            lastReportPwd = now
+            reportPwdCount += 1
+        case .reportTty:
+            lastReportTty = now
+            reportTtyCount += 1
+        case .reportGitBranch:
+            lastReportGitBranch = now
+            reportGitBranchCount += 1
+        }
+    }
+}
+
 enum SidebarBranchOrdering {
     struct BranchEntry: Equatable {
         let name: String

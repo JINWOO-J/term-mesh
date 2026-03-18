@@ -71,7 +71,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .agentCLIPaths: return ["cli", "path", "claude", "kiro", "codex", "gemini", "binary", "agent"]
         case .worktrees: return ["worktrees", "worktree", "base directory", "cleanup", "auto"]
         case .dashboard: return ["dashboard", "http", "localhost", "port", "remote"]
-        case .services: return ["services", "daemon", "doctor", "status", "restart", "subsystem", "log"]
+        case .services: return ["services", "daemon", "doctor", "status", "restart", "subsystem", "log", "shell", "integration", "health"]
         case .browser: return ["browser", "search", "engine", "theme", "link", "history", "http", "insecure", "suggestion"]
         case .imeInputBar: return ["ime", "input", "bar", "font", "height", "cjk"]
         case .keyboardShortcuts: return ["keyboard", "shortcut", "keybinding", "hotkey"]
@@ -152,6 +152,7 @@ struct SettingsView: View {
     @State private var daemonStatusInfo: TermMeshDaemon.DaemonStatus?
     @State private var isDaemonRestarting = false
     @State private var daemonLogTail: AttributedString?
+    @State private var shellHealthEntries: [ShellHealthEntry] = []
     @State private var selectedSection: SettingsSection = .app
 
     private var selectedWorkspacePlacement: NewWorkspacePlacement {
@@ -1346,7 +1347,12 @@ struct SettingsView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
         }
-        .onAppear { refreshDaemonStatus() }
+        .onAppear {
+            refreshDaemonStatus()
+            refreshShellIntegrationHealth()
+        }
+
+        shellIntegrationHealthCard
     }
 
     // MARK: - Section: Browser
@@ -1727,6 +1733,124 @@ struct SettingsView: View {
         return "\(s)s"
     }
 
+    // MARK: - Shell Integration Health
+
+    @ViewBuilder
+    private var shellIntegrationHealthCard: some View {
+        SettingsCard {
+            SettingsCardRow("Shell Integration", subtitle: shellHealthSummary) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(shellHealthOverallColor)
+                        .frame(width: 8, height: 8)
+                    Text(shellHealthOverallLabel)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if !shellHealthEntries.isEmpty {
+                ForEach(shellHealthEntries) { entry in
+                    SettingsCardDivider()
+
+                    SettingsCardRow(
+                        "\(entry.workspaceTitle) / \(entry.panelTitle)",
+                        subtitle: shellHealthDetail(entry)
+                    ) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(entry.health.status.settingsColor)
+                                .frame(width: 7, height: 7)
+                            Text(entry.health.status.label)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+
+            SettingsCardDivider()
+
+            HStack {
+                Spacer(minLength: 0)
+                Button("Refresh") {
+                    refreshShellIntegrationHealth()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private var shellHealthSummary: String {
+        let total = shellHealthEntries.count
+        if total == 0 { return "No terminal panels detected" }
+        return "\(total) terminal panel\(total == 1 ? "" : "s") across all workspaces"
+    }
+
+    private var shellHealthOverallColor: Color {
+        if shellHealthEntries.isEmpty { return .gray }
+        let statuses = shellHealthEntries.map { $0.health.status }
+        if statuses.contains(.notLoaded) { return .red }
+        if statuses.contains(.partial) || statuses.contains(.stale) { return .orange }
+        if statuses.allSatisfy({ $0 == .starting }) { return .gray }
+        return .green
+    }
+
+    private var shellHealthOverallLabel: String {
+        if shellHealthEntries.isEmpty { return "No panels" }
+        let statuses = shellHealthEntries.map { $0.health.status }
+        let notLoadedCount = statuses.filter { $0 == .notLoaded }.count
+        if notLoadedCount > 0 { return "\(notLoadedCount) not loaded" }
+        let problemCount = statuses.filter { $0 == .partial || $0 == .stale }.count
+        if problemCount > 0 { return "\(problemCount) degraded" }
+        if statuses.allSatisfy({ $0 == .starting }) { return "Starting..." }
+        return "All healthy"
+    }
+
+    private func shellHealthDetail(_ entry: ShellHealthEntry) -> String {
+        let h = entry.health
+        let pwdAge: String
+        if let lastPwd = h.lastReportPwd {
+            let secs = Int(Date().timeIntervalSince(lastPwd))
+            pwdAge = "\(secs)s ago"
+        } else {
+            pwdAge = "never"
+        }
+        return "pwd: \(h.reportPwdCount), last \(pwdAge) | tty: \(h.reportTtyCount > 0 ? "yes" : "no") | git: \(h.reportGitBranchCount > 0 ? "yes" : "no")"
+    }
+
+    private func refreshShellIntegrationHealth() {
+        guard let appDelegate = AppDelegate.shared else {
+            shellHealthEntries = []
+            return
+        }
+        var entries: [ShellHealthEntry] = []
+        for context in appDelegate.mainWindowContexts.values {
+            let tabManager = context.tabManager
+            for workspace in tabManager.tabs {
+                for panelId in workspace.panels.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+                    guard workspace.panels[panelId] is TerminalPanel else { continue }
+                    let health = workspace.shellIntegrationHealth[panelId]
+                        ?? ShellIntegrationHealth(createdAt: workspace.createdAt)
+                    let panelTitle = workspace.panelTitles[panelId]
+                        ?? String(panelId.uuidString.prefix(8))
+                    let title = workspace.customTitle ?? workspace.title
+                    entries.append(ShellHealthEntry(
+                        id: panelId,
+                        workspaceTitle: title,
+                        panelTitle: panelTitle,
+                        health: health
+                    ))
+                }
+            }
+        }
+        shellHealthEntries = entries
+    }
+
     private func copyDiagnostics() {
         var lines: [String] = []
         lines.append("term-mesh diagnostics")
@@ -1759,6 +1883,37 @@ struct SettingsView: View {
             }
         } else {
             lines.append("Daemon: status not available")
+        }
+
+        // Shell Integration Health
+        lines.append("")
+        lines.append("Shell Integration:")
+        if let appDelegate = AppDelegate.shared {
+            var panelIndex = 0
+            for context in appDelegate.mainWindowContexts.values {
+                for workspace in context.tabManager.tabs {
+                    for panelId in workspace.panels.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+                        guard workspace.panels[panelId] is TerminalPanel else { continue }
+                        let health = workspace.shellIntegrationHealth[panelId]
+                            ?? ShellIntegrationHealth(createdAt: workspace.createdAt)
+                        let now = Date()
+                        let pwdAge: String
+                        if let lastPwd = health.lastReportPwd {
+                            pwdAge = "last \(Int(now.timeIntervalSince(lastPwd)))s ago"
+                        } else {
+                            pwdAge = "never"
+                        }
+                        let age = Int(now.timeIntervalSince(health.createdAt))
+                        let title = workspace.customTitle ?? workspace.title
+                        let panelLabel = workspace.panelTitles[panelId] ?? String(panelId.uuidString.prefix(8))
+                        panelIndex += 1
+                        lines.append("  \(title)/\(panelLabel): \(health.status.rawValue) (pwd: \(health.reportPwdCount) msgs, \(pwdAge), tty: \(health.reportTtyCount > 0 ? "yes" : "no"), git: \(health.reportGitBranchCount > 0 ? "yes" : "no"), age: \(age)s)")
+                    }
+                }
+            }
+            if panelIndex == 0 {
+                lines.append("  (no terminal panels)")
+            }
         }
 
         let text = lines.joined(separator: "\n")
@@ -2044,6 +2199,24 @@ enum CLIPathSettings {
         }
         return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? ""
     }
+}
+
+extension IntegrationStatus {
+    var settingsColor: Color {
+        switch self {
+        case .starting: return .gray
+        case .healthy: return .green
+        case .stale, .partial: return .orange
+        case .notLoaded: return .red
+        }
+    }
+}
+
+private struct ShellHealthEntry: Identifiable {
+    let id: UUID
+    let workspaceTitle: String
+    let panelTitle: String
+    let health: ShellIntegrationHealth
 }
 
 private struct SettingsCardNote: View {

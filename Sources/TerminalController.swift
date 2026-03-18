@@ -469,6 +469,9 @@ class TerminalController {
         case "report_pwd":
             return reportPwd(args)
 
+        case "shell_integration_status":
+            return shellIntegrationStatus(args)
+
         case "workspace_tag":
             return workspaceTag(args)
 

@@ -383,6 +383,7 @@ extension TerminalController {
             }
 
             tab.updatePanelGitBranch(panelId: surfaceId, branch: branch, isDirty: isDirty, dirtyFileCount: dirtyFileCount)
+            tab.recordShellIntegrationEvent(.reportGitBranch, panelId: surfaceId)
         }
         return "OK"
     }
@@ -504,6 +505,9 @@ extension TerminalController {
             DispatchQueue.main.async {
                 guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: scope.workspaceId) else { return }
                 tabManager.updateSurfaceDirectory(tabId: scope.workspaceId, surfaceId: scope.panelId, directory: directory)
+                if let workspace = tabManager.tabs.first(where: { $0.id == scope.workspaceId }) {
+                    workspace.recordShellIntegrationEvent(.reportPwd, panelId: scope.panelId)
+                }
             }
             return "OK"
         }
@@ -540,6 +544,7 @@ extension TerminalController {
             }
 
             tabManager.updateSurfaceDirectory(tabId: tab.id, surfaceId: surfaceId, directory: directory)
+            tab.recordShellIntegrationEvent(.reportPwd, panelId: surfaceId)
         }
         return "OK"
     }
@@ -596,6 +601,11 @@ extension TerminalController {
                 panelId: scope.panelId,
                 ttyName: ttyName
             )
+            DispatchQueue.main.async {
+                guard let tabManager = AppDelegate.shared?.tabManagerFor(tabId: scope.workspaceId),
+                      let workspace = tabManager.tabs.first(where: { $0.id == scope.workspaceId }) else { return }
+                workspace.recordShellIntegrationEvent(.reportTty, panelId: scope.panelId)
+            }
             return "OK"
         }
 
@@ -630,6 +640,7 @@ extension TerminalController {
             guard tab.surfaceTTYNames[surfaceId] != ttyName else { return }
             tab.surfaceTTYNames[surfaceId] = ttyName
             PortScanner.shared.registerTTY(workspaceId: tab.id, panelId: surfaceId, ttyName: ttyName)
+            tab.recordShellIntegrationEvent(.reportTty, panelId: surfaceId)
         }
         return "OK"
     }
@@ -921,6 +932,74 @@ extension TerminalController {
 
             if let id = newPanelId {
                 result = "OK \(id.uuidString)"
+            }
+        }
+        if !completed { return "ERROR: Main thread busy" }
+        return result
+    }
+
+    func shellIntegrationStatus(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        let tabFilter = parsed.options["tab"]
+        let panelFilter = parsed.options["panel"]
+
+        // Diagnostic command — main thread execution required for consistent snapshot.
+        var result = ""
+        let completed = v2MainExec {
+            guard let tabManager = self.tabManager else {
+                result = "ERROR: TabManager not available"
+                return
+            }
+
+            let workspaces: [Workspace]
+            if let tabArg = tabFilter, !tabArg.isEmpty {
+                if let tab = self.resolveTab(from: tabArg, tabManager: tabManager) {
+                    workspaces = [tab]
+                } else {
+                    result = "ERROR: Tab not found"
+                    return
+                }
+            } else {
+                workspaces = tabManager.tabs
+            }
+
+            var entries: [[String: Any]] = []
+            let now = Date()
+            for workspace in workspaces {
+                for panelId in workspace.panels.keys.sorted(by: { $0.uuidString < $1.uuidString }) {
+                    if let pFilter = panelFilter, !pFilter.isEmpty {
+                        guard panelId.uuidString == pFilter else { continue }
+                    }
+                    guard workspace.panels[panelId] is TerminalPanel else { continue }
+                    let health = workspace.shellIntegrationHealth[panelId]
+                        ?? ShellIntegrationHealth(createdAt: workspace.createdAt)
+                    var entry: [String: Any] = [
+                        "workspace_id": workspace.id.uuidString,
+                        "panel_id": panelId.uuidString,
+                        "status": health.status.rawValue,
+                        "report_pwd_count": health.reportPwdCount,
+                        "report_tty_count": health.reportTtyCount,
+                        "report_git_branch_count": health.reportGitBranchCount,
+                        "age_secs": round(now.timeIntervalSince(health.createdAt) * 10) / 10,
+                    ]
+                    if let lastPwd = health.lastReportPwd {
+                        entry["report_pwd_age_secs"] = round(now.timeIntervalSince(lastPwd) * 10) / 10
+                    }
+                    if let lastTty = health.lastReportTty {
+                        entry["report_tty_age_secs"] = round(now.timeIntervalSince(lastTty) * 10) / 10
+                    }
+                    if let lastGit = health.lastReportGitBranch {
+                        entry["report_git_branch_age_secs"] = round(now.timeIntervalSince(lastGit) * 10) / 10
+                    }
+                    entries.append(entry)
+                }
+            }
+
+            if let data = try? JSONSerialization.data(withJSONObject: entries, options: [.sortedKeys]),
+               let json = String(data: data, encoding: .utf8) {
+                result = json
+            } else {
+                result = "[]"
             }
         }
         if !completed { return "ERROR: Main thread busy" }

@@ -109,6 +109,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     @Published var listeningPorts: [Int] = []
     var surfaceTTYNames: [UUID: String] = [:]
+    @Published var shellIntegrationHealth: [UUID: ShellIntegrationHealth] = [:]
 
     var focusedSurfaceId: UUID? { focusedPanelId }
     var surfaceDirectories: [UUID: String] {
@@ -659,6 +660,13 @@ final class Workspace: Identifiable, ObservableObject {
         NotificationCenter.default.post(name: .ghosttyDidUpdateGitBranch, object: nil)
     }
 
+    func recordShellIntegrationEvent(_ signal: ShellIntegrationSignal, panelId: UUID) {
+        if shellIntegrationHealth[panelId] == nil {
+            shellIntegrationHealth[panelId] = ShellIntegrationHealth(createdAt: Date())
+        }
+        shellIntegrationHealth[panelId]?.record(signal)
+    }
+
     func clearPanelGitBranch(panelId: UUID) {
         panelGitBranches.removeValue(forKey: panelId)
         if panelId == focusedPanelId {
@@ -715,6 +723,7 @@ final class Workspace: Identifiable, ObservableObject {
         manualUnreadMarkedAt = manualUnreadMarkedAt.filter { validSurfaceIds.contains($0.key) }
         surfaceListeningPorts = surfaceListeningPorts.filter { validSurfaceIds.contains($0.key) }
         surfaceTTYNames = surfaceTTYNames.filter { validSurfaceIds.contains($0.key) }
+        shellIntegrationHealth = shellIntegrationHealth.filter { validSurfaceIds.contains($0.key) }
         recomputeListeningPorts()
     }
 

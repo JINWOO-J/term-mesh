@@ -45,6 +45,6 @@ builtin print -- "[tm-zshenv] after-restore ZDOTDIR=${ZDOTDIR:-unset}" >> /tmp/t
             fi
         fi
     fi
-    builtin print -- "[tm-zshenv] always-end _termmesh_send=$(builtin whence -w _termmesh_send 2>&1) _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
+    builtin print -- "[tm-zshenv] always-end PID=$$ _termmesh_send=$(builtin whence -w _termmesh_send 2>&1) _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
     builtin unset _termmesh_file _termmesh_ghostty _termmesh_integ
 }

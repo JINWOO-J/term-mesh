@@ -1503,8 +1503,19 @@ final class TeamOrchestrator: ObservableObject {
     }
 
     private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.10) -> Bool {
-        guard let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }) else { return false }
-        guard let panel = workspace.terminalPanel(for: panelId) else { return false }
+        // Try the provided tabManager first, then fall back to global surface lookup
+        // for cross-window scenarios (e.g. broadcast when agents are in a different window).
+        let panel: TerminalPanel
+        if let workspace = tabManager.tabs.first(where: { $0.id == workspaceId }),
+           let p = workspace.terminalPanel(for: panelId) {
+            panel = p
+        } else if let located = AppDelegate.shared?.locateSurface(surfaceId: panelId),
+                  let workspace = located.tabManager.tabs.first(where: { $0.id == located.workspaceId }),
+                  let p = workspace.terminalPanel(for: panelId) {
+            panel = p
+        } else {
+            return false
+        }
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
         guard !trimmed.isEmpty else { return true }
 

@@ -1387,11 +1387,11 @@ fn run_create_headless(
 
             // Send init prompts to all agents
             eprintln!("\nSending init prompts to headless agents...");
-            let sock_str = daemon_sock.to_string_lossy();
+            let app_sock_str = app_sock.to_string_lossy();
             for spec in &agent_specs {
                 let name = spec["name"].as_str().unwrap_or("");
                 let agent_id = format!("{name}@{team}");
-                let init_text = agent_init_prompt(name, &workdir, &sock_str);
+                let init_text = agent_init_prompt(name, &workdir, &app_sock_str);
                 match rpc_call_timeout(&daemon_sock, "headless.send", json!({
                     "agent_id": agent_id,
                     "text": init_text,

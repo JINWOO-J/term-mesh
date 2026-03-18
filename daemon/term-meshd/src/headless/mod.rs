@@ -75,6 +75,7 @@ pub struct SpawnParams {
     /// Resolved absolute path to the CLI binary (from Swift's agentBinaryPath).
     pub cli_path: Option<String>,
     /// Swift app socket path — agents use this as TERMMESH_SOCKET for team.* commands.
+    #[serde(default)]
     pub app_socket_path: Option<String>,
 }
 

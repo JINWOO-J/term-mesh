@@ -278,6 +278,7 @@ struct SidebarBackdrop: View {
     @AppStorage("sidebarState") private var sidebarState = SidebarStateOption.followWindow.rawValue
     @AppStorage("sidebarCornerRadius") private var sidebarCornerRadius = 0.0
     @AppStorage("sidebarBlurOpacity") private var sidebarBlurOpacity = 1.0
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let materialOption = SidebarMaterialOption(rawValue: sidebarMaterial)
@@ -285,8 +286,7 @@ struct SidebarBackdrop: View {
         let state = SidebarStateOption(rawValue: sidebarState)?.state ?? .active
         // In dark mode, use a deep dark tint instead of the user-configured (typically white) tint
         let effectiveTintColor: NSColor = {
-            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            if isDark {
+            if colorScheme == .dark {
                 return (NSColor(hex: "#0a0e14") ?? .black).withAlphaComponent(0.85)
             }
             return (NSColor(hex: sidebarTintHex) ?? .black).withAlphaComponent(sidebarTintOpacity)

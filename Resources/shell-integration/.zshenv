@@ -1,18 +1,10 @@
 # vim:ft=zsh
 #
 # term-mesh ZDOTDIR bootstrap for zsh.
-#
-# GhosttyKit already uses a ZDOTDIR injection mechanism for zsh (setting ZDOTDIR
-# to Ghostty's integration dir). term-mesh also needs to run its integration, but
-# we must restore the user's real ZDOTDIR immediately so that:
-# - /etc/zshrc sets HISTFILE relative to the real ZDOTDIR/HOME (shared history)
-# - zsh loads the user's real .zprofile/.zshrc normally (no wrapper recursion)
-#
-# We restore ZDOTDIR from (in priority order):
-# - GHOSTTY_ZSH_ZDOTDIR (set by GhosttyKit when it overwrote ZDOTDIR)
-# - TERMMESH_ZSH_ZDOTDIR (set by term-mesh when it overwrote a user-provided ZDOTDIR)
-# - CMUX_ZSH_ZDOTDIR (legacy fallback)
-# - unset (zsh treats unset ZDOTDIR as $HOME)
+
+# TEST: define a bare function at the very top — does it survive to .zshrc?
+_tm_test_survive() { builtin print "alive"; }
+builtin print -- "[tm-zshenv] TOP _tm_test=$(builtin whence -w _tm_test_survive 2>&1) ZDOTDIR=${ZDOTDIR:-unset} GHOSTTY_ZSH_ZDOTDIR=${GHOSTTY_ZSH_ZDOTDIR:-unset}" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
 
 if [[ -n "${GHOSTTY_ZSH_ZDOTDIR+X}" ]]; then
     builtin export ZDOTDIR="$GHOSTTY_ZSH_ZDOTDIR"
@@ -27,31 +19,32 @@ else
     builtin unset ZDOTDIR
 fi
 
+builtin print -- "[tm-zshenv] after-restore ZDOTDIR=${ZDOTDIR:-unset}" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
+
 {
-    # zsh treats unset ZDOTDIR as if it were HOME. We do the same.
     builtin typeset _termmesh_file="${ZDOTDIR-$HOME}/.zshenv"
-    builtin print -- "[tm-zshenv] enter file=$_termmesh_file" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
+    builtin print -- "[tm-zshenv] sourcing user=$_termmesh_file" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
     [[ ! -r "$_termmesh_file" ]] || builtin source -- "$_termmesh_file"
+    builtin print -- "[tm-zshenv] after-user-zshenv _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
 } always {
+    builtin print -- "[tm-zshenv] always-start interactive=$([[ -o interactive ]] && echo y || echo n) _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
     if [[ -o interactive ]]; then
-        # We overwrote GhosttyKit's injected ZDOTDIR, so manually load Ghostty's
-        # zsh integration if available.
         if [[ -n "${GHOSTTY_RESOURCES_DIR:-}" ]]; then
             builtin typeset _termmesh_ghostty="$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration"
-            [[ -r "$_termmesh_ghostty" ]] && builtin source -- "$_termmesh_ghostty"
+            if [[ -r "$_termmesh_ghostty" ]]; then
+                builtin source -- "$_termmesh_ghostty"
+                builtin print -- "[tm-zshenv] after-ghostty _tm_test=$(builtin whence -w _tm_test_survive 2>&1) _ghostty_state=${_ghostty_state:-unset}" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
+            fi
         fi
 
-        # Load term-mesh integration (unless disabled).
-        # This works because shell-integration=none in ghostty-termmesh.conf
-        # prevents Ghostty's .zshenv always-block from clearing these functions.
         if [[ "${TERMMESH_SHELL_INTEGRATION:-${CMUX_SHELL_INTEGRATION:-1}}" != "0" && -n "${TERMMESH_SHELL_INTEGRATION_DIR:-${CMUX_SHELL_INTEGRATION_DIR:-}}" ]]; then
             builtin typeset _termmesh_integ="${TERMMESH_SHELL_INTEGRATION_DIR:-$CMUX_SHELL_INTEGRATION_DIR}/term-mesh-zsh-integration.zsh"
             if [[ -r "$_termmesh_integ" ]]; then
                 builtin source -- "$_termmesh_integ"
-                builtin print -- "[tm-zshenv] sourced OK send=$(builtin whence -w _termmesh_send 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
+                builtin print -- "[tm-zshenv] after-integ _termmesh_send=$(builtin whence -w _termmesh_send 2>&1) _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
             fi
         fi
     fi
-
+    builtin print -- "[tm-zshenv] always-end _termmesh_send=$(builtin whence -w _termmesh_send 2>&1) _tm_test=$(builtin whence -w _tm_test_survive 2>&1)" >> /tmp/term-mesh-zshenv-debug.log 2>/dev/null
     builtin unset _termmesh_file _termmesh_ghostty _termmesh_integ
 }

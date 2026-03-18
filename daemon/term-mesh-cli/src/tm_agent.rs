@@ -1459,11 +1459,29 @@ fn run_delegate_result(
             // Check if text was actually delivered to the agent's terminal
             let text_delivered = v["result"]["text_delivered"].as_bool().unwrap_or(true);
             if !text_delivered {
-                // Server-side retry already failed; try one more CLI-side retry via team.send
-                // Re-format with task metadata so the agent gets proper [TASK_ID] prefix
-                eprintln!("  Warning: text not delivered to agent, retrying via team.send...");
                 let task_ref = &v["result"]["task"];
                 let instruction = format_task_instruction(sock, team, task_ref, text, no_report);
+
+                // Headless agent path: route via daemon socket if available
+                if let Some(daemon_sock) = detect_daemon_socket() {
+                    if let Some(agent_id) = is_headless_agent(&daemon_sock, team, target) {
+                        let headless_resp = rpc_call(&daemon_sock, "headless.send", json!({
+                            "agent_id": agent_id,
+                            "text": format!("{instruction}\n"),
+                        }));
+                        if let Ok(ref hr) = headless_resp {
+                            if hr["ok"].as_bool().unwrap_or(false) {
+                                // Successfully delivered via daemon — no warning needed
+                            } else {
+                                eprintln!("  Warning: headless.send failed for {target}");
+                            }
+                        }
+                        return Ok(v);
+                    }
+                }
+
+                // In-app panel retry: agent is not headless, retry via team.send
+                eprintln!("  Warning: text not delivered to agent, retrying via team.send...");
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 let retry = rpc_call(sock, "team.send", json!({
                     "team_name": team, "agent_name": target,
@@ -1503,6 +1521,25 @@ fn run_delegate_result(
 
     let instruction = format_task_instruction(sock, team, task, text, no_report);
     let send_text = format!("{instruction}\n");
+
+    // Headless agent path: route via daemon socket for 2-RPC fallback too
+    if let Some(daemon_sock) = detect_daemon_socket() {
+        if let Some(agent_id) = is_headless_agent(&daemon_sock, team, target) {
+            let headless_resp = rpc_call(&daemon_sock, "headless.send", json!({
+                "agent_id": agent_id,
+                "text": &send_text,
+            }));
+            let sent_ok = headless_resp.as_ref()
+                .map(|r| r["ok"].as_bool().unwrap_or(false))
+                .unwrap_or(false);
+            if !sent_ok {
+                eprintln!("  Warning: headless.send failed in 2-RPC fallback");
+            }
+            return Ok(json!({ "task": task, "send": { "ok": sent_ok } }));
+        }
+    }
+
+    // In-app panel path
     let sent = rpc_call(sock, "team.send", json!({
         "team_name": team, "agent_name": target,
         "text": &send_text,

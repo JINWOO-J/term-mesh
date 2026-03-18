@@ -16,9 +16,12 @@ pub fn build_claude_command(
     model: &str,
     _working_directory: &str,
     daemon_socket: &str,
+    cli_path: Option<&str>,
 ) -> CliCommand {
-    let claude_path = std::env::var("CLAUDE_PATH")
-        .unwrap_or_else(|_| "claude".to_string());
+    let claude_path = cli_path
+        .map(String::from)
+        .or_else(|| std::env::var("CLAUDE_PATH").ok())
+        .unwrap_or_else(|| "claude".to_string());
 
     let agent_id = format!("{name}@{team_name}");
 

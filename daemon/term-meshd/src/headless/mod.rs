@@ -72,6 +72,8 @@ pub struct SpawnParams {
     #[serde(default = "default_model")]
     pub model: String,
     pub working_directory: String,
+    /// Resolved absolute path to the CLI binary (from Swift's agentBinaryPath).
+    pub cli_path: Option<String>,
 }
 
 fn default_cli() -> String { "claude".into() }
@@ -95,6 +97,8 @@ pub struct AgentSpec {
     pub cli: String,
     #[serde(default = "default_model")]
     pub model: String,
+    /// Resolved absolute path to the CLI binary (from Swift's agentBinaryPath).
+    pub cli_path: Option<String>,
 }
 
 /// Manages all headless agent subprocesses and teams.
@@ -129,6 +133,7 @@ impl HeadlessManager {
             &params.model,
             &params.working_directory,
             &daemon_socket,
+            params.cli_path.as_deref(),
         );
 
         tracing::info!(
@@ -362,6 +367,7 @@ impl HeadlessManager {
                 cli: spec.cli.clone(),
                 model: spec.model.clone(),
                 working_directory: params.working_directory.clone(),
+                cli_path: spec.cli_path.clone(),
             };
 
             match self.spawn_agent(spawn_params).await {

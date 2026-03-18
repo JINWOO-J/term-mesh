@@ -605,7 +605,12 @@ final class TeamOrchestrator: ObservableObject {
         if executionMode == "headless" {
             // Spawn agents via daemon RPC (no GUI panes)
             let agentSpecs: [[String: Any]] = agents.map { a in
-                ["name": a.name, "cli": a.cli.isEmpty ? "claude" : a.cli, "model": a.model]
+                let cli = a.cli.isEmpty ? "claude" : a.cli
+                var spec: [String: Any] = ["name": a.name, "cli": cli, "model": a.model]
+                if let path = cliPaths[cli] {
+                    spec["cli_path"] = path
+                }
+                return spec
             }
             let createParams: [String: Any] = [
                 "team_name": name,

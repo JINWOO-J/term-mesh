@@ -1465,16 +1465,15 @@ fn run_delegate_result(
                 // Headless agent path: route via daemon socket if available
                 if let Some(daemon_sock) = detect_daemon_socket() {
                     if let Some(agent_id) = is_headless_agent(&daemon_sock, team, target) {
-                        let headless_resp = rpc_call(&daemon_sock, "headless.send", json!({
+                        let headless_ok = match rpc_call(&daemon_sock, "headless.send", json!({
                             "agent_id": agent_id,
                             "text": format!("{instruction}\n"),
-                        }));
-                        if let Ok(ref hr) = headless_resp {
-                            if hr["ok"].as_bool().unwrap_or(false) {
-                                // Successfully delivered via daemon — no warning needed
-                            } else {
-                                eprintln!("  Warning: headless.send failed for {target}");
-                            }
+                        })) {
+                            Ok(ref hr) => !hr["result"].is_null(),
+                            Err(_) => false,
+                        };
+                        if !headless_ok {
+                            eprintln!("  Warning: headless.send failed for {target}");
                         }
                         return Ok(v);
                     }
@@ -1525,13 +1524,13 @@ fn run_delegate_result(
     // Headless agent path: route via daemon socket for 2-RPC fallback too
     if let Some(daemon_sock) = detect_daemon_socket() {
         if let Some(agent_id) = is_headless_agent(&daemon_sock, team, target) {
-            let headless_resp = rpc_call(&daemon_sock, "headless.send", json!({
+            let sent_ok = match rpc_call(&daemon_sock, "headless.send", json!({
                 "agent_id": agent_id,
                 "text": &send_text,
-            }));
-            let sent_ok = headless_resp.as_ref()
-                .map(|r| r["ok"].as_bool().unwrap_or(false))
-                .unwrap_or(false);
+            })) {
+                Ok(ref hr) => !hr["result"].is_null(),
+                Err(_) => false,
+            };
             if !sent_ok {
                 eprintln!("  Warning: headless.send failed in 2-RPC fallback");
             }

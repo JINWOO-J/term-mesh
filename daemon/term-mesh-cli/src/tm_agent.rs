@@ -1230,45 +1230,70 @@ fn run_create(
     }
 }
 
-fn run_delegate(
+fn run_delegate_result(
     sock: &PathBuf, team: &str, target: &str, text: &str,
     title: Option<String>, priority: Option<u32>,
     accept: &[String], deps: &[String], desc: Option<String>, no_report: bool,
-) {
+) -> Result<Value, String> {
+    let resolved_title = title.unwrap_or_else(|| task_title_from_text(text));
+    let resolved_priority = priority.unwrap_or(2);
+
+    // Try unified team.delegate RPC first (single round-trip)
+    let delegate_params = json!({
+        "team": team,
+        "agent": target,
+        "text": text,
+        "task_title": resolved_title,
+        "priority": resolved_priority,
+    });
+    if let Ok(v) = rpc_call(sock, "team.delegate", delegate_params) {
+        if v["ok"].as_bool().unwrap_or(false) {
+            return Ok(v);
+        }
+    }
+
+    // Fallback: original 2-RPC path (server may not support team.delegate yet)
     let mut params = json!({
         "team_name": team,
-        "title": title.unwrap_or_else(|| task_title_from_text(text)),
+        "title": resolved_title,
         "assignee": target,
-        "priority": priority.unwrap_or(2),
+        "priority": resolved_priority,
     });
     if let Some(d) = desc { params["description"] = json!(d); }
     if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
     if !deps.is_empty() { params["depends_on"] = json!(deps); }
 
-    let created = match rpc_call(sock, "team.task.create", params) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
-    };
+    let created = rpc_call(sock, "team.task.create", params)
+        .map_err(|e| format!("task.create: {e}"))?;
 
     let task = &created["result"];
     let task_id = task["id"].as_str().unwrap_or("");
     if !created["ok"].as_bool().unwrap_or(false) || task_id.is_empty() {
-        println!("{}", pretty(&created));
-        if !created["ok"].as_bool().unwrap_or(false) { process::exit(1); }
-        return;
+        return Err(format!("task.create failed: {}", pretty(&created)));
     }
 
     let instruction = format_task_instruction(sock, team, task, text, no_report);
-    let sent = match rpc_call(sock, "team.send", json!({
+    let sent = rpc_call(sock, "team.send", json!({
         "team_name": team, "agent_name": target,
         "text": format!("{instruction}\n"),
-    })) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
-    };
+    })).map_err(|e| format!("team.send: {e}"))?;
 
-    println!("{}", pretty(&json!({ "task": task, "send": sent })));
-    if !sent["ok"].as_bool().unwrap_or(false) { process::exit(1); }
+    if !sent["ok"].as_bool().unwrap_or(false) {
+        return Err(format!("team.send failed: {}", pretty(&sent)));
+    }
+
+    Ok(json!({ "task": task, "send": sent }))
+}
+
+fn run_delegate(
+    sock: &PathBuf, team: &str, target: &str, text: &str,
+    title: Option<String>, priority: Option<u32>,
+    accept: &[String], deps: &[String], desc: Option<String>, no_report: bool,
+) {
+    match run_delegate_result(sock, team, target, text, title, priority, accept, deps, desc, no_report) {
+        Ok(v) => println!("{}", pretty(&v)),
+        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+    }
 }
 
 fn run_fan_out(
@@ -1299,23 +1324,58 @@ fn run_fan_out(
         process::exit(1);
     }
 
-    eprintln!("Fan-out: delegating to {} agents: {}", targets.len(), targets.join(", "));
+    eprintln!("Fan-out: delegating to {} agents in parallel: {}", targets.len(), targets.join(", "));
 
-    let mut sent_agents: Vec<String> = Vec::new();
-    for target in &targets {
-        let t = title.clone().unwrap_or_else(|| task_title_from_text(text));
-        run_delegate(sock, team, target, text, Some(t), priority, &[], &[], None, no_report);
-        sent_agents.push(target.to_string());
+    // L2: compute task title once outside the thread scope to avoid repeated calls per thread.
+    let base_title = title.unwrap_or_else(|| task_title_from_text(text));
+
+    // Run all delegate calls in parallel using scoped threads.
+    // rpc_call_timeout() opens a new UnixStream per call, so threads don't share connections.
+    let results: Vec<(&str, Result<Value, String>)> = thread::scope(|s| {
+        let handles: Vec<_> = targets.iter().map(|target| {
+            let t = base_title.clone();
+            s.spawn(move || {
+                let result = run_delegate_result(
+                    sock, team, target, text, Some(t), priority, &[], &[], None, no_report,
+                );
+                (*target, result)
+            })
+        }).collect();
+        handles.into_iter().map(|h| h.join().expect("thread panicked")).collect()
+    });
+
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for (agent, result) in &results {
+        match result {
+            Ok(v) => {
+                println!("{}", pretty(v));
+                succeeded.push(agent.to_string());
+            }
+            Err(e) => {
+                eprintln!("Error delegating to {agent}: {e}");
+                failed.push(agent.to_string());
+            }
+        }
     }
 
-    eprintln!("Fan-out complete: {} tasks created and delegated.", sent_agents.len());
+    eprintln!(
+        "Fan-out complete: {} succeeded, {} failed.",
+        succeeded.len(), failed.len()
+    );
     println!("{}", pretty(&json!({
         "fan_out": {
             "team_name": team,
-            "agents": sent_agents,
-            "count": sent_agents.len(),
+            "agents": succeeded,
+            "count": succeeded.len(),
+            "failed": failed,
         }
     })));
+
+    // M1: exit with error if all delegates failed.
+    if succeeded.is_empty() && !failed.is_empty() {
+        process::exit(1);
+    }
 }
 
 fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str, task_id: Option<&str>, agent_filter: &std::collections::HashSet<String>) {

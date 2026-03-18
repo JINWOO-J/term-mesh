@@ -1797,6 +1797,8 @@ class TerminalController {
         "team.task.reassign",
         "team.task.unblock",
         "team.task.split",
+        // Unified delegate: task creation + instruction send in one RPC
+        "team.delegate",
     ]
 
     /// Dispatch ALL team commands via async path.
@@ -1919,6 +1921,8 @@ class TerminalController {
             return await asyncTeamTaskUnblock(params: params, id: id)
         case "team.task.split":
             return await asyncTeamTaskSplit(params: params, id: id)
+        case "team.delegate":
+            return await asyncTeamDelegate(params: params, id: id)
         default:
             return v2Error(id: id, code: "unknown_method", message: "Unknown team command: \(method)")
         }
@@ -2501,6 +2505,43 @@ class TerminalController {
             return v2Error(id: id, code: "not_found", message: "Task not found")
         }
         return v2Ok(id: id, result: store.taskDictionary(task))
+    }
+
+    /// Unified delegate handler: atomically creates a task and dispatches the formatted
+    /// instruction to the agent in a single RPC. Replaces the 2-step team.task.create +
+    /// team.send pattern used by `tm-agent delegate` as fallback.
+    /// Rust sends "team"/"agent" keys (not "team_name"/"agent_name").
+    private func asyncTeamDelegate(params: [String: Any], id: Any?) async -> String {
+        guard let teamName = (params["team"] ?? params["team_name"]) as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team")
+        }
+        guard let agentName = (params["agent"] ?? params["agent_name"]) as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing agent")
+        }
+        guard let text = params["text"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing text")
+        }
+        let taskTitle = params["task_title"] as? String
+        let priority = params["priority"] as? Int
+        let store = TeamDataStore.shared
+
+        // Create task + send instruction on MainActor (sendToAgent requires main thread)
+        let task: TeamOrchestrator.TeamTask? = await MainActor.run {
+            guard let tabManager = self.tabManager else { return nil }
+            return TeamOrchestrator.shared.delegateToAgent(
+                teamName: teamName,
+                agentName: agentName,
+                text: text,
+                taskTitle: taskTitle,
+                priority: priority,
+                tabManager: tabManager
+            )
+        }
+
+        guard let task else {
+            return v2Error(id: id, code: "not_found", message: "Team or agent not found, or task creation failed")
+        }
+        return v2Ok(id: id, result: ["task": store.taskDictionary(task), "sent": true])
     }
 
     // MARK: - V2 Team Data Dispatch (Approach C: Dual Queue)

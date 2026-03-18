@@ -1297,6 +1297,54 @@ final class TeamOrchestrator: ObservableObject {
         return dispatched
     }
 
+    /// Unified delegate: atomically create a task in TeamDataStore and dispatch the
+    /// formatted instruction to the agent. Mirrors the `tm-agent delegate` two-step
+    /// logic (team.task.create + team.send) in a single atomic call.
+    /// Must be called on the main thread (sendToAgent requires MainActor).
+    @discardableResult
+    func delegateToAgent(
+        teamName: String,
+        agentName: String,
+        text: String,
+        taskTitle: String? = nil,
+        priority: Int? = nil,
+        tabManager: TabManager
+    ) -> TeamTask? {
+        let title = taskTitle?.nilIfBlank ?? String(text.prefix(80))
+        guard let task = TeamDataStore.shared.createTask(
+            teamName: teamName,
+            title: title,
+            assignee: agentName,
+            priority: priority ?? 2
+        ) else { return nil }
+        let instruction = formatDelegateInstruction(task: task, text: text)
+        _ = sendToAgent(teamName: teamName, agentName: agentName, text: instruction + "\n", tabManager: tabManager)
+        return task
+    }
+
+    private func formatDelegateInstruction(task: TeamTask, text: String) -> String {
+        let taskId = task.id
+        var lines: [String] = [
+            "[TASK_ID] \(taskId)",
+            "[TASK_TITLE] \(task.title)",
+            "[TASK_STATUS] \(task.status)",
+            "[TASK_PRIORITY] \(task.priority)",
+            "",
+            "[FORMAT COMPLIANCE] Follow the leader's instructions EXACTLY as given. If a specific output format is requested, reproduce it precisely — do not paraphrase, summarize, or restructure the format.",
+            "",
+            text.trimmingCharacters(in: .whitespacesAndNewlines),
+            "",
+            "You MUST follow this task lifecycle:",
+            "- tm-agent task start \(taskId)",
+            "- tm-agent heartbeat '<short progress summary>'",
+            "- tm-agent task block \(taskId) '<reason>'",
+            "- tm-agent task review \(taskId) '<summary>'",
+            "- tm-agent task done \(taskId) '<result>'",
+        ]
+        let body = lines.joined(separator: "\n")
+        return body + "\n\n[IMPORTANT] When you finish this task, you MUST use your bash/execute tool to run this SINGLE command:\n```\ntm-agent reply '<one-paragraph summary of your result>'\n```\nThis sends the result to the leader AND registers it as a report in one step.\nDo NOT run separate msg send + report commands. Just use `reply` once."
+    }
+
     private func formatTaskDispatchInstruction(task: TeamTask) -> String {
         var lines = [
             "Task \(task.id): \(task.title)",
@@ -1410,15 +1458,14 @@ final class TeamOrchestrator: ObservableObject {
 
     /// Broadcast text to all agents in a team.
     /// Staggers Enter delivery to prevent concurrent panel deallocation under high load.
-    /// Each agent gets a primary Enter at delay + (index * 50ms), plus a retry 250ms later.
+    /// Each agent gets a primary Enter at delay + (index * 20ms), plus a retry 250ms later.
     func broadcast(teamName: String, text: String, tabManager: TabManager) -> Int {
         guard let team = teams[teamName] else { return 0 }
         var count = 0
         for (index, agent) in team.agents.enumerated() {
-            // Base delay 150ms; stagger by 50ms per agent to spread out GCD queue load.
-            // Even for 10+ agents, the latest agent will have delay ~650ms, leaving time
-            // before any main-thread starvation.
-            let enterDelay = 0.15 + Double(index) * 0.05
+            // Base delay 100ms; stagger by 20ms per agent to spread out GCD queue load.
+            // 10 agents = 280ms total (was 600ms). 20ms is the safe minimum interval.
+            let enterDelay = 0.10 + Double(index) * 0.02
             if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager, enterDelay: enterDelay) {
                 count += 1
             }

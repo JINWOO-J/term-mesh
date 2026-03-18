@@ -166,8 +166,25 @@ final class TeamDataStore: @unchecked Sendable {
            }) {
             return duplicate
         }
+        // Generate ID early so it can be used in dependency validation below.
+        let taskId = UUID().uuidString.prefix(8).lowercased().description
+        let existingIds = Set((taskBoards[teamName] ?? []).map(\.id))
+        // Validate dependsOn: strip blanks, remove self-references and unknown IDs.
+        var validatedDependsOn: [String] = []
+        for depId in dependsOn.compactMap(\.teamDataNilIfBlank) {
+            if depId == taskId {
+                NSLog("[TeamDataStore] createTask: skipping self-reference dep '%@' for task '%@'", depId, taskId)
+                continue
+            }
+            guard existingIds.contains(depId) else {
+                NSLog("[TeamDataStore] createTask: WARNING dep '%@' not found in team '%@', removing", depId, teamName)
+                continue
+            }
+            validatedDependsOn.append(depId)
+        }
+
         let task = TeamOrchestrator.TeamTask(
-            id: UUID().uuidString.prefix(8).lowercased().description,
+            id: taskId,
             title: title,
             details: details?.teamDataNilIfBlank,
             acceptanceCriteria: acceptanceCriteria.compactMap(\.teamDataNilIfBlank),
@@ -176,7 +193,7 @@ final class TeamDataStore: @unchecked Sendable {
             assignee: normalizedAssignee,
             status: normalizedAssignee == nil ? "queued" : "assigned",
             priority: max(1, min(priority, 3)),
-            dependsOn: dependsOn.compactMap(\.teamDataNilIfBlank),
+            dependsOn: validatedDependsOn,
             parentTaskId: parentTaskId?.teamDataNilIfBlank,
             childTaskIds: [],
             reassignmentCount: 0,
@@ -266,6 +283,12 @@ final class TeamDataStore: @unchecked Sendable {
                 tasks[idx].lastProgressAt = now
                 if normalizedStatus == "completed" {
                     tasks[idx].blockedReason = nil
+                    // Log dependent tasks that may now be ready to start.
+                    let dependents = tasks.filter { $0.dependsOn.contains(taskId) }
+                    if !dependents.isEmpty {
+                        let depIds = dependents.map(\.id).joined(separator: ", ")
+                        NSLog("[TeamDataStore] task '%@' completed: %d dependent task(s) may be unblocked: %@", taskId, dependents.count, depIds)
+                    }
                 }
             default:
                 break

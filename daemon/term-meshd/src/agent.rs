@@ -719,14 +719,49 @@ impl AgentSessionManager {
         let ts = now_ms();
         let priority = params.priority.unwrap_or(0);
 
+        // BUG-2: Dedup deps to prevent PK constraint crash on duplicate entries.
+        let raw_deps = params.deps.unwrap_or_default();
+        let mut seen = std::collections::HashSet::new();
+        let mut deps: Vec<String> = raw_deps.into_iter().filter(|d| seen.insert(d.clone())).collect();
+
+        // BUG-1 + ISSUE-3: Validate dep existence BEFORE task INSERT to prevent orphan rows.
+        // Unknown deps are stripped with a warning (matches Swift behavior) rather than erroring.
+        if !deps.is_empty() {
+            let placeholders: Vec<String> = deps.iter().enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect();
+            let check_sql = format!(
+                "SELECT id FROM tasks WHERE id IN ({})",
+                placeholders.join(", ")
+            );
+            let mut stmt = inner.db.prepare(&check_sql)
+                .map_err(|e| format!("dep check failed: {e}"))?;
+            let dep_refs: Vec<&dyn rusqlite::types::ToSql> =
+                deps.iter().map(|d| d as &dyn rusqlite::types::ToSql).collect();
+            let found_ids: std::collections::HashSet<String> = stmt
+                .query_map(dep_refs.as_slice(), |row| row.get::<_, String>(0))
+                .map_err(|e| format!("dep check failed: {e}"))?
+                .flatten()
+                .collect();
+            let missing: Vec<&str> = deps.iter()
+                .filter(|d| !found_ids.contains(*d))
+                .map(String::as_str)
+                .collect();
+            if !missing.is_empty() {
+                tracing::warn!(
+                    "task_create: stripping {} unknown dep(s): {:?}",
+                    missing.len(), missing
+                );
+                deps.retain(|d| found_ids.contains(d));
+            }
+        }
+
         inner.db.execute(
             "INSERT INTO tasks (id, title, description, status, priority, assignee, created_by, created_at_ms, updated_at_ms)
              VALUES (?1, ?2, ?3, 'pending', ?4, NULL, ?5, ?6, ?7)",
             params![id, params.title, params.description, priority, params.created_by, ts, ts],
         ).map_err(|e| format!("DB insert failed: {e}"))?;
 
-        // Insert deps
-        let deps = params.deps.unwrap_or_default();
         for dep in &deps {
             inner.db.execute(
                 "INSERT INTO task_deps (task_id, depends_on) VALUES (?1, ?2)",
@@ -754,14 +789,24 @@ impl AgentSessionManager {
         })
     }
 
-    /// Get a task by ID (with deps loaded).
+    /// Get a task by ID (with deps loaded via single JOIN query).
     pub fn task_get(&self, id: &str) -> Result<Task, String> {
         let inner = self.inner.lock().unwrap();
-        let task = inner.db.query_row(
-            "SELECT id, title, description, status, priority, assignee, created_by, created_at_ms, updated_at_ms
-             FROM tasks WHERE id = ?1",
+        inner.db.query_row(
+            // Safe: task IDs are hex UUIDs, never contain '|'
+            "SELECT t.id, t.title, t.description, t.status, t.priority, t.assignee,
+                    t.created_by, t.created_at_ms, t.updated_at_ms,
+                    GROUP_CONCAT(td.depends_on, '|') as dep_ids
+             FROM tasks t
+             LEFT JOIN task_deps td ON td.task_id = t.id
+             WHERE t.id = ?1
+             GROUP BY t.id",
             params![id],
             |row| {
+                let dep_str: Option<String> = row.get(9)?;
+                let deps = dep_str
+                    .map(|s| s.split('|').map(String::from).collect())
+                    .unwrap_or_default();
                 Ok(Task {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -770,34 +815,38 @@ impl AgentSessionManager {
                     priority: row.get(4)?,
                     assignee: row.get(5)?,
                     created_by: row.get(6)?,
-                    deps: Vec::new(),
+                    deps,
                     created_at_ms: row.get(7)?,
                     updated_at_ms: row.get(8)?,
                 })
             },
-        ).map_err(|_| format!("task not found: {id}"))?;
-
-        let deps = Self::load_deps(&inner.db, id);
-        Ok(Task { deps, ..task })
+        ).map_err(|_| format!("task not found: {id}"))
     }
 
     /// List tasks with optional filters, ordered by priority DESC.
+    /// Uses LEFT JOIN + GROUP_CONCAT to load deps in a single query (no N+1).
     pub fn task_list(&self, params: TaskListParams) -> Vec<Task> {
         let inner = self.inner.lock().unwrap();
         let mut sql = String::from(
-            "SELECT id, title, description, status, priority, assignee, created_by, created_at_ms, updated_at_ms FROM tasks WHERE 1=1"
+            // Safe: task IDs are hex UUIDs, never contain '|'
+            "SELECT t.id, t.title, t.description, t.status, t.priority, t.assignee,
+                    t.created_by, t.created_at_ms, t.updated_at_ms,
+                    GROUP_CONCAT(td.depends_on, '|') as dep_ids
+             FROM tasks t
+             LEFT JOIN task_deps td ON td.task_id = t.id
+             WHERE 1=1"
         );
         let mut bind_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
         if let Some(ref status) = params.status {
             bind_values.push(Box::new(status.clone()));
-            sql.push_str(&format!(" AND status = ?{}", bind_values.len()));
+            sql.push_str(&format!(" AND t.status = ?{}", bind_values.len()));
         }
         if let Some(ref assignee) = params.assignee {
             bind_values.push(Box::new(assignee.clone()));
-            sql.push_str(&format!(" AND assignee = ?{}", bind_values.len()));
+            sql.push_str(&format!(" AND t.assignee = ?{}", bind_values.len()));
         }
-        sql.push_str(" ORDER BY priority DESC, created_at_ms ASC");
+        sql.push_str(" GROUP BY t.id ORDER BY t.priority DESC, t.created_at_ms ASC");
 
         let mut stmt = match inner.db.prepare(&sql) {
             Ok(s) => s,
@@ -806,6 +855,10 @@ impl AgentSessionManager {
 
         let refs: Vec<&dyn rusqlite::types::ToSql> = bind_values.iter().map(|b| b.as_ref()).collect();
         let rows = match stmt.query_map(refs.as_slice(), |row| {
+            let dep_str: Option<String> = row.get(9)?;
+            let deps = dep_str
+                .map(|s| s.split('|').map(String::from).collect())
+                .unwrap_or_default();
             Ok(Task {
                 id: row.get(0)?,
                 title: row.get(1)?,
@@ -814,7 +867,7 @@ impl AgentSessionManager {
                 priority: row.get(4)?,
                 assignee: row.get(5)?,
                 created_by: row.get(6)?,
-                deps: Vec::new(),
+                deps,
                 created_at_ms: row.get(7)?,
                 updated_at_ms: row.get(8)?,
             })
@@ -823,12 +876,7 @@ impl AgentSessionManager {
             Err(_) => return Vec::new(),
         };
 
-        let mut tasks: Vec<Task> = rows.flatten().collect();
-        // Load deps for each task
-        for task in &mut tasks {
-            task.deps = Self::load_deps(&inner.db, &task.id);
-        }
-        tasks
+        rows.flatten().collect()
     }
 
     /// Update a task (partial update + state machine validation).
@@ -1139,6 +1187,28 @@ impl AgentSessionManager {
             Err(_) => return Vec::new(),
         };
         rows.flatten().collect()
+    }
+
+    /// BFS cycle detection: returns true if adding the edge from_task → to_task would
+    /// introduce a cycle in the dependency graph. Not currently called but reserved for
+    /// future use when cycle prevention is enforced at assignment or creation time.
+    #[allow(dead_code)]
+    fn check_cycle(db: &Connection, from_task: &str, to_task: &str) -> bool {
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(to_task.to_string());
+        while let Some(current) = queue.pop_front() {
+            if current == from_task {
+                return true; // cycle detected
+            }
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            for dep in Self::load_deps(db, &current) {
+                queue.push_back(dep);
+            }
+        }
+        false
     }
 
     /// Terminate all active sessions (called during graceful shutdown).

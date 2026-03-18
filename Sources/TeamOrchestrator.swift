@@ -351,6 +351,7 @@ final class TeamOrchestrator: ObservableObject {
                 return nil
             }
             Logger.team.info("cleaning up stale team '\(name, privacy: .public)' (workspace closed)")
+            clearResults(teamName: name)
             teams.removeValue(forKey: name)
         }
 
@@ -1696,6 +1697,9 @@ final class TeamOrchestrator: ObservableObject {
         guard let team = teams[name] else { return false }
         guard let workspace = tabManager.tabs.first(where: { $0.id == team.workspaceId }) else {
             cleanupWorktrees(team: team)
+            clearResults(teamName: name)
+            clearMessages(teamName: name)
+            clearTasks(teamName: name)
             teams.removeValue(forKey: name)
             heartbeats.removeValue(forKey: name)
             TeamDataStore.shared.unregisterTeam(name)

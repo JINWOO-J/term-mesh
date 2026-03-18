@@ -48,6 +48,19 @@ final class TeamOrchestrator: ObservableObject {
 
     @Published private(set) var teams: [String: Team] = [:]
 
+    /// Resolve the correct TabManager for a team by locating any agent panel in the window hierarchy.
+    /// Returns nil only if no agent panel can be found (all closed or headless).
+    func resolveTabManager(teamName: String) -> TabManager? {
+        guard let team = teams[teamName] else { return nil }
+        // Try each agent until we find one whose panel is still alive in a window.
+        for agent in team.agents {
+            if let located = AppDelegate.shared?.locateSurface(surfaceId: agent.panelId) {
+                return located.tabManager
+            }
+        }
+        return nil
+    }
+
     /// When true, agent terminal surfaces are occluded; a periodic timer triggers a single
     /// ghostty_surface_draw every 3 s so new output is visible when the user glances at agents.
     @Published private(set) var agentRenderingPaused = false
@@ -1529,6 +1542,14 @@ final class TeamOrchestrator: ObservableObject {
                   let p = workspace.terminalPanel(for: panelId) {
             panel = p
         } else {
+            #if DEBUG
+            // Detailed failure logging to diagnose text_delivered:false
+            let wsFound = tabManager.tabs.first(where: { $0.id == workspaceId })
+            let panelFound = wsFound?.panels[panelId]
+            let locateResult = AppDelegate.shared?.locateSurface(surfaceId: panelId)
+            dlog("[team.sendTextToPanel.FAIL] panelId=\(panelId.uuidString.prefix(8)) wsId=\(workspaceId.uuidString.prefix(8)) wsFound=\(wsFound != nil) panelInWs=\(panelFound != nil) globalLocate=\(locateResult != nil) tabCount=\(tabManager.tabs.count) ctxCount=\(AppDelegate.shared?.mainWindowContexts.count ?? 0)")
+            #endif
+            Logger.team.warning("[sendTextToPanel] panel \(panelId.uuidString.prefix(8), privacy: .public) not found: wsMatch=\(tabManager.tabs.contains(where: { $0.id == workspaceId }), privacy: .public) globalLocate=\(AppDelegate.shared?.locateSurface(surfaceId: panelId) != nil, privacy: .public)")
             return false
         }
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)

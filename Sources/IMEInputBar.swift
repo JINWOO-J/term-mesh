@@ -401,6 +401,15 @@ struct IMEInputBar: View {
                     helpRow("⇧Tab", "Send Shift+Tab (accept)")
                     helpRow("⌥↑↓←→", "Arrow to terminal")
                     helpRow("⌥Tab", "Tab to terminal")
+                    helpRow("Del", "Forward delete (empty)")
+                }
+                helpSection("Claude Code") {
+                    helpRow("⌃J", "Submit (alt Enter)")
+                    helpRow("⌃L", "Clear conversation")
+                    helpRow("⌃C", "Interrupt")
+                    helpRow("Esc Esc", "Double-ESC → Ctrl+C")
+                    helpRow("⇧Tab", "Accept suggestion")
+                    helpRow("⌥Tab", "Toggle thinking")
                 }
                 helpSection("IME Box") {
                     helpRow("⌘Esc", "Close")
@@ -706,6 +715,26 @@ final class IMETextView: NSTextView {
             deleteWordBackward(nil)
             return
         }
+        // Ctrl+J → alternative submit (same as Enter, useful during IME composing)
+        if event.keyCode == 38 && event.modifierFlags.contains(.control) {
+            if hasMarkedText() {
+                super.keyDown(with: event)
+                if !hasMarkedText() {
+                    if string.hasSuffix("\n") {
+                        string = String(string.dropLast())
+                    }
+                    submitHandler?()
+                }
+                return
+            }
+            submitHandler?()
+            return
+        }
+        // Ctrl+L → forward to terminal (Claude Code: clear conversation)
+        if event.keyCode == 37 && event.modifierFlags.contains(.control) {
+            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_CTRL.rawValue))
+            return
+        }
         // Ctrl+R → reverse history search
         if event.keyCode == 15 && event.modifierFlags.contains(.control) {
             historySearchHandler?()
@@ -785,6 +814,15 @@ final class IMETextView: NSTextView {
             return
         }
         super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        if string.isEmpty {
+            // IME bar is empty → forward Delete (Fn+Backspace) to terminal
+            sendKeyHandler?(117, 0)
+            return
+        }
+        super.deleteForward(sender)
     }
 
     private func isCursorOnFirstLine() -> Bool {

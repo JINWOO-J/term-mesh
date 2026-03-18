@@ -928,6 +928,7 @@ struct TeamCreationView: View {
 
     private func applyModelToAll() {
         for i in agents.indices {
+            agents[i].preset.cli = bulkCli
             agents[i].preset.model = bulkModel
             agents[i].providerBadge = .none
         }

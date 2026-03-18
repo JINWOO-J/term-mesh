@@ -328,6 +328,7 @@ final class TeamOrchestrator: ObservableObject {
         leaderMode: String = "repl",
         leaderModel: String = "sonnet",
         worktreeMode: String = "off",
+        executionMode: String = "pane",
         adoptedLeaderSurfaceId: UUID? = nil,
         tabManager: TabManager
     ) -> Team? {
@@ -594,6 +595,81 @@ final class TeamOrchestrator: ObservableObject {
         // Agent grid anchor: in normal mode agents split from leaderPanel;
         // in adopted mode they split from the workspace's default panel (no leader pane exists).
         let agentAnchorPanelId = leaderMode == "adopted" ? defaultPanelId : leaderPanelId
+
+        // ── Headless mode: spawn agents via daemon instead of GUI panes ──
+        if executionMode == "headless" {
+            // Spawn agents via daemon RPC (no GUI panes)
+            let agentSpecs: [[String: Any]] = agents.map { a in
+                ["name": a.name, "cli": a.cli.isEmpty ? "claude" : a.cli, "model": a.model]
+            }
+            let createParams: [String: Any] = [
+                "team_name": name,
+                "working_directory": workingDirectory,
+                "leader_session_id": leaderSessionId,
+                "agents": agentSpecs,
+            ]
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                let result = self.daemon.rpcCallRaw(method: "headless.create_team", params: createParams)
+                if result == nil {
+                    Logger.team.error("[headless] create_team RPC failed")
+                }
+            }
+
+            // In adopted mode, close the default panel (no agents to anchor to)
+            if leaderMode == "adopted" {
+                workspace.closePanel(defaultPanelId)
+            }
+
+            // Build headless members (no panelId — they're daemon subprocesses)
+            let colors = ["green", "blue", "yellow", "magenta", "cyan", "red"]
+            var headlessMembers: [AgentMember] = []
+            for (index, agent) in agents.enumerated() {
+                let agentColor = agent.color.isEmpty ? colors[index % colors.count] : agent.color
+                let agentCli = agent.cli.isEmpty ? "claude" : agent.cli
+                let member = AgentMember(
+                    id: "\(agent.name)@\(name)",
+                    name: agent.name,
+                    teamName: name,
+                    cli: agentCli,
+                    model: agent.model,
+                    agentType: agent.agentType,
+                    color: agentColor,
+                    instructions: agent.instructions,
+                    workspaceId: workspace.id,
+                    panelId: UUID(), // placeholder — no real panel
+                    parentSessionId: leaderSessionId,
+                    createdAt: Date(),
+                    worktreeName: nil,
+                    worktreePath: nil,
+                    worktreeBranch: nil
+                )
+                headlessMembers.append(member)
+            }
+
+            let team = Team(
+                id: name,
+                leaderSessionId: leaderSessionId,
+                leaderMode: leaderMode,
+                leaderModel: leaderModel,
+                leaderPanelId: leaderPanelId,
+                leaderWorkspaceId: leaderWorkspaceId,
+                workingDirectory: workingDirectory,
+                workspaceId: workspace.id,
+                agents: headlessMembers,
+                createdAt: Date(),
+                gitRepoRoot: nil,
+                worktreeMode: worktreeMode,
+                sharedWorktreeName: nil,
+                sharedWorktreePath: nil,
+                sharedWorktreeBranch: nil
+            )
+            teams[name] = team
+            TeamDataStore.shared.registerTeam(name, agentNames: headlessMembers.map(\.name))
+            syncTeamStateToDaemon()
+            Logger.team.info("created headless team '\(name, privacy: .public)' with \(headlessMembers.count, privacy: .public) agent(s) + leader console")
+            return team
+        }
 
         // Compute optimal grid dimensions for agent panes
         let snapshot = workspace.bonsplitController.layoutSnapshot()

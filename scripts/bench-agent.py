@@ -417,24 +417,28 @@ def _detect_team() -> Optional[Dict]:
     if not output:
         return None
 
-    # Try JSON first
+    # Try JSON first — tm-agent status returns a JSON-RPC envelope:
+    #   {"id": N, "ok": true, "result": {"team_name": "...", "agents": [...]}}
     try:
-        data = json.loads(output)
-        if isinstance(data, dict):
-            team_name = (data.get("team_name")
-                         or data.get("team")
-                         or data.get("name")
-                         or "unknown")
-            agents_raw = data.get("agents", [])
-            if isinstance(agents_raw, list) and agents_raw:
-                if isinstance(agents_raw[0], dict):
-                    agents = [a.get("name", "") for a in agents_raw if a.get("name")]
+        raw = json.loads(output)
+        if isinstance(raw, dict):
+            # Unwrap JSON-RPC envelope if present
+            data = raw.get("result", raw) if raw.get("ok") else raw
+            if isinstance(data, dict):
+                team_name = (data.get("team_name")
+                             or data.get("team")
+                             or data.get("name")
+                             or "unknown")
+                agents_raw = data.get("agents", [])
+                if isinstance(agents_raw, list) and agents_raw:
+                    if isinstance(agents_raw[0], dict):
+                        agents = [a.get("name", "") for a in agents_raw if a.get("name")]
+                    else:
+                        agents = [str(a) for a in agents_raw]
                 else:
-                    agents = [str(a) for a in agents_raw]
-            else:
-                agents = []
-            if team_name or agents:
-                return {"team_name": team_name, "agents": agents}
+                    agents = []
+                if team_name or agents:
+                    return {"team_name": team_name, "agents": agents}
     except (json.JSONDecodeError, TypeError):
         pass
 

@@ -1208,7 +1208,7 @@ struct SettingsView: View {
                             // -- PID & Uptime --
                             if let pid = status.pid {
                                 SettingsCardRow("PID") {
-                                    Text("\(pid)")
+                                    Text(verbatim: "\(pid)")
                                         .font(.system(size: 12, design: .monospaced))
                                         .foregroundColor(.secondary)
                                         .textSelection(.enabled)

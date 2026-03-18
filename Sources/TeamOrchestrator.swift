@@ -373,8 +373,13 @@ final class TeamOrchestrator: ObservableObject {
             workingDirectory: workingDirectory,
             select: true
         )
-        workspace.customTitle = "[\(name)]"
-        workspace.title = "[\(name)]"
+        if executionMode == "headless" {
+            workspace.customTitle = "[\(name)] \(agents.count) headless"
+            workspace.title = "[\(name)] \(agents.count) headless"
+        } else {
+            workspace.customTitle = "[\(name)]"
+            workspace.title = "[\(name)]"
+        }
 
         // Env vars for agent panes
         // Include essential PATH entries since pane commands may not source shell profiles

@@ -235,7 +235,7 @@ struct TeamCreationView: View {
                     Text("Headless").tag("headless")
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 160)
+                .frame(width: 240)
             }
             .onChange(of: executionMode) { _ in
                 if executionMode == "headless" {

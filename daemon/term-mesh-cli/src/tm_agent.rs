@@ -1456,6 +1456,27 @@ fn run_delegate_result(
     });
     if let Ok(v) = rpc_call(sock, "team.delegate", delegate_params) {
         if v["ok"].as_bool().unwrap_or(false) {
+            // Check if text was actually delivered to the agent's terminal
+            let text_delivered = v["result"]["text_delivered"].as_bool().unwrap_or(true);
+            if !text_delivered {
+                // Server-side retry already failed; try one more CLI-side retry via team.send
+                // Re-format with task metadata so the agent gets proper [TASK_ID] prefix
+                eprintln!("  Warning: text not delivered to agent, retrying via team.send...");
+                let task_ref = &v["result"]["task"];
+                let instruction = format_task_instruction(sock, team, task_ref, text, no_report);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let retry = rpc_call(sock, "team.send", json!({
+                    "team_name": team, "agent_name": target,
+                    "text": format!("{instruction}\n"),
+                }));
+                if let Ok(ref rv) = retry {
+                    if rv["ok"].as_bool().unwrap_or(false) {
+                        eprintln!("  Retry succeeded.");
+                    } else {
+                        eprintln!("  Warning: retry also failed — task created but text may not have been delivered.");
+                    }
+                }
+            }
             return Ok(v);
         }
     }
@@ -1481,13 +1502,27 @@ fn run_delegate_result(
     }
 
     let instruction = format_task_instruction(sock, team, task, text, no_report);
+    let send_text = format!("{instruction}\n");
     let sent = rpc_call(sock, "team.send", json!({
         "team_name": team, "agent_name": target,
-        "text": format!("{instruction}\n"),
+        "text": &send_text,
     })).map_err(|e| format!("team.send: {e}"))?;
 
     if !sent["ok"].as_bool().unwrap_or(false) {
-        return Err(format!("team.send failed: {}", pretty(&sent)));
+        // Retry once after 500ms — task is already created, so we must not abandon it
+        eprintln!("  Warning: team.send failed, retrying in 500ms...");
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let retry = rpc_call(sock, "team.send", json!({
+            "team_name": team, "agent_name": target,
+            "text": &send_text,
+        }));
+        match retry {
+            Ok(ref rv) if rv["ok"].as_bool().unwrap_or(false) => {
+                eprintln!("  Retry succeeded.");
+                return Ok(json!({ "task": task, "send": rv }));
+            }
+            _ => return Err(format!("team.send failed after retry: {}", pretty(&sent))),
+        }
     }
 
     Ok(json!({ "task": task, "send": sent }))

@@ -2095,14 +2095,24 @@ class TerminalController {
         guard let text = params["text"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing text")
         }
-        let success = await MainActor.run {
+        var success = await MainActor.run {
             guard let tabManager = self.tabManager else { return false }
             return TeamOrchestrator.shared.sendToAgent(
                 teamName: teamName, agentName: agentName, text: text, tabManager: tabManager
             )
         }
+        // Retry once if panel routing failed
+        if !success {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            success = await MainActor.run {
+                guard let tabManager = self.tabManager else { return false }
+                return TeamOrchestrator.shared.sendToAgent(
+                    teamName: teamName, agentName: agentName, text: text, tabManager: tabManager
+                )
+            }
+        }
         return success
-            ? v2Ok(id: id, result: ["sent": true, "team_name": teamName, "agent_name": agentName])
+            ? v2Ok(id: id, result: ["sent": true, "text_delivered": true, "team_name": teamName, "agent_name": agentName])
             : v2Error(id: id, code: "not_found", message: "Agent or team not found")
     }
 
@@ -2546,7 +2556,7 @@ class TerminalController {
         let store = TeamDataStore.shared
 
         // Create task + send instruction on MainActor (sendToAgent requires main thread)
-        let task: TeamOrchestrator.TeamTask? = await MainActor.run {
+        let delegateResult: TeamOrchestrator.DelegateResult? = await MainActor.run {
             guard let tabManager = self.tabManager else { return nil }
             return TeamOrchestrator.shared.delegateToAgent(
                 teamName: teamName,
@@ -2558,10 +2568,34 @@ class TerminalController {
             )
         }
 
-        guard let task else {
+        guard let delegateResult else {
             return v2Error(id: id, code: "internal_error", message: "Task creation failed for agent '\(agentName)'")
         }
-        return v2Ok(id: id, result: ["task": store.taskDictionary(task), "sent": true])
+
+        // Retry text delivery if initial send failed (panel routing race)
+        var textDelivered = delegateResult.textDelivered
+        if !textDelivered {
+            #if DEBUG
+            dlog("[asyncTeamDelegate] initial send failed for \(agentName), retrying in 500ms")
+            #endif
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            textDelivered = await MainActor.run {
+                guard let tabManager = self.tabManager else { return false }
+                return TeamOrchestrator.shared.sendToAgent(
+                    teamName: teamName, agentName: agentName,
+                    text: delegateResult.instruction + "\n", tabManager: tabManager
+                )
+            }
+            #if DEBUG
+            dlog("[asyncTeamDelegate] retry result for \(agentName): \(textDelivered)")
+            #endif
+        }
+
+        return v2Ok(id: id, result: [
+            "task": store.taskDictionary(delegateResult.task),
+            "sent": true,
+            "text_delivered": textDelivered,
+        ])
     }
 
     // MARK: - V2 Team Data Dispatch (Approach C: Dual Queue)

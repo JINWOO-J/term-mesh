@@ -1391,6 +1391,14 @@ final class TeamOrchestrator: ObservableObject {
         return dispatched
     }
 
+    /// Result of a delegate operation, containing both the task and delivery status.
+    struct DelegateResult {
+        let task: TeamTask
+        let textDelivered: Bool
+        /// Pre-formatted instruction text for retry (avoids re-calling private formatter).
+        let instruction: String
+    }
+
     /// Unified delegate: atomically create a task in TeamDataStore and dispatch the
     /// formatted instruction to the agent. Mirrors the `tm-agent delegate` two-step
     /// logic (team.task.create + team.send) in a single atomic call.
@@ -1403,7 +1411,7 @@ final class TeamOrchestrator: ObservableObject {
         taskTitle: String? = nil,
         priority: Int? = nil,
         tabManager: TabManager
-    ) -> TeamTask? {
+    ) -> DelegateResult? {
         let title = taskTitle?.nilIfBlank ?? String(text.prefix(80))
         guard let task = TeamDataStore.shared.createTask(
             teamName: teamName,
@@ -1412,8 +1420,8 @@ final class TeamOrchestrator: ObservableObject {
             priority: priority ?? 2
         ) else { return nil }
         let instruction = formatDelegateInstruction(task: task, text: text)
-        _ = sendToAgent(teamName: teamName, agentName: agentName, text: instruction + "\n", tabManager: tabManager)
-        return task
+        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction + "\n", tabManager: tabManager)
+        return DelegateResult(task: task, textDelivered: delivered, instruction: instruction)
     }
 
     private func formatDelegateInstruction(task: TeamTask, text: String) -> String {

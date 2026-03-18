@@ -136,14 +136,22 @@ impl HeadlessManager {
             id, params.cli, params.model, params.working_directory
         );
 
-        let mut child = Command::new(&cmd.program)
+        let mut command = Command::new(&cmd.program);
+        command
             .args(&cmd.args)
             .envs(cmd.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .current_dir(&params.working_directory)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+
+        // Remove env vars that would interfere with the subprocess
+        for key in &cmd.env_remove {
+            command.env_remove(key);
+        }
+
+        let mut child = command
             .spawn()
             .map_err(|e| format!("failed to spawn '{}': {e}", cmd.program))?;
 

@@ -5,6 +5,8 @@ pub struct CliCommand {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Environment variables to remove from the child process.
+    pub env_remove: Vec<String>,
 }
 
 /// Build the CLI command for a Claude Code agent in stream-json mode.
@@ -36,10 +38,17 @@ pub fn build_claude_command(
         ("TERMMESH_HEADLESS".into(), "1".to_string()),
     ];
 
+    // Remove env vars that cause nested-session detection in Claude Code
+    let env_remove = vec![
+        "CLAUDECODE".into(),
+        "CLAUDE_CODE_ENTRYPOINT".into(),
+    ];
+
     CliCommand {
         program: claude_path,
         args,
         env,
+        env_remove,
     }
 }
 

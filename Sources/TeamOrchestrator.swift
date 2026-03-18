@@ -617,6 +617,7 @@ final class TeamOrchestrator: ObservableObject {
                 "working_directory": workingDirectory,
                 "leader_session_id": leaderSessionId,
                 "agents": agentSpecs,
+                "app_socket_path": SocketControlSettings.socketPath(),
             ]
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }

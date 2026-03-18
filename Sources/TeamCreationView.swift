@@ -214,7 +214,7 @@ struct TeamCreationView: View {
                         Text("\(cli.capitalized) (Auto)").tag(cli)
                     }
                 }
-                .frame(width: 180)
+                .fixedSize()
 
                 if leaderMode != "repl" {
                     Picker("", selection: $leaderModel) {
@@ -222,7 +222,7 @@ struct TeamCreationView: View {
                             Text(m).tag(m)
                         }
                     }
-                    .frame(width: 130)
+                    .fixedSize()
                 }
             }
 
@@ -235,7 +235,6 @@ struct TeamCreationView: View {
                     Text("Headless").tag("headless")
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 240)
             }
             .onChange(of: executionMode) { _ in
                 if executionMode == "headless" {
@@ -266,7 +265,6 @@ struct TeamCreationView: View {
                     Text("Isolated").tag("isolated")
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 240)
             }
             .onChange(of: worktreeMode) { _ in
                 showDaemonWarning = worktreeMode != "off" && !TermMeshDaemon.shared.daemonStatus().connected

@@ -1555,32 +1555,23 @@ final class TeamOrchestrator: ObservableObject {
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
         guard !trimmed.isEmpty else { return true }
 
-        // Send text and Enter via DispatchQueue.main (GCD) instead of
-        // RunLoop timers. GCD asyncAfter is more reliable under heavy
-        // main-thread load from multiple panels. Both text and Enter go
-        // through main thread to ensure AppKit thread safety and ordering.
-        //
-        // TUI apps (Claude Code) need a gap between text input and Return
-        // to process the text into their input buffer.
-        DispatchQueue.main.async {
-            panel.sendInputText(trimmed)
-        }
-
-        // Primary Enter — use STRONG reference [panel] to prevent deallocation
-        // during GCD scheduling under high concurrent load (10+ agents).
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay) { [panel] in
-            panel.sendInputText("\n")
+        // Hybrid approach: sendIMEText for atomic text+Enter (PRESS+RELEASE pairs),
+        // plus a safety Enter retry in case the first one is missed.
+        // sendIMEText eliminates the 100ms enterDelay by sending text and Return
+        // synchronously with proper key state tracking.
+        DispatchQueue.main.async { [panel] in
+            panel.sendIMEText(trimmed, withReturn: true)
             #if DEBUG
-            dlog("[team.sendTextToPanel.enter1] panelId=\(panelId.uuidString.prefix(8)) delay=\(enterDelay)")
+            dlog("[team.sendTextToPanel.ime] panelId=\(panelId.uuidString.prefix(8)) textLen=\(trimmed.count)")
             #endif
         }
 
         // Safety retry: if primary Enter was missed (e.g. TUI was busy),
         // send another Enter later. Double-Enter on an idle prompt is harmless.
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay + 0.25) { [panel] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [panel] in
             panel.sendInputText("\n")
             #if DEBUG
-            dlog("[team.sendTextToPanel.enter2] panelId=\(panelId.uuidString.prefix(8)) retry")
+            dlog("[team.sendTextToPanel.retryEnter] panelId=\(panelId.uuidString.prefix(8))")
             #endif
         }
 

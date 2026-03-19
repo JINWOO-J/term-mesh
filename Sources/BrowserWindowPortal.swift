@@ -317,6 +317,17 @@ final class WindowBrowserSlotView: NSView {
     required init?(coder: NSCoder) {
         nil
     }
+
+    // Guarantee masksToBounds regardless of when AppKit creates the backing layer.
+    // In AppKit, `layer` can be nil at init time (before the view joins the hierarchy),
+    // so the `layer?.masksToBounds = true` in init may silently no-op. Overriding
+    // makeBackingLayer ensures the layer clips from the moment it exists, preventing
+    // WKWebView compositing layers from painting outside the portal container on zoom.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        return layer
+    }
 }
 
 @MainActor
@@ -794,7 +805,7 @@ final class WindowBrowserPortal: NSObject {
         }
     }
 
-    private func synchronizeWebView(withId webViewId: ObjectIdentifier, source: String) {
+    fileprivate func synchronizeWebView(withId webViewId: ObjectIdentifier, source: String) {
         guard ensureInstalled() else { return }
         guard let entry = entriesByWebViewId[webViewId] else { return }
         guard let webView = entry.webView else {
@@ -1193,6 +1204,16 @@ enum BrowserWindowPortalRegistry {
         guard let windowId = webViewToWindowId[webViewId],
               let portal = portalsByWindowId[windowId] else { return }
         portal.updateEntryVisibility(forWebViewId: webViewId, visibleInUI: visibleInUI, zPriority: zPriority)
+    }
+
+    /// Re-synchronize a specific web view's portal frame.
+    /// Called after operations that may shift the web view frame (e.g. pageZoom changes)
+    /// without triggering an anchor geometry callback.
+    static func synchronizeForWebView(_ webView: WKWebView) {
+        let webViewId = ObjectIdentifier(webView)
+        guard let windowId = webViewToWindowId[webViewId],
+              let portal = portalsByWindowId[windowId] else { return }
+        portal.synchronizeWebView(withId: webViewId, source: "pageZoom")
     }
 
     static func detach(webView: WKWebView) {

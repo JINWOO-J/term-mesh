@@ -2336,6 +2336,13 @@ private extension BrowserPanel {
             return false
         }
         webView.pageZoom = clamped
+        // WebKit may internally adjust compositing layers after pageZoom changes.
+        // Trigger a deferred portal sync so the container frame normalization
+        // (frameExtendsOutsideBounds check) runs and clips any overflow.
+        let wv = webView
+        DispatchQueue.main.async {
+            BrowserWindowPortalRegistry.synchronizeForWebView(wv)
+        }
         return true
     }
 

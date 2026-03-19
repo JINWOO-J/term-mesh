@@ -980,7 +980,44 @@ final class TeamOrchestrator: ObservableObject {
             }
         }
 
+        // Auto-warmup: trigger each agent's first API call to warm Anthropic prompt cache.
+        // Cold API RTT ~700-900ms → hot ~200-300ms after first call. 15s delay allows
+        // Claude Code CLI to fully initialize before sending the warmup task.
+        scheduleAutoWarmup(team: team, tabManager: tabManager)
+
         return team
+    }
+
+    /// Send a lightweight "pong" task to each agent after a delay, warming the Anthropic prompt cache.
+    /// This reduces first-real-task latency from ~10s (cold) to ~1.2s (hot cache).
+    private func scheduleAutoWarmup(team: Team, tabManager: TabManager) {
+        let warmupDelay: TimeInterval = 15.0
+        let teamName = team.id
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + warmupDelay) { [weak self] in
+            guard let self = self, self.teams[teamName] != nil else { return }
+
+            // Resolve tabManager at execution time (original ref may be stale after 15s)
+            let currentTabManager = self.resolveTabManager(teamName: teamName) ?? tabManager
+
+            var sent = 0
+            for agent in team.agents {
+                let result = self.delegateToAgent(
+                    teamName: teamName,
+                    agentName: agent.name,
+                    text: "Reply with exactly one word: pong",
+                    taskTitle: "warmup-ping",
+                    priority: 3,
+                    tabManager: currentTabManager
+                )
+                if result?.textDelivered == true { sent += 1 }
+                #if DEBUG
+                dlog("[team] auto-warmup \(result?.textDelivered == true ? "sent" : "FAILED") to \(agent.name) in team '\(teamName)'")
+                #endif
+            }
+
+            Logger.team.info("auto-warmup: \(sent)/\(team.agents.count) agent(s) warmed in team '\(teamName, privacy: .public)'")
+        }
     }
 
     /// Find the leader script for the given mode.

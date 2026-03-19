@@ -144,10 +144,10 @@ final class TerminalPanel: Panel, ObservableObject {
     }
 
     func close() {
-        // Unbind agent session if bound (session stays alive in daemon)
+        // Terminate agent session if bound (kills agent process + unbinds panel)
         if let sessionId = agentSessionId {
             DispatchQueue.global(qos: .utility).async {
-                let _ = self.daemon.unbindAgentPanel(sessionId: sessionId)
+                let _ = self.daemon.terminateAgent(id: sessionId, force: false)
             }
         }
         // The surface will be cleaned up by its deinit

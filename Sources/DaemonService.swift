@@ -46,6 +46,7 @@ protocol DaemonService: AnyObject {
     func getAgent(id: String) -> AgentSessionInfo?
     func bindAgentPanel(sessionId: String, panelId: String) -> Bool
     func unbindAgentPanel(sessionId: String) -> Bool
+    func terminateAgent(id: String, force: Bool) -> Bool
 
     // MARK: - Dashboard
     func setAutoStop(enabled: Bool)

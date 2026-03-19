@@ -15,6 +15,8 @@ struct IMETextEditor: NSViewRepresentable {
     var onComposingChanged: ((Bool) -> Void)? = nil
     /// History entries for ghost suggestion prefix matching.
     var history: [String] = []
+    /// Claude slash commands for ghost suggestion when text starts with "/".
+    var slashCommands: [String] = []
     /// Whether the fuzzy history picker overlay is visible.
     var isHistoryPickerOpen: Bool = false
     // M1: History picker callbacks
@@ -71,6 +73,8 @@ struct IMETextEditor: NSViewRepresentable {
         textView.composingHandler = onComposingChanged
         // Q2: ghost suggestion source
         textView.historySource = history
+        // Slash command ghost source
+        textView.slashCommands = slashCommands
         // M1: picker state and callbacks
         textView.isHistoryPickerOpen = isHistoryPickerOpen
         textView.historyPickerToggleHandler = onHistoryPickerToggle
@@ -122,6 +126,8 @@ struct IMETextEditor: NSViewRepresentable {
         textView.composingHandler = onComposingChanged
         // Q2: keep history source in sync for ghost suggestions
         textView.historySource = history
+        // Slash command ghost source
+        textView.slashCommands = slashCommands
         // M1: sync picker open state and callbacks
         textView.isHistoryPickerOpen = isHistoryPickerOpen
         textView.historyPickerToggleHandler = onHistoryPickerToggle

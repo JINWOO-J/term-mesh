@@ -55,6 +55,11 @@ final class IMETextView: NSTextView {
         didSet { updateGhostSuggestion() }
     }
 
+    /// Claude slash command list for ghost suggestions (text starting with /).
+    var slashCommands: [String] = [] {
+        didSet { updateGhostSuggestion() }
+    }
+
     // MARK: - M1: History picker routing
 
     /// True when the fuzzy history picker overlay is visible; routes Up/Down/Enter/Esc to picker.
@@ -421,6 +426,8 @@ final class IMETextView: NSTextView {
     private static let syntaxPatterns: [(NSRegularExpression, NSColor)] = {
         var patterns: [(NSRegularExpression, NSColor)] = []
         let defs: [(String, NSColor)] = [
+            // Slash commands: /command-name (highest priority — before strings/comments)
+            (#"(?:^|(?<=\s))/[A-Za-z][A-Za-z0-9_:-]*"#, NSColor.systemTeal),
             // Double-quoted strings (handles \" escapes)
             (#""(?:[^"\\]|\\.)*""#,             .systemYellow),
             // Single-quoted strings
@@ -608,6 +615,17 @@ final class IMETextView: NSTextView {
         let currentText = string
         // Only suggest on single-line text to avoid layout complexity
         guard !currentText.isEmpty, !currentText.contains("\n") else { clearGhost(); return }
+
+        // Slash commands take priority when text starts with "/"
+        if currentText.hasPrefix("/") {
+            let lower = currentText.lowercased()
+            if let match = slashCommands.first(where: {
+                $0.lowercased().hasPrefix(lower) && $0.count > currentText.count
+            }) {
+                ghostSuggestion = String(match.dropFirst(currentText.count))
+                return
+            }
+        }
 
         let lower = currentText.lowercased()
         if let match = historySource.first(where: {

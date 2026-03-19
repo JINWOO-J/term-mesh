@@ -129,3 +129,49 @@ enum ShellHistory {
         return entries
     }
 }
+
+// MARK: - Claude Code slash commands
+
+enum SlashCommands {
+    /// Built-in Claude Code slash commands (from v2.1.72)
+    static let builtinCommands: [String] = [
+        "/add-dir", "/agents", "/btw", "/chrome", "/clear", "/color", "/compact",
+        "/config", "/context", "/copy", "/cost", "/desktop", "/diff", "/doctor",
+        "/effort", "/exit", "/export", "/extra-usage", "/fast", "/feedback",
+        "/branch", "/help", "/hooks", "/ide", "/init", "/insights",
+        "/install-github-app", "/install-slack-app", "/keybindings",
+        "/login", "/logout", "/mcp", "/memory", "/mobile", "/model", "/passes",
+        "/permissions", "/plan", "/plugin", "/pr-comments", "/privacy-settings",
+        "/release-notes", "/reload-plugins", "/remote-control", "/remote-env",
+        "/rename", "/resume", "/review", "/rewind", "/sandbox", "/security-review",
+        "/skills", "/stats", "/status", "/statusline", "/stickers", "/tasks",
+        "/terminal-setup", "/theme", "/upgrade", "/usage", "/vim", "/voice",
+        // Common aliases
+        "/quit", "/reset", "/new", "/settings", "/app", "/bug", "/fork",
+        "/continue", "/checkpoint", "/allowed-tools", "/rc", "/ios", "/android",
+        // Bundled skills
+        "/batch", "/claude-api", "/debug", "/loop", "/simplify",
+    ]
+
+    /// Loads built-in commands merged with custom commands from .claude/commands/ directories.
+    static func loadAll() -> [String] {
+        var commands = builtinCommands
+        // Project-local commands
+        let projectDir = FileManager.default.currentDirectoryPath + "/.claude/commands"
+        commands += scanCommandDir(projectDir)
+        // User global commands
+        let userDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/commands").path
+        commands += scanCommandDir(userDir)
+        // Dedupe and sort
+        return Array(Set(commands)).sorted()
+    }
+
+    private static func scanCommandDir(_ path: String) -> [String] {
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: path) else { return [] }
+        return files.compactMap { file -> String? in
+            guard file.hasSuffix(".md") else { return nil }
+            return "/" + file.replacingOccurrences(of: ".md", with: "")
+        }
+    }
+}

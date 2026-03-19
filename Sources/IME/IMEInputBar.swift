@@ -24,6 +24,7 @@ struct IMEInputBar: View {
 
     @State private var text: String = ""
     @State private var history: [String] = IMEHistory.load()   // Q4: fast sync init; merged async in .task
+    @State private var slashCommands: [String] = SlashCommands.loadAll()
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
     @State private var isComposing: Bool = false
@@ -44,7 +45,7 @@ struct IMEInputBar: View {
     private var feedbackColor: Color {
         switch feedbackState {
         case .none:    return .clear
-        case .success: return .green
+        case .success: return Color(red: 0.55, green: 0.45, blue: 0.95)
         case .failure: return .red
         }
     }
@@ -203,6 +204,7 @@ struct IMEInputBar: View {
                     onHistorySearch: historySearch,
                     onComposingChanged: { isComposing = $0 },
                     history: history,
+                    slashCommands: slashCommands,
                     isHistoryPickerOpen: showHistoryPicker,
                     onHistoryPickerToggle: {
                         showHistoryPicker.toggle()

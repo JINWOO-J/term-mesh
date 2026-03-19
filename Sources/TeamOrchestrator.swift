@@ -1618,22 +1618,35 @@ final class TeamOrchestrator: ObservableObject {
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
         guard !trimmed.isEmpty else { return true }
 
-        // Use sendIMEText for reliable text+Enter delivery:
-        // - Sends text with proper PRESS+RELEASE pairs (prevents key state ambiguity)
-        // - Sends Return synchronously after text (no GCD timing uncertainty)
-        // - Single atomic call eliminates the race condition where delayed Enter
-        //   via asyncAfter could be lost when the main queue is congested.
-        // Previous approach (sendInputText + asyncAfter Enter) caused Enter swallowing
-        // because sendInputText sends PRESS-only for text chars, creating key state
-        // ambiguity that could block the subsequent Enter key event.
-        DispatchQueue.main.async { [panel] in
-            panel.sendIMEText(trimmed, withReturn: true)
+        // Surface readiness check — if the underlying ghostty surface is nil,
+        // sendIMEText will silently drop the text+Enter. Detect this early and
+        // let the caller's retry logic handle it.
+        guard panel.surface.surface != nil else {
             #if DEBUG
-            dlog("[team.sendTextToPanel] IME sendText+Enter panelId=\(panelId.uuidString.prefix(8)) textLen=\(trimmed.count) text=\(trimmed.prefix(80).debugDescription)")
+            dlog("[team.sendTextToPanel] surface nil for panelId=\(panelId.uuidString.prefix(8)), returning false for retry")
             #endif
+            Logger.team.warning("[sendTextToPanel] surface nil for panel \(panelId.uuidString.prefix(8), privacy: .public) (attempt \(retryCount + 1))")
+            if retryCount < 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    _ = self?.sendTextToPanel(
+                        workspaceId: workspaceId, panelId: panelId, text: text,
+                        tabManager: tabManager, retryCount: retryCount + 1
+                    )
+                }
+            }
+            return false
         }
 
-        return true
+        // Send synchronously — we are already on the main thread (called via
+        // MainActor.run → delegateToAgent → sendToAgent → here). The previous
+        // DispatchQueue.main.async dispatch was unnecessary and created a race
+        // window where the surface could become nil between dispatch and execution,
+        // while also preventing the return value from propagating to the retry logic.
+        let delivered = panel.sendIMEText(trimmed, withReturn: true)
+        #if DEBUG
+        dlog("[team.sendTextToPanel] IME sendText+Enter panelId=\(panelId.uuidString.prefix(8)) textLen=\(trimmed.count) delivered=\(delivered) text=\(trimmed.prefix(80).debugDescription)")
+        #endif
+        return delivered
     }
 
     /// Broadcast text to all agents in a team.

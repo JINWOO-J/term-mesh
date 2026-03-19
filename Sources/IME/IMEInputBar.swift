@@ -23,7 +23,7 @@ struct IMEInputBar: View {
     var onSendKey: ((_ keycode: UInt16, _ mods: UInt32) -> Void)? = nil
 
     @State private var text: String = ""
-    @State private var history: [String] = []   // Q4: loaded async in .task
+    @State private var history: [String] = IMEHistory.load()   // Q4: fast sync init; merged async in .task
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
     @State private var isComposing: Bool = false

@@ -826,8 +826,15 @@ final class TeamOrchestrator: ObservableObject {
                 shellCommand = "\(agentCommand); exec $SHELL"
             }
             // Select the right environment: non-claude agents don't need CLAUDECODE
+            // Add window and workspace routing so agent team.create calls route correctly
+            let windowId = AppDelegate.shared?.windowId(for: tabManager)?.uuidString ?? ""
+            var agentSpecificEnv: [String: String] = ["TERMMESH_AGENT_NAME": agent.name]
+            if !windowId.isEmpty {
+                agentSpecificEnv["TERMMESH_WINDOW_ID"] = windowId
+            }
+            agentSpecificEnv["TERMMESH_WORKSPACE_ID"] = workspace.id.uuidString
             let paneEnv = (agentCli == "claude" ? claudeAgentEnv : kiroAgentEnv)
-                .merging(["TERMMESH_AGENT_NAME": agent.name]) { _, new in new }
+                .merging(agentSpecificEnv) { _, new in new }
 
             // Grid layout: agents are assigned to cells in column-major order.
             // col = index % numCols, row = index / numCols

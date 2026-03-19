@@ -175,6 +175,13 @@ final class TerminalPanel: Panel, ObservableObject {
         surface.sendInputText(text)
     }
 
+    /// Send text via the IME-style path (PRESS+RELEASE pairs) for reliable key state tracking.
+    /// Unlike sendInputText which sends PRESS-only for text chars, this sends proper
+    /// PRESS+RELEASE pairs that prevent key state ambiguity in TUI apps.
+    func sendIMEText(_ text: String, withReturn: Bool = true) {
+        surface.sendIMEText(text, withReturn: withReturn)
+    }
+
     /// Send a key press directly through the Ghostty surface API.
     /// Works even when the panel is not in the active tab (no window required).
     func sendSurfaceKeyPress(keycode: UInt16) {

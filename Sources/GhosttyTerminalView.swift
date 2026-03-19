@@ -938,6 +938,81 @@ final class TerminalSurface: Identifiable, ObservableObject {
         flush()
     }
 
+    /// Send text via IME-style PRESS+RELEASE pairs for reliable key state tracking.
+    /// Unlike sendInputText which sends PRESS-only for text chars (causing key state
+    /// ambiguity), this sends proper PRESS+RELEASE pairs per chunk, then an atomic
+    /// Return key event — all synchronously within one call.
+    func sendIMEText(_ text: String, withReturn: Bool = true) {
+        guard let surface = surface else { return }
+
+        if !text.isEmpty {
+            // Chunk long text at UTF-8 safe boundaries
+            let maxBytes = 4096
+            var chunks: [String] = []
+            if text.utf8.count <= maxBytes {
+                chunks = [text]
+            } else {
+                var current = ""
+                var currentBytes = 0
+                for char in text {
+                    let charBytes = char.utf8.count
+                    if currentBytes + charBytes > maxBytes {
+                        chunks.append(current)
+                        current = String(char)
+                        currentBytes = charBytes
+                    } else {
+                        current.append(char)
+                        currentBytes += charBytes
+                    }
+                }
+                if !current.isEmpty { chunks.append(current) }
+            }
+
+            for chunk in chunks {
+                // PRESS with text
+                chunk.withCString { ptr in
+                    var keyEvent = ghostty_input_key_s()
+                    keyEvent.action = GHOSTTY_ACTION_PRESS
+                    keyEvent.keycode = 0
+                    keyEvent.mods = GHOSTTY_MODS_NONE
+                    keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+                    keyEvent.unshifted_codepoint = 0
+                    keyEvent.text = ptr
+                    keyEvent.composing = false
+                    _ = ghostty_surface_key(surface, keyEvent)
+                }
+                // Matching RELEASE — TUI apps track key state
+                var releaseEvent = ghostty_input_key_s()
+                releaseEvent.action = GHOSTTY_ACTION_RELEASE
+                releaseEvent.keycode = 0
+                releaseEvent.mods = GHOSTTY_MODS_NONE
+                releaseEvent.consumed_mods = GHOSTTY_MODS_NONE
+                releaseEvent.unshifted_codepoint = 0
+                releaseEvent.text = nil
+                releaseEvent.composing = false
+                _ = ghostty_surface_key(surface, releaseEvent)
+            }
+        }
+
+        // Send Return key (PRESS+RELEASE)
+        if withReturn {
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 36 // kVK_Return
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.unshifted_codepoint = 0
+            keyEvent.composing = false
+            "\r".withCString { ptr in
+                keyEvent.text = ptr
+                _ = ghostty_surface_key(surface, keyEvent)
+            }
+            keyEvent.action = GHOSTTY_ACTION_RELEASE
+            keyEvent.text = nil
+            _ = ghostty_surface_key(surface, keyEvent)
+        }
+    }
+
     func requestBackgroundSurfaceStartIfNeeded() {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in

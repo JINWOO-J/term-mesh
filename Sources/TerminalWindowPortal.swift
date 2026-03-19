@@ -741,6 +741,13 @@ final class WindowTerminalPortal: NSObject {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
         }
 
+        // Z-order contract: terminal portal must render below browser portal.
+        // This mirrors the enforcement in BrowserWindowPortal.ensureInstalled().
+        if let browserHost = container.subviews.first(where: { $0 is WindowBrowserHostView }),
+           Self.isView(hostView, above: browserHost, in: container) {
+            container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+        }
+
         // Keep the drag/mouse forwarding overlay above portal-hosted terminal views.
         if let overlay = objc_getAssociatedObject(window, &fileDropOverlayKey) as? NSView,
            overlay.superview === container,

@@ -461,6 +461,15 @@ final class WindowBrowserPortal: NSObject {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
         }
 
+        // Z-order contract: browser portal must always render above terminal portal.
+        // Both portals install .above the same reference view, so the last to run wins.
+        // Explicitly enforce browser > terminal ordering to prevent Metal terminal surfaces
+        // from painting over browser WebView content (visible during pane zoom).
+        if let terminalHost = container.subviews.first(where: { $0 is WindowTerminalHostView }),
+           !Self.isView(hostView, above: terminalHost, in: container) {
+            container.addSubview(hostView, positioned: .above, relativeTo: terminalHost)
+        }
+
         synchronizeHostFrameToReference()
         return true
     }

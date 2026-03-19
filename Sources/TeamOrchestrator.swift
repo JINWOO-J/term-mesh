@@ -1388,10 +1388,10 @@ final class TeamOrchestrator: ObservableObject {
     }
 
     /// Send text to a specific agent in a team.
-    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.10) -> Bool {
+    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager) -> Bool {
         guard let team = teams[teamName] else { return false }
         guard let agent = team.agents.first(where: { $0.name == agentName }) else { return false }
-        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager, enterDelay: enterDelay)
+        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager)
     }
 
     func sendToLeader(teamName: String, text: String, tabManager: TabManager) -> Bool {
@@ -1582,7 +1582,7 @@ final class TeamOrchestrator: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
-    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.10, retryCount: Int = 0) -> Bool {
+    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, retryCount: Int = 0) -> Bool {
         // Try the provided tabManager first, then fall back to global surface lookup
         // for cross-window scenarios (e.g. broadcast when agents are in a different window).
         let panel: TerminalPanel
@@ -1609,7 +1609,7 @@ final class TeamOrchestrator: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     _ = self?.sendTextToPanel(
                         workspaceId: workspaceId, panelId: panelId, text: text,
-                        tabManager: tabManager, enterDelay: enterDelay, retryCount: retryCount + 1
+                        tabManager: tabManager, retryCount: retryCount + 1
                     )
                 }
             }
@@ -1618,48 +1618,45 @@ final class TeamOrchestrator: ObservableObject {
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
         guard !trimmed.isEmpty else { return true }
 
-        // Send text and Enter via DispatchQueue.main (GCD).
-        // TUI apps (Claude Code) need a gap between text input and Return
-        // to process the text into their input buffer.
-        DispatchQueue.main.async {
-            panel.sendInputText(trimmed)
-        }
-
-        // Primary Enter — use STRONG reference [panel] to prevent deallocation
-        // during GCD scheduling under high concurrent load (10+ agents).
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay) { [panel] in
-            panel.sendInputText("\n")
+        // Surface readiness check — if the underlying ghostty surface is nil,
+        // sendIMEText will silently drop the text+Enter. Detect this early and
+        // let the caller's retry logic handle it.
+        guard panel.surface.surface != nil else {
             #if DEBUG
-            dlog("[team.sendTextToPanel.enter1] panelId=\(panelId.uuidString.prefix(8)) delay=\(enterDelay)")
+            dlog("[team.sendTextToPanel] surface nil for panelId=\(panelId.uuidString.prefix(8)), returning false for retry")
             #endif
+            Logger.team.warning("[sendTextToPanel] surface nil for panel \(panelId.uuidString.prefix(8), privacy: .public) (attempt \(retryCount + 1))")
+            if retryCount < 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    _ = self?.sendTextToPanel(
+                        workspaceId: workspaceId, panelId: panelId, text: text,
+                        tabManager: tabManager, retryCount: retryCount + 1
+                    )
+                }
+            }
+            return false
         }
 
-        // Safety retry: if primary Enter was missed (e.g. TUI was busy),
-        // send another Enter later. Double-Enter on an idle prompt is harmless.
-        DispatchQueue.main.asyncAfter(deadline: .now() + enterDelay + 0.10) { [panel] in
-            panel.sendInputText("\n")
-            #if DEBUG
-            dlog("[team.sendTextToPanel.enter2] panelId=\(panelId.uuidString.prefix(8)) retry")
-            #endif
-        }
-
+        // Send synchronously — we are already on the main thread (called via
+        // MainActor.run → delegateToAgent → sendToAgent → here). The previous
+        // DispatchQueue.main.async dispatch was unnecessary and created a race
+        // window where the surface could become nil between dispatch and execution,
+        // while also preventing the return value from propagating to the retry logic.
+        let delivered = panel.sendIMEText(trimmed, withReturn: true)
         #if DEBUG
-        dlog("[team.sendTextToPanel] sendText textLen=\(trimmed.count) enterDelay=\(enterDelay) text=\(trimmed.prefix(80).debugDescription)")
+        dlog("[team.sendTextToPanel] IME sendText+Enter panelId=\(panelId.uuidString.prefix(8)) textLen=\(trimmed.count) delivered=\(delivered) text=\(trimmed.prefix(80).debugDescription)")
         #endif
-        return true
+        return delivered
     }
 
     /// Broadcast text to all agents in a team.
-    /// Staggers Enter delivery to prevent concurrent panel deallocation under high load.
-    /// Each agent gets a primary Enter at delay + (index * 20ms), plus a retry 250ms later.
+    /// Uses sendIMEText for atomic text+Enter delivery — no staggering needed since
+    /// each sendIMEText call is synchronous within its GCD block.
     func broadcast(teamName: String, text: String, tabManager: TabManager) -> Int {
         guard let team = teams[teamName] else { return 0 }
         var count = 0
-        for (index, agent) in team.agents.enumerated() {
-            // Base delay 100ms; stagger by 20ms per agent to spread out GCD queue load.
-            // 10 agents = 280ms total (was 600ms). 20ms is the safe minimum interval.
-            let enterDelay = 0.10 + Double(index) * 0.02
-            if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager, enterDelay: enterDelay) {
+        for agent in team.agents {
+            if sendToAgent(teamName: teamName, agentName: agent.name, text: text, tabManager: tabManager) {
                 count += 1
             }
         }

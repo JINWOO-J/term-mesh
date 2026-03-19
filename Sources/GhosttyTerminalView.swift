@@ -942,8 +942,14 @@ final class TerminalSurface: Identifiable, ObservableObject {
     /// Unlike sendInputText which sends PRESS-only for text chars (causing key state
     /// ambiguity), this sends proper PRESS+RELEASE pairs per chunk, then an atomic
     /// Return key event — all synchronously within one call.
-    func sendIMEText(_ text: String, withReturn: Bool = true) {
-        guard let surface = surface else { return }
+    @discardableResult
+    func sendIMEText(_ text: String, withReturn: Bool = true) -> Bool {
+        guard let surface = surface else {
+            #if DEBUG
+            dlog("ime.send.fail reason=surface_nil")
+            #endif
+            return false
+        }
 
         if !text.isEmpty {
             // Chunk long text at UTF-8 safe boundaries
@@ -1011,6 +1017,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             keyEvent.text = nil
             _ = ghostty_surface_key(surface, keyEvent)
         }
+        return true
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {

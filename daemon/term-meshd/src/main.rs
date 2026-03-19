@@ -18,6 +18,13 @@ static START_TIME: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Handle --version before any subsystem init
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("term-meshd {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("term_meshd=debug".parse()?))
         .init();

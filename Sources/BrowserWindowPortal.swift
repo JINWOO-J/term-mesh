@@ -38,6 +38,15 @@ final class WindowBrowserHostView: NSView {
         }
     }
 
+    // Compositor-level z-order: browser portal (zPosition 200) always renders above terminal portal (zPosition 100).
+    // CALayer.zPosition survives NSView reordering, layout passes, and deferred portal sync races.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        layer.zPosition = 200
+        return layer
+    }
+
     override var isOpaque: Bool { false }
     private static let sidebarLeadingEdgeEpsilon: CGFloat = 1
     private static let minimumVisibleLeadingContentWidth: CGFloat = 24
@@ -356,6 +365,7 @@ final class WindowBrowserPortal: NSObject {
         super.init()
         hostView.wantsLayer = true
         hostView.layer?.masksToBounds = true
+        hostView.layer?.zPosition = 200  // best-effort early set; makeBackingLayer is the reliable path
         hostView.translatesAutoresizingMaskIntoConstraints = true
         hostView.autoresizingMask = []
         installGeometryObservers(for: window)

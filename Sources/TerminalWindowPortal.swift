@@ -43,6 +43,15 @@ final class WindowTerminalHostView: NSView {
         }
     }
 
+    // Compositor-level z-order: terminal portal (zPosition 100) always renders below browser portal (zPosition 200).
+    // CALayer.zPosition survives NSView reordering, layout passes, and deferred portal sync races.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        layer.zPosition = 100
+        return layer
+    }
+
     override var isOpaque: Bool { false }
     private static let sidebarLeadingEdgeEpsilon: CGFloat = 1
     private static let minimumVisibleLeadingContentWidth: CGFloat = 24
@@ -567,6 +576,7 @@ final class WindowTerminalPortal: NSObject {
         super.init()
         hostView.wantsLayer = true
         hostView.layer?.masksToBounds = true
+        hostView.layer?.zPosition = 100  // best-effort early set; makeBackingLayer is the reliable path
         hostView.postsFrameChangedNotifications = true
         hostView.postsBoundsChangedNotifications = true
         hostView.translatesAutoresizingMaskIntoConstraints = false
@@ -753,6 +763,12 @@ final class WindowTerminalPortal: NSObject {
            overlay.superview === container,
            !Self.isView(overlay, above: hostView, in: container) {
             container.addSubview(overlay, positioned: .above, relativeTo: hostView)
+        }
+        // Ensure file drop overlay renders above both portal hosts at compositor level.
+        if let overlay = objc_getAssociatedObject(window, &fileDropOverlayKey) as? NSView,
+           overlay.superview === container {
+            overlay.wantsLayer = true
+            overlay.layer?.zPosition = 300
         }
 
         synchronizeLayoutHierarchy()

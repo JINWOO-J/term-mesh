@@ -386,26 +386,24 @@ final class WindowBrowserPortal: NSObject {
                 self.scheduleExternalGeometrySynchronize()
             }
         })
-        // Fullscreen transitions change the window content view hierarchy (themeFrame / NSGlassEffectView),
-        // so the portal host must be re-installed and all web view frames re-synced after the animation
-        // completes. Without these observers, entering fullscreen and then zooming corrupts the web view
-        // layout because the portal container frame was never updated after the content view swap.
-        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
-            geometryObservers.append(center.addObserver(
-                forName: name,
-                object: window,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    // Force re-installation: the content view hierarchy changes on fullscreen toggle,
-                    // so installedContainerView / installedReferenceView may be stale.
-                    self.installedContainerView = nil
-                    self.installedReferenceView = nil
-                    self.scheduleExternalGeometrySynchronize()
-                }
-            })
-        }
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didEnterFullScreenNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
+        geometryObservers.append(center.addObserver(
+            forName: NSWindow.didExitFullScreenNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleExternalGeometrySynchronize()
+            }
+        })
     }
 
     private func removeGeometryObservers() {

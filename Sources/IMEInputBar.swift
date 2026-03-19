@@ -398,6 +398,7 @@ struct IMEInputBar: View {
                 }
                 helpSection("Terminal") {
                     helpRow("Esc", "Send Escape to terminal")
+                    helpRow("Tab", "Tab to terminal")
                     helpRow("⇧Tab", "Send Shift+Tab (accept)")
                     helpRow("⌥↑↓←→", "Arrow to terminal")
                     helpRow("⌥Tab", "Tab to terminal")
@@ -792,6 +793,11 @@ final class IMETextView: NSTextView {
         // Option+Tab → forward Meta+Tab to terminal (e.g. Claude thinking toggle)
         if event.keyCode == 48 && event.modifierFlags.contains(.option) && !hasMarkedText() {
             sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
+            return
+        }
+        // Plain Tab → forward to terminal (e.g. shell completion, Claude tab accept)
+        if event.keyCode == 48 && !event.modifierFlags.contains(.shift) && !event.modifierFlags.contains(.option) && !event.modifierFlags.contains(.command) && !hasMarkedText() {
+            sendKeyHandler?(event.keyCode, 0)
             return
         }
         // ArrowUp → history (when cursor is on first line and not composing IME)

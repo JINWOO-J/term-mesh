@@ -33,6 +33,9 @@ struct IMEInputBar: View {
     // M1: Fuzzy history picker state
     @State private var showHistoryPicker: Bool = false
     @State private var historyPickerSelection: Int = 0
+    // Slash command picker state
+    @State private var showSlashPicker: Bool = false
+    @State private var slashPickerSelection: Int = 0
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isFieldFocused: Bool
 
@@ -92,6 +95,17 @@ struct IMEInputBar: View {
             .sorted { $0.score > $1.score }
             .prefix(10)
         )
+    }
+
+    private var filteredSlashCommands: [String] {
+        guard showSlashPicker else { return [] }
+        let query = text.lowercased()
+        if query == "/" {
+            return Array(slashCommands.prefix(10))
+        }
+        return Array(slashCommands
+            .filter { $0.lowercased().hasPrefix(query) }
+            .prefix(10))
     }
 
     // MARK: - Actions
@@ -224,6 +238,22 @@ struct IMEInputBar: View {
                     onHistoryPickerCancel: {
                         showHistoryPicker = false
                         historyPickerSelection = 0
+                    },
+                    isSlashPickerOpen: showSlashPicker,
+                    onSlashPickerMove: { delta in
+                        let count = filteredSlashCommands.count
+                        guard count > 0 else { return }
+                        slashPickerSelection = (slashPickerSelection + delta + count) % count
+                    },
+                    onSlashPickerConfirm: {
+                        guard slashPickerSelection < filteredSlashCommands.count else { return }
+                        text = filteredSlashCommands[slashPickerSelection] + " "
+                        showSlashPicker = false
+                        slashPickerSelection = 0
+                    },
+                    onSlashPickerCancel: {
+                        showSlashPicker = false
+                        slashPickerSelection = 0
                     }
                 )
                 .focused($isFieldFocused)
@@ -279,6 +309,10 @@ struct IMEInputBar: View {
         .popover(isPresented: $showHistoryPicker, arrowEdge: .bottom) {
             historyPickerView
         }
+        // Slash command picker popover (appears above the bar)
+        .popover(isPresented: $showSlashPicker, arrowEdge: .bottom) {
+            slashCommandPickerView
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isFieldFocused = true
@@ -289,9 +323,21 @@ struct IMEInputBar: View {
             let loaded = await Task.detached { IMEHistory.loadMerged() }.value
             history = loaded
         }
-        // M1: reset picker selection when text changes
+        // M1: reset picker selection when text changes; auto-open slash picker
         .onChange(of: text) { _ in
             if showHistoryPicker { historyPickerSelection = 0 }
+            // Auto-trigger slash picker when text is a bare slash command prefix
+            let isSlashQuery = text.hasPrefix("/") && !text.contains(" ") && !text.contains("\n")
+            if isSlashQuery && !showSlashPicker {
+                showSlashPicker = true
+                showHistoryPicker = false
+                slashPickerSelection = 0
+            } else if !isSlashQuery && showSlashPicker {
+                showSlashPicker = false
+                slashPickerSelection = 0
+            } else if showSlashPicker {
+                slashPickerSelection = 0
+            }
         }
     }
 
@@ -437,6 +483,68 @@ struct IMEInputBar: View {
             }
         }
         .frame(width: 420)
+    }
+
+    // MARK: - Slash command picker popover content
+
+    private var slashCommandPickerView: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Slash Commands")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("↑↓ nav · Tab/⏎ select · Esc close")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+
+            Divider()
+
+            if filteredSlashCommands.isEmpty {
+                Text("No matching commands")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(filteredSlashCommands.enumerated()), id: \.offset) { i, cmd in
+                            Button(action: {
+                                text = cmd + " "
+                                showSlashPicker = false
+                                slashPickerSelection = 0
+                            }) {
+                                HStack(spacing: 6) {
+                                    Text(cmd)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    i == slashPickerSelection
+                                        ? Color.accentColor.opacity(0.2)
+                                        : Color.clear
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            if i < filteredSlashCommands.count - 1 {
+                                Divider().padding(.leading, 10)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+        }
+        .frame(width: 300)
     }
 
     private var keyboardHelpView: some View {

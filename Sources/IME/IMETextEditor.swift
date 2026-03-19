@@ -24,6 +24,11 @@ struct IMETextEditor: NSViewRepresentable {
     var onHistoryPickerMove: ((Int) -> Void)? = nil
     var onHistoryPickerConfirm: (() -> Void)? = nil
     var onHistoryPickerCancel: (() -> Void)? = nil
+    // Slash command picker
+    var isSlashPickerOpen: Bool = false
+    var onSlashPickerMove: ((Int) -> Void)? = nil
+    var onSlashPickerConfirm: (() -> Void)? = nil
+    var onSlashPickerCancel: (() -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator {
@@ -81,6 +86,11 @@ struct IMETextEditor: NSViewRepresentable {
         textView.historyPickerMoveHandler = onHistoryPickerMove
         textView.historyPickerConfirmHandler = onHistoryPickerConfirm
         textView.historyPickerCancelHandler = onHistoryPickerCancel
+        // Slash command picker state and callbacks
+        textView.isSlashPickerOpen = isSlashPickerOpen
+        textView.slashPickerMoveHandler = onSlashPickerMove
+        textView.slashPickerConfirmHandler = onSlashPickerConfirm
+        textView.slashPickerCancelHandler = onSlashPickerCancel
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
@@ -134,6 +144,11 @@ struct IMETextEditor: NSViewRepresentable {
         textView.historyPickerMoveHandler = onHistoryPickerMove
         textView.historyPickerConfirmHandler = onHistoryPickerConfirm
         textView.historyPickerCancelHandler = onHistoryPickerCancel
+        // Slash command picker state and callbacks
+        textView.isSlashPickerOpen = isSlashPickerOpen
+        textView.slashPickerMoveHandler = onSlashPickerMove
+        textView.slashPickerConfirmHandler = onSlashPickerConfirm
+        textView.slashPickerCancelHandler = onSlashPickerCancel
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {

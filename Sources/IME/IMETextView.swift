@@ -70,6 +70,15 @@ final class IMETextView: NSTextView {
     var historyPickerConfirmHandler: (() -> Void)?
     var historyPickerCancelHandler: (() -> Void)?
 
+    // MARK: - Slash command picker routing
+
+    /// True when the slash command picker is visible; takes priority over history picker.
+    var isSlashPickerOpen: Bool = false
+
+    var slashPickerMoveHandler: ((Int) -> Void)?
+    var slashPickerConfirmHandler: (() -> Void)?
+    var slashPickerCancelHandler: (() -> Void)?
+
     // MARK: - Focus activation
 
     override func mouseDown(with event: NSEvent) {
@@ -133,7 +142,9 @@ final class IMETextView: NSTextView {
 
         // Return key: picker confirm when open; else Cmd+Enter/Shift+Enter/plain Enter
         case VK.returnKey:
-            if isHistoryPickerOpen {
+            if isSlashPickerOpen {
+                slashPickerConfirmHandler?()
+            } else if isHistoryPickerOpen {
                 historyPickerConfirmHandler?()
             } else {
                 handleReturn(event: event, mods: mods)
@@ -193,7 +204,9 @@ final class IMETextView: NSTextView {
 
         // Up: picker nav when open; else Option+Up (terminal) or plain Up (history)
         case VK.upArrow:
-            if isHistoryPickerOpen {
+            if isSlashPickerOpen {
+                slashPickerMoveHandler?(-1)
+            } else if isHistoryPickerOpen {
                 historyPickerMoveHandler?(-1)
             } else {
                 handleUpArrow(event: event, mods: mods)
@@ -201,7 +214,9 @@ final class IMETextView: NSTextView {
 
         // Down: picker nav when open; else Option+Down (terminal) or plain Down (history)
         case VK.downArrow:
-            if isHistoryPickerOpen {
+            if isSlashPickerOpen {
+                slashPickerMoveHandler?(1)
+            } else if isHistoryPickerOpen {
                 historyPickerMoveHandler?(1)
             } else {
                 handleDownArrow(event: event, mods: mods)
@@ -253,8 +268,10 @@ final class IMETextView: NSTextView {
             // Option+Tab → Meta+Tab to terminal (Claude Code: toggle thinking)
             sendKeyHandler?(VK.tab, UInt32(GHOSTTY_MODS_ALT.rawValue))
         } else if !mods.contains(.command) && !hasMarkedText() {
-            // Ghost suggestion takes priority; fall back to terminal tab
-            if !ghostSuggestion.isEmpty {
+            // Slash picker confirm > ghost suggestion accept > terminal tab
+            if isSlashPickerOpen {
+                slashPickerConfirmHandler?()
+            } else if !ghostSuggestion.isEmpty {
                 acceptGhostSuggestion()
             } else {
                 sendKeyHandler?(VK.tab, 0)
@@ -269,6 +286,10 @@ final class IMETextView: NSTextView {
     private func handleEscape(mods: NSEvent.ModifierFlags) {
         if mods.contains(.command) {
             cancelHandler?()
+            return
+        }
+        if isSlashPickerOpen {
+            slashPickerCancelHandler?()
             return
         }
         if isHistoryPickerOpen {

@@ -257,6 +257,10 @@ struct IMEInputBar: View {
                     }
                 )
                 .focused($isFieldFocused)
+                // Slash command picker popover (anchored to text editor, appears below cursor)
+                .popover(isPresented: $showSlashPicker, arrowEdge: .top) {
+                    slashCommandPickerView
+                }
 
                 actionButtons
             }
@@ -309,10 +313,7 @@ struct IMEInputBar: View {
         .popover(isPresented: $showHistoryPicker, arrowEdge: .bottom) {
             historyPickerView
         }
-        // Slash command picker popover (appears above the bar)
-        .popover(isPresented: $showSlashPicker, arrowEdge: .bottom) {
-            slashCommandPickerView
-        }
+        // (slash picker popover is attached to IMETextEditor above)
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isFieldFocused = true

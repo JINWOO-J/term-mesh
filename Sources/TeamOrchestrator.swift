@@ -1530,7 +1530,7 @@ final class TeamOrchestrator: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
-    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.01) -> Bool {
+    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, enterDelay: TimeInterval = 0.02) -> Bool {
         // Try the provided tabManager first, then fall back to global surface lookup
         // for cross-window scenarios (e.g. broadcast when agents are in a different window).
         let panel: TerminalPanel

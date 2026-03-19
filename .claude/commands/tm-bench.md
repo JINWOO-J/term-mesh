@@ -58,12 +58,29 @@ When `$ARGUMENTS` is empty or just `agent` with no flags:
    When team is detected: show 4 options (Existing team E2E recommended, Full pane, RPC only, LLM leader).
    When no team: show 3 options (Full pane recommended, RPC only, LLM leader). Skip "Existing team E2E".
 
-3. **Run the mapped command** — Take the user's selection, map to the flags above, and execute:
+3. **Ask for a change note** — After benchmark selection, ask with a second `AskUserQuestion`:
+
+   **Question:** "Change note? (e.g. 렌더링 ON, headless 모드, after refactor)"
+   **Header:** "Note"
+
+   Options (single-select):
+   | Option label | Description |
+   |---|---|
+   | **Skip** | `No note — just run the benchmark` |
+   | **렌더링 ON** | `Terminal rendering enabled` |
+   | **렌더링 OFF** | `Terminal rendering disabled` |
+   | **Custom** | `Enter a custom note` |
+
+   - If user selects "Skip" → no `--note` flag
+   - If user selects a preset → append `--note "렌더링 ON"` (or OFF) to the command
+   - If user selects "Other" (custom text) → append `--note "{user_input}"` to the command
+
+4. **Run the mapped command** — Take the user's selection, map to the flags above, and execute:
    ```
-   python3 scripts/bench-agent.py {mapped flags}
+   python3 scripts/bench-agent.py {mapped flags} [--note "..."]
    ```
 
-4. **Show output** to the user.
+5. **Show output** to the user.
 
 ## Subcommand Reference
 

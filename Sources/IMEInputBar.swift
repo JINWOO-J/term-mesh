@@ -361,6 +361,10 @@ struct IMEInputBar: View {
             hintLabel("⏎ send")
             hintLabel("⌘⏎ send+close")
             hintLabel("⇧⏎ newline")
+            hintLabel("Tab →term")
+            hintLabel("⇧Tab accept")
+            hintLabel("Esc →term")
+            hintLabel("⌃C interrupt")
 
             Button(action: { showKeyboardHelp.toggle() }) {
                 Text("?")

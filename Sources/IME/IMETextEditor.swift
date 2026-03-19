@@ -13,6 +13,15 @@ struct IMETextEditor: NSViewRepresentable {
     let onHistoryDown: () -> Void
     var onHistorySearch: (() -> Void)? = nil
     var onComposingChanged: ((Bool) -> Void)? = nil
+    /// History entries for ghost suggestion prefix matching.
+    var history: [String] = []
+    /// Whether the fuzzy history picker overlay is visible.
+    var isHistoryPickerOpen: Bool = false
+    // M1: History picker callbacks
+    var onHistoryPickerToggle: (() -> Void)? = nil
+    var onHistoryPickerMove: ((Int) -> Void)? = nil
+    var onHistoryPickerConfirm: (() -> Void)? = nil
+    var onHistoryPickerCancel: (() -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> Coordinator {
@@ -60,6 +69,14 @@ struct IMETextEditor: NSViewRepresentable {
         textView.historyDownHandler = onHistoryDown
         textView.historySearchHandler = onHistorySearch
         textView.composingHandler = onComposingChanged
+        // Q2: ghost suggestion source
+        textView.historySource = history
+        // M1: picker state and callbacks
+        textView.isHistoryPickerOpen = isHistoryPickerOpen
+        textView.historyPickerToggleHandler = onHistoryPickerToggle
+        textView.historyPickerMoveHandler = onHistoryPickerMove
+        textView.historyPickerConfirmHandler = onHistoryPickerConfirm
+        textView.historyPickerCancelHandler = onHistoryPickerCancel
 
         scrollView.documentView = textView
         context.coordinator.textView = textView
@@ -103,6 +120,14 @@ struct IMETextEditor: NSViewRepresentable {
         textView.historyDownHandler = onHistoryDown
         textView.historySearchHandler = onHistorySearch
         textView.composingHandler = onComposingChanged
+        // Q2: keep history source in sync for ghost suggestions
+        textView.historySource = history
+        // M1: sync picker open state and callbacks
+        textView.isHistoryPickerOpen = isHistoryPickerOpen
+        textView.historyPickerToggleHandler = onHistoryPickerToggle
+        textView.historyPickerMoveHandler = onHistoryPickerMove
+        textView.historyPickerConfirmHandler = onHistoryPickerConfirm
+        textView.historyPickerCancelHandler = onHistoryPickerCancel
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {

@@ -1,5 +1,28 @@
 import AppKit
 
+/// Virtual keycode constants (Carbon HIToolbox/Events.h).
+private enum VK {
+    static let a: UInt16           = 0x00  //  0  — 'a'
+    static let v: UInt16           = 0x09  //  9  — 'v'
+    static let c: UInt16           = 0x08  //  8  — 'c'
+    static let e: UInt16           = 0x0E  // 14  — 'e'
+    static let j: UInt16           = 0x26  // 38  — 'j'
+    static let k: UInt16           = 0x28  // 40  — 'k'
+    static let l: UInt16           = 0x25  // 37  — 'l'
+    static let r: UInt16           = 0x0F  // 15  — 'r'
+    static let u: UInt16           = 0x20  // 32  — 'u'  (Ctrl+U = clear line)
+    static let w: UInt16           = 0x0D  // 13  — 'w'
+    static let returnKey: UInt16   = 0x24  // 36  — Return
+    static let tab: UInt16         = 0x30  // 48  — Tab
+    static let delete: UInt16      = 0x33  // 51  — Backspace/Delete
+    static let escape: UInt16      = 0x35  // 53  — Escape
+    static let forwardDelete: UInt16 = 0x75 // 117 — Fn+Delete
+    static let upArrow: UInt16     = 0x7E  // 126 — ↑
+    static let downArrow: UInt16   = 0x7D  // 125 — ↓
+    static let leftArrow: UInt16   = 0x7B  // 123 — ←
+    static let rightArrow: UInt16  = 0x7C  // 124 — →
+}
+
 /// Custom NSTextView that intercepts Enter (submit), Shift+Enter (newline),
 /// Up/Down (history navigation), and Escape (cancel).
 final class IMETextView: NSTextView {
@@ -19,6 +42,28 @@ final class IMETextView: NSTextView {
     private var lastEscapeTime: TimeInterval = 0
     /// Double-ESC threshold in seconds.
     private let doubleEscapeThreshold: TimeInterval = 0.4
+
+    // MARK: - Q2: Ghost suggestion
+
+    /// Suffix to display after the current text as a ghost/autocomplete hint.
+    var ghostSuggestion: String = "" {
+        didSet { if ghostSuggestion != oldValue { needsDisplay = true } }
+    }
+
+    /// History entries injected from IMEInputBar for prefix matching.
+    var historySource: [String] = [] {
+        didSet { updateGhostSuggestion() }
+    }
+
+    // MARK: - M1: History picker routing
+
+    /// True when the fuzzy history picker overlay is visible; routes Up/Down/Enter/Esc to picker.
+    var isHistoryPickerOpen: Bool = false
+
+    var historyPickerToggleHandler: (() -> Void)?
+    var historyPickerMoveHandler: ((Int) -> Void)?     // -1 = up, 1 = down
+    var historyPickerConfirmHandler: (() -> Void)?
+    var historyPickerCancelHandler: (() -> Void)?
 
     // MARK: - Focus activation
 
@@ -41,7 +86,7 @@ final class IMETextView: NSTextView {
         // Cmd+C: if IME has no text selection but a terminal in the window does, copy the
         // terminal selection. This lets users mouse-select terminal text while IME is active
         // and copy it without losing IME focus.
-        if event.keyCode == 8 && flags == .command && selectedRange().length == 0 {
+        if event.keyCode == VK.c && flags == .command && selectedRange().length == 0 {
             if let surfaceView = Self.findTerminalSurfaceWithSelection(in: window) {
                 surfaceView.copy(nil)
                 return true
@@ -72,179 +117,201 @@ final class IMETextView: NSTextView {
     // MARK: - Key handling
 
     override func keyDown(with event: NSEvent) {
+        let kc   = event.keyCode
+        let mods = event.modifierFlags
+
+        switch kc {
+
         // Cmd+V → paste (ensure image paste works even if menu dispatch is intercepted)
-        if event.keyCode == 9 && event.modifierFlags.contains(.command) && !event.modifierFlags.contains(.shift) {
+        case VK.v where mods.contains(.command) && !mods.contains(.shift):
             paste(nil)
-            return
-        }
-        // Cmd+Enter → submit and close IME box
-        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-            if hasMarkedText() {
-                super.keyDown(with: event)
-                if !hasMarkedText() {
-                    if string.hasSuffix("\n") {
-                        string = String(string.dropLast())
-                    }
-                    submitAndCloseHandler?()
-                }
-                return
+
+        // Return key: picker confirm when open; else Cmd+Enter/Shift+Enter/plain Enter
+        case VK.returnKey:
+            if isHistoryPickerOpen {
+                historyPickerConfirmHandler?()
+            } else {
+                handleReturn(event: event, mods: mods)
             }
-            submitAndCloseHandler?()
-            return
-        }
-        // Enter without Shift → submit (guard: let IME commit composed text first)
-        if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
-            if hasMarkedText() {
-                super.keyDown(with: event)
-                // IME confirmed composition via super.keyDown. If no longer composing,
-                // strip any trailing newline that NSTextView's insertNewline added,
-                // then submit immediately so the user doesn't need a second Enter.
-                if !hasMarkedText() {
-                    if string.hasSuffix("\n") {
-                        string = String(string.dropLast())
-                    }
-                    submitHandler?()
-                }
-                return
-            }
-            submitHandler?()
-            return
-        }
-        // Shift+Enter → insert newline (guard: let IME handle if composing)
-        if event.keyCode == 36 && event.modifierFlags.contains(.shift) {
-            if hasMarkedText() {
-                super.keyDown(with: event)
-                return
-            }
-            insertNewline(nil)
-            return
-        }
-        // Ctrl+C → send ETX interrupt + key event (enables Claude double Ctrl+C exit)
-        if event.keyCode == 8 && event.modifierFlags.contains(.control) {
+
+        // Ctrl+C → ETX interrupt (enables Claude double Ctrl+C exit)
+        case VK.c where mods.contains(.control):
             ctrlCHandler?()
-            return
-        }
-        // Ctrl+A → move to beginning of line (readline)
-        if event.keyCode == 0 && event.modifierFlags.contains(.control) {
+
+        // Ctrl+A → readline beginning-of-line
+        case VK.a where mods.contains(.control):
             moveToBeginningOfLine(nil)
-            return
-        }
-        // Ctrl+E → move to end of line (readline)
-        if event.keyCode == 14 && event.modifierFlags.contains(.control) {
+
+        // Ctrl+E → readline end-of-line
+        case VK.e where mods.contains(.control):
             moveToEndOfLine(nil)
-            return
-        }
-        // Ctrl+K → delete to end of paragraph (readline)
-        if event.keyCode == 40 && event.modifierFlags.contains(.control) {
+
+        // Ctrl+K → readline kill-to-end-of-paragraph
+        case VK.k where mods.contains(.control):
             deleteToEndOfParagraph(nil)
-            return
-        }
-        // Ctrl+W → delete word backward (readline)
-        if event.keyCode == 13 && event.modifierFlags.contains(.control) {
+
+        // Ctrl+W → readline delete-word-backward
+        case VK.w where mods.contains(.control):
             deleteWordBackward(nil)
-            return
+
+        // Ctrl+J → alternative submit (same semantics as plain Enter, useful during IME)
+        case VK.j where mods.contains(.control):
+            commitAndSubmit(event: event, handler: submitHandler)
+
+        // Ctrl+L → forward to terminal (Claude Code: clear conversation)
+        case VK.l where mods.contains(.control):
+            sendKeyHandler?(kc, UInt32(GHOSTTY_MODS_CTRL.rawValue))
+
+        // Ctrl+R → open/close fuzzy history picker
+        case VK.r where mods.contains(.control):
+            historyPickerToggleHandler?()
+
+        // Ctrl+Backspace → Ctrl+U (delete line) in terminal
+        case VK.delete where mods.contains(.control):
+            sendKeyHandler?(VK.u, UInt32(GHOSTTY_MODS_CTRL.rawValue))
+
+        // Tab: ghost accept > Shift+Tab (accept suggestion) > Option+Tab (meta) > plain (terminal)
+        case VK.tab:
+            handleTab(event: event, mods: mods)
+
+        // Cmd+Escape (close IME box), Esc (picker cancel or terminal forward)
+        case VK.escape:
+            handleEscape(mods: mods)
+
+        // Option+Left → Alt+Left to terminal (word-level cursor movement)
+        case VK.leftArrow where mods.contains(.option) && !hasMarkedText():
+            sendKeyHandler?(kc, UInt32(GHOSTTY_MODS_ALT.rawValue))
+
+        // Option+Right → Alt+Right to terminal (word-level cursor movement)
+        case VK.rightArrow where mods.contains(.option) && !hasMarkedText():
+            sendKeyHandler?(kc, UInt32(GHOSTTY_MODS_ALT.rawValue))
+
+        // Up: picker nav when open; else Option+Up (terminal) or plain Up (history)
+        case VK.upArrow:
+            if isHistoryPickerOpen {
+                historyPickerMoveHandler?(-1)
+            } else {
+                handleUpArrow(event: event, mods: mods)
+            }
+
+        // Down: picker nav when open; else Option+Down (terminal) or plain Down (history)
+        case VK.downArrow:
+            if isHistoryPickerOpen {
+                historyPickerMoveHandler?(1)
+            } else {
+                handleDownArrow(event: event, mods: mods)
+            }
+
+        default:
+            super.keyDown(with: event)
         }
-        // Ctrl+J → alternative submit (same as Enter, useful during IME composing)
-        if event.keyCode == 38 && event.modifierFlags.contains(.control) {
+    }
+
+    // MARK: - Key sub-handlers
+
+    /// Return/Enter: Cmd+Enter → submit+close, Shift+Enter → newline, plain Enter → submit.
+    private func handleReturn(event: NSEvent, mods: NSEvent.ModifierFlags) {
+        if mods.contains(.command) {
+            commitAndSubmit(event: event, handler: submitAndCloseHandler)
+        } else if mods.contains(.shift) {
             if hasMarkedText() {
                 super.keyDown(with: event)
-                if !hasMarkedText() {
-                    if string.hasSuffix("\n") {
-                        string = String(string.dropLast())
-                    }
-                    submitHandler?()
-                }
-                return
+            } else {
+                insertNewline(nil)
             }
-            submitHandler?()
-            return
+        } else {
+            commitAndSubmit(event: event, handler: submitHandler)
         }
-        // Ctrl+L → forward to terminal (Claude Code: clear conversation)
-        if event.keyCode == 37 && event.modifierFlags.contains(.control) {
-            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_CTRL.rawValue))
-            return
+    }
+
+    /// If IME is composing, let it commit first (via super), then call handler.
+    /// Strips the trailing newline that NSTextView.insertNewline may add.
+    private func commitAndSubmit(event: NSEvent, handler: (() -> Void)?) {
+        if hasMarkedText() {
+            super.keyDown(with: event)
+            if !hasMarkedText() {
+                if string.hasSuffix("\n") { string = String(string.dropLast()) }
+                handler?()
+            }
+        } else {
+            handler?()
         }
-        // Ctrl+R → reverse history search
-        if event.keyCode == 15 && event.modifierFlags.contains(.control) {
-            historySearchHandler?()
-            return
+    }
+
+    /// Tab: Shift+Tab → accept suggestion, Option+Tab → meta-tab, plain Tab → ghost accept or terminal.
+    /// Shift+Tab has no `!hasMarkedText()` guard — it always forwards.
+    private func handleTab(event: NSEvent, mods: NSEvent.ModifierFlags) {
+        if mods.contains(.shift) {
+            // Shift+Tab → forward to terminal (Claude Code: accept suggestion)
+            sendKeyHandler?(VK.tab, UInt32(GHOSTTY_MODS_SHIFT.rawValue))
+        } else if mods.contains(.option) && !hasMarkedText() {
+            // Option+Tab → Meta+Tab to terminal (Claude Code: toggle thinking)
+            sendKeyHandler?(VK.tab, UInt32(GHOSTTY_MODS_ALT.rawValue))
+        } else if !mods.contains(.command) && !hasMarkedText() {
+            // Ghost suggestion takes priority; fall back to terminal tab
+            if !ghostSuggestion.isEmpty {
+                acceptGhostSuggestion()
+            } else {
+                sendKeyHandler?(VK.tab, 0)
+            }
+        } else {
+            super.keyDown(with: event)
         }
-        // Ctrl+Backspace → Ctrl+U (delete line) in terminal
-        if event.keyCode == 51 && event.modifierFlags.contains(.control) {
-            sendKeyHandler?(32, UInt32(GHOSTTY_MODS_CTRL.rawValue))
-            return
-        }
-        // Shift+Tab → forward to terminal (Claude Code uses this for accepting suggestions)
-        if event.keyCode == 48 && event.modifierFlags.contains(.shift) {
-            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_SHIFT.rawValue))
-            return
-        }
-        // Cmd+Escape → close IME box
-        if event.keyCode == 53 && event.modifierFlags.contains(.command) {
+    }
+
+    /// Escape: Cmd+Escape closes the IME box; plain Escape closes picker (if open) or
+    /// forwards to terminal with double-ESC → Ctrl+C detection.
+    private func handleEscape(mods: NSEvent.ModifierFlags) {
+        if mods.contains(.command) {
             cancelHandler?()
             return
         }
-        // Escape handling: double-ESC → Ctrl+C to terminal, single ESC → forward ESC to terminal
-        if event.keyCode == 53 {
-            let now = CACurrentMediaTime()
-            if (now - lastEscapeTime) < doubleEscapeThreshold {
-                // Double-ESC: send Ctrl+C (keycode 8 = 'c', with ctrl mod) to cancel running command
-                sendKeyHandler?(8, UInt32(GHOSTTY_MODS_CTRL.rawValue))
-                lastEscapeTime = 0  // reset to avoid triple-trigger
-            } else {
-                // Single ESC: forward to terminal
-                sendKeyHandler?(event.keyCode, 0)
-                lastEscapeTime = now
-            }
+        if isHistoryPickerOpen {
+            historyPickerCancelHandler?()
             return
         }
-        // Option+ArrowUp → forward plain Up arrow to terminal (e.g. Claude menu navigation)
-        if event.keyCode == 126 && event.modifierFlags.contains(.option) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, 0)
-            return
+        let now = CACurrentMediaTime()
+        if (now - lastEscapeTime) < doubleEscapeThreshold {
+            // Double-ESC: send Ctrl+C (keycode 'c' + ctrl mod) to cancel running command
+            sendKeyHandler?(VK.c, UInt32(GHOSTTY_MODS_CTRL.rawValue))
+            lastEscapeTime = 0  // reset to avoid triple-trigger
+        } else {
+            // Single ESC: forward to terminal
+            sendKeyHandler?(VK.escape, 0)
+            lastEscapeTime = now
         }
-        // Option+ArrowDown → forward plain Down arrow to terminal
-        if event.keyCode == 125 && event.modifierFlags.contains(.option) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, 0)
-            return
-        }
-        // Option+ArrowLeft → forward Alt+Left to terminal (word-level cursor movement)
-        if event.keyCode == 123 && event.modifierFlags.contains(.option) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
-            return
-        }
-        // Option+ArrowRight → forward Alt+Right to terminal (word-level cursor movement)
-        if event.keyCode == 124 && event.modifierFlags.contains(.option) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
-            return
-        }
-        // Option+Tab → forward Meta+Tab to terminal (e.g. Claude thinking toggle)
-        if event.keyCode == 48 && event.modifierFlags.contains(.option) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, UInt32(GHOSTTY_MODS_ALT.rawValue))
-            return
-        }
-        // Plain Tab → forward to terminal (e.g. shell completion, Claude tab accept)
-        if event.keyCode == 48 && !event.modifierFlags.contains(.shift) && !event.modifierFlags.contains(.option) && !event.modifierFlags.contains(.command) && !hasMarkedText() {
-            sendKeyHandler?(event.keyCode, 0)
-            return
-        }
-        // ArrowUp → history (when cursor is on first line and not composing IME)
-        if event.keyCode == 126 && !hasMarkedText() && isCursorOnFirstLine() {
-            historyUpHandler?()
-            return
-        }
-        // ArrowDown → history (when cursor is on last line and not composing IME)
-        if event.keyCode == 125 && !hasMarkedText() && isCursorOnLastLine() {
-            historyDownHandler?()
-            return
-        }
-        super.keyDown(with: event)
     }
+
+    /// Up arrow: Option+Up forwards plain Up to terminal; plain Up navigates history
+    /// when the cursor is on the first line and IME is not composing.
+    private func handleUpArrow(event: NSEvent, mods: NSEvent.ModifierFlags) {
+        if mods.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(VK.upArrow, 0)
+        } else if !hasMarkedText() && isCursorOnFirstLine() {
+            historyUpHandler?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    /// Down arrow: Option+Down forwards plain Down to terminal; plain Down navigates
+    /// history when the cursor is on the last line and IME is not composing.
+    private func handleDownArrow(event: NSEvent, mods: NSEvent.ModifierFlags) {
+        if mods.contains(.option) && !hasMarkedText() {
+            sendKeyHandler?(VK.downArrow, 0)
+        } else if !hasMarkedText() && isCursorOnLastLine() {
+            historyDownHandler?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    // MARK: - Delete overrides
 
     override func deleteBackward(_ sender: Any?) {
         if string.isEmpty {
             // IME bar is empty → forward Backspace to terminal
-            sendKeyHandler?(51, 0)
+            sendKeyHandler?(VK.delete, 0)
             return
         }
         super.deleteBackward(sender)
@@ -253,11 +320,13 @@ final class IMETextView: NSTextView {
     override func deleteForward(_ sender: Any?) {
         if string.isEmpty {
             // IME bar is empty → forward Delete (Fn+Backspace) to terminal
-            sendKeyHandler?(117, 0)
+            sendKeyHandler?(VK.forwardDelete, 0)
             return
         }
         super.deleteForward(sender)
     }
+
+    // MARK: - Cursor position helpers
 
     private func isCursorOnFirstLine() -> Bool {
         let loc = selectedRange().location
@@ -327,6 +396,7 @@ final class IMETextView: NSTextView {
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
         composingHandler?(hasMarkedText())
+        clearGhost()  // hide ghost during IME composition
     }
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
@@ -352,6 +422,7 @@ final class IMETextView: NSTextView {
         isApplyingRainbow = true
         applyRainbowKeywords()
         isApplyingRainbow = false
+        updateGhostSuggestion()
     }
 
     /// Scans committed text for rainbow keywords and applies per-character gradient colors.
@@ -404,5 +475,77 @@ final class IMETextView: NSTextView {
         }
 
         storage.endEditing()
+    }
+
+    // MARK: - Ghost suggestion logic
+
+    private func updateGhostSuggestion() {
+        guard !hasMarkedText() else { clearGhost(); return }
+        let currentText = string
+        // Only suggest on single-line text to avoid layout complexity
+        guard !currentText.isEmpty, !currentText.contains("\n") else { clearGhost(); return }
+
+        let lower = currentText.lowercased()
+        if let match = historySource.first(where: {
+            $0.lowercased().hasPrefix(lower) && $0.count > currentText.count
+        }) {
+            ghostSuggestion = String(match.dropFirst(currentText.count))
+        } else {
+            clearGhost()
+        }
+    }
+
+    private func clearGhost() {
+        if !ghostSuggestion.isEmpty { ghostSuggestion = "" }
+    }
+
+    /// Accepts the current ghost suggestion by inserting it into the text view.
+    func acceptGhostSuggestion() {
+        guard !ghostSuggestion.isEmpty else { return }
+        let insertion = ghostSuggestion
+        clearGhost()
+        let loc = (string as NSString).length
+        insertText(insertion, replacementRange: NSRange(location: loc, length: 0))
+    }
+
+    // MARK: - Ghost drawing
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawGhostText()
+    }
+
+    private func drawGhostText() {
+        guard !ghostSuggestion.isEmpty, !hasMarkedText() else { return }
+        guard let lm = layoutManager, let tc = textContainer else { return }
+
+        lm.ensureLayout(for: tc)
+        let numGlyphs = lm.numberOfGlyphs
+        guard numGlyphs > 0 else { return }
+
+        // bounding rect of the last glyph in textContainer coordinates
+        let lastGlyphIdx = numGlyphs - 1
+        let glyphBound = lm.boundingRect(
+            forGlyphRange: NSRange(location: lastGlyphIdx, length: 1),
+            in: tc
+        )
+
+        // convert to view coordinates (NSTextView is flipped: y increases downward)
+        let drawPoint = NSPoint(
+            x: textContainerInset.width + glyphBound.maxX,
+            y: textContainerInset.height + glyphBound.minY
+        )
+
+        let ghostFont = font ?? NSFont.monospacedSystemFont(
+            ofSize: IMEInputBarSettings.fontSize, weight: .regular
+        )
+        let attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.4),
+            .font: ghostFont,
+        ]
+
+        // Only show the first line of the suggestion
+        let displayGhost = ghostSuggestion.components(separatedBy: "\n").first ?? ghostSuggestion
+        displayGhost.draw(at: drawPoint, withAttributes: attrs)
     }
 }

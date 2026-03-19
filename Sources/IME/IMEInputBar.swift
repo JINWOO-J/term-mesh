@@ -29,6 +29,9 @@ struct IMEInputBar: View {
     @State private var isComposing: Bool = false
     @State private var showKeyboardHelp: Bool = false
     @State private var feedbackState: FeedbackState = .none  // Q1
+    // M1: Fuzzy history picker state
+    @State private var showHistoryPicker: Bool = false
+    @State private var historyPickerSelection: Int = 0
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isFieldFocused: Bool
 
@@ -44,6 +47,50 @@ struct IMEInputBar: View {
         case .success: return .green
         case .failure: return .red
         }
+    }
+
+    // MARK: - M1: Fuzzy history matching
+
+    private struct HistoryMatch {
+        let index: Int
+        let entry: String
+        let score: Int
+    }
+
+    private func fuzzyMatch(_ query: String, in candidate: String) -> (matched: Bool, score: Int) {
+        let q = query.lowercased()
+        let c = candidate.lowercased()
+        if c.hasPrefix(q) { return (true, 1000 + q.count) }
+        var qIdx = q.startIndex
+        var score = 0
+        var consecutive = 0
+        for char in c {
+            if qIdx < q.endIndex && char == q[qIdx] {
+                score += 1 + consecutive * 2
+                consecutive += 1
+                qIdx = q.index(after: qIdx)
+            } else {
+                consecutive = 0
+            }
+        }
+        return (qIdx == q.endIndex, score)
+    }
+
+    private var filteredHistory: [HistoryMatch] {
+        guard showHistoryPicker else { return [] }
+        if text.isEmpty {
+            return Array(history.prefix(10).enumerated().map {
+                HistoryMatch(index: $0.offset, entry: $0.element, score: 0)
+            })
+        }
+        return Array(history.enumerated()
+            .compactMap { idx, entry -> HistoryMatch? in
+                let (matched, score) = fuzzyMatch(text, in: entry)
+                return matched ? HistoryMatch(index: idx, entry: entry, score: score) : nil
+            }
+            .sorted { $0.score > $1.score }
+            .prefix(10)
+        )
     }
 
     // MARK: - Actions
@@ -127,19 +174,10 @@ struct IMEInputBar: View {
         }
     }
 
-    /// Reverse-search history (Ctrl+R): find next entry containing current text.
+    /// Reverse-search history (Ctrl+R): open fuzzy picker.
     private func historySearch() {
-        let query = text.lowercased()
-        let startIndex = historyIndex + 1
-        guard startIndex < history.count else { return }
-        for i in startIndex..<history.count {
-            if query.isEmpty || history[i].lowercased().contains(query) {
-                if historyIndex == -1 { historyDraft = text }
-                historyIndex = i
-                text = history[i]
-                return
-            }
-        }
+        showHistoryPicker = true
+        historyPickerSelection = 0
     }
 
     // MARK: - Body
@@ -163,7 +201,28 @@ struct IMEInputBar: View {
                     onHistoryUp: historyUp,
                     onHistoryDown: historyDown,
                     onHistorySearch: historySearch,
-                    onComposingChanged: { isComposing = $0 }
+                    onComposingChanged: { isComposing = $0 },
+                    history: history,
+                    isHistoryPickerOpen: showHistoryPicker,
+                    onHistoryPickerToggle: {
+                        showHistoryPicker.toggle()
+                        historyPickerSelection = 0
+                    },
+                    onHistoryPickerMove: { delta in
+                        let count = filteredHistory.count
+                        guard count > 0 else { return }
+                        historyPickerSelection = (historyPickerSelection + delta + count) % count
+                    },
+                    onHistoryPickerConfirm: {
+                        guard historyPickerSelection < filteredHistory.count else { return }
+                        text = filteredHistory[historyPickerSelection].entry
+                        showHistoryPicker = false
+                        historyPickerSelection = 0
+                    },
+                    onHistoryPickerCancel: {
+                        showHistoryPicker = false
+                        historyPickerSelection = 0
+                    }
                 )
                 .focused($isFieldFocused)
 
@@ -214,6 +273,10 @@ struct IMEInputBar: View {
                 .stroke(feedbackColor, lineWidth: feedbackState == .none ? 0 : 2)
                 .animation(.easeInOut(duration: 0.15), value: feedbackState)
         )
+        // M1: fuzzy history picker popover (appears above the bar)
+        .popover(isPresented: $showHistoryPicker, arrowEdge: .bottom) {
+            historyPickerView
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isFieldFocused = true
@@ -223,6 +286,10 @@ struct IMEInputBar: View {
         .task {
             let loaded = await Task.detached { IMEHistory.loadMerged() }.value
             history = loaded
+        }
+        // M1: reset picker selection when text changes
+        .onChange(of: text) { _ in
+            if showHistoryPicker { historyPickerSelection = 0 }
         }
     }
 
@@ -307,6 +374,69 @@ struct IMEInputBar: View {
         }
     }
 
+    // MARK: - M1: History picker popover content
+
+    private var historyPickerView: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("History")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("⌃R close · ↑↓ nav · ⏎ select · Esc close")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+
+            Divider()
+
+            if filteredHistory.isEmpty {
+                Text("No matching history")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(filteredHistory.enumerated()), id: \.offset) { i, item in
+                            Button(action: {
+                                text = item.entry
+                                showHistoryPicker = false
+                                historyPickerSelection = 0
+                            }) {
+                                HStack(spacing: 6) {
+                                    Text(item.entry)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    i == historyPickerSelection
+                                        ? Color.accentColor.opacity(0.2)
+                                        : Color.clear
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            if i < filteredHistory.count - 1 {
+                                Divider().padding(.leading, 10)
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: 200)
+            }
+        }
+        .frame(width: 420)
+    }
+
     private var keyboardHelpView: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Keyboard Shortcuts")
@@ -322,12 +452,12 @@ struct IMEInputBar: View {
                 }
                 helpSection("Navigation") {
                     helpRow("↑ ↓", "History (\(history.count))")
-                    helpRow("⌃R", "Search history")
+                    helpRow("⌃R", "Fuzzy history picker")
                     helpRow("⌃A / ⌃E", "Line start / end")
                 }
                 helpSection("Terminal") {
                     helpRow("Esc", "Send Escape to terminal")
-                    helpRow("Tab", "Tab to terminal")
+                    helpRow("Tab", "Accept ghost / tab to terminal")
                     helpRow("⇧Tab", "Send Shift+Tab (accept)")
                     helpRow("⌥↑↓←→", "Arrow to terminal")
                     helpRow("⌥Tab", "Tab to terminal")

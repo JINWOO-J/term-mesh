@@ -132,29 +132,96 @@ enum ShellHistory {
 
 // MARK: - Claude Code slash commands
 
+struct SlashCommand: Equatable, Hashable {
+    let name: String
+    let desc: String
+}
+
 enum SlashCommands {
-    /// Built-in Claude Code slash commands (from v2.1.72)
-    static let builtinCommands: [String] = [
-        "/add-dir", "/agents", "/btw", "/chrome", "/clear", "/color", "/compact",
-        "/config", "/context", "/copy", "/cost", "/desktop", "/diff", "/doctor",
-        "/effort", "/exit", "/export", "/extra-usage", "/fast", "/feedback",
-        "/branch", "/help", "/hooks", "/ide", "/init", "/insights",
-        "/install-github-app", "/install-slack-app", "/keybindings",
-        "/login", "/logout", "/mcp", "/memory", "/mobile", "/model", "/passes",
-        "/permissions", "/plan", "/plugin", "/pr-comments", "/privacy-settings",
-        "/release-notes", "/reload-plugins", "/remote-control", "/remote-env",
-        "/rename", "/resume", "/review", "/rewind", "/sandbox", "/security-review",
-        "/skills", "/stats", "/status", "/statusline", "/stickers", "/tasks",
-        "/terminal-setup", "/theme", "/upgrade", "/usage", "/vim", "/voice",
+    /// Built-in Claude Code slash commands with descriptions
+    static let builtinCommands: [SlashCommand] = [
+        .init(name: "/add-dir", desc: "Add a directory to context"),
+        .init(name: "/agents", desc: "View agent status"),
+        .init(name: "/btw", desc: "Send a non-blocking message"),
+        .init(name: "/chrome", desc: "Control Chrome browser"),
+        .init(name: "/clear", desc: "Clear conversation history"),
+        .init(name: "/color", desc: "Change terminal color scheme"),
+        .init(name: "/compact", desc: "Compact conversation to save context"),
+        .init(name: "/config", desc: "Open or edit config"),
+        .init(name: "/context", desc: "Manage context files"),
+        .init(name: "/copy", desc: "Copy last response to clipboard"),
+        .init(name: "/cost", desc: "Show token usage and cost"),
+        .init(name: "/desktop", desc: "Control desktop automation"),
+        .init(name: "/diff", desc: "Show pending file changes"),
+        .init(name: "/doctor", desc: "Check Claude Code health"),
+        .init(name: "/effort", desc: "Set thinking effort level"),
+        .init(name: "/exit", desc: "Exit Claude Code"),
+        .init(name: "/export", desc: "Export conversation"),
+        .init(name: "/extra-usage", desc: "Manage extra usage allowance"),
+        .init(name: "/fast", desc: "Toggle fast mode (Haiku)"),
+        .init(name: "/feedback", desc: "Send feedback to Anthropic"),
+        .init(name: "/branch", desc: "Create or switch git branch"),
+        .init(name: "/help", desc: "Show available commands"),
+        .init(name: "/hooks", desc: "Manage hooks"),
+        .init(name: "/ide", desc: "Open file in IDE"),
+        .init(name: "/init", desc: "Initialize CLAUDE.md for project"),
+        .init(name: "/insights", desc: "View conversation insights"),
+        .init(name: "/install-github-app", desc: "Install GitHub App"),
+        .init(name: "/install-slack-app", desc: "Install Slack App"),
+        .init(name: "/keybindings", desc: "View or edit keybindings"),
+        .init(name: "/login", desc: "Log in to Anthropic"),
+        .init(name: "/logout", desc: "Log out"),
+        .init(name: "/mcp", desc: "Manage MCP servers"),
+        .init(name: "/memory", desc: "Edit CLAUDE.md memory"),
+        .init(name: "/mobile", desc: "Mobile development tools"),
+        .init(name: "/model", desc: "Switch AI model"),
+        .init(name: "/passes", desc: "Manage passes"),
+        .init(name: "/permissions", desc: "Manage tool permissions"),
+        .init(name: "/plan", desc: "Enter plan mode"),
+        .init(name: "/plugin", desc: "Manage plugins"),
+        .init(name: "/pr-comments", desc: "View PR comments"),
+        .init(name: "/privacy-settings", desc: "Manage privacy settings"),
+        .init(name: "/release-notes", desc: "View release notes"),
+        .init(name: "/reload-plugins", desc: "Reload all plugins"),
+        .init(name: "/remote-control", desc: "Remote control settings"),
+        .init(name: "/remote-env", desc: "Manage remote environment"),
+        .init(name: "/rename", desc: "Rename conversation"),
+        .init(name: "/resume", desc: "Resume a previous conversation"),
+        .init(name: "/review", desc: "Review code changes"),
+        .init(name: "/rewind", desc: "Undo last action"),
+        .init(name: "/sandbox", desc: "Manage sandbox settings"),
+        .init(name: "/security-review", desc: "Run security review"),
+        .init(name: "/skills", desc: "List available skills"),
+        .init(name: "/stats", desc: "Show session statistics"),
+        .init(name: "/status", desc: "Show current status"),
+        .init(name: "/statusline", desc: "Configure status line"),
+        .init(name: "/stickers", desc: "View stickers"),
+        .init(name: "/tasks", desc: "Manage tasks"),
+        .init(name: "/terminal-setup", desc: "Set up terminal integration"),
+        .init(name: "/theme", desc: "Change UI theme"),
+        .init(name: "/upgrade", desc: "Upgrade Claude Code"),
+        .init(name: "/usage", desc: "Show usage statistics"),
+        .init(name: "/vim", desc: "Toggle vim mode"),
+        .init(name: "/voice", desc: "Toggle voice input"),
         // Common aliases
-        "/quit", "/reset", "/new", "/settings", "/app", "/bug", "/fork",
-        "/continue", "/checkpoint", "/allowed-tools", "/rc", "/ios", "/android",
+        .init(name: "/quit", desc: "Exit (alias)"),
+        .init(name: "/reset", desc: "Reset conversation (alias)"),
+        .init(name: "/new", desc: "New conversation (alias)"),
+        .init(name: "/settings", desc: "Open settings (alias)"),
+        .init(name: "/bug", desc: "Report a bug (alias)"),
+        .init(name: "/continue", desc: "Continue previous session (alias)"),
+        .init(name: "/checkpoint", desc: "Create a checkpoint (alias)"),
+        .init(name: "/allowed-tools", desc: "Manage allowed tools (alias)"),
         // Bundled skills
-        "/batch", "/claude-api", "/debug", "/loop", "/simplify",
+        .init(name: "/batch", desc: "Run batch operations"),
+        .init(name: "/claude-api", desc: "Build with Claude API"),
+        .init(name: "/debug", desc: "Debug an issue"),
+        .init(name: "/loop", desc: "Run recurring task"),
+        .init(name: "/simplify", desc: "Simplify code"),
     ]
 
     /// Loads built-in commands merged with custom commands from .claude/commands/ directories.
-    static func loadAll() -> [String] {
+    static func loadAll() -> [SlashCommand] {
         var commands = builtinCommands
         // Project-local commands
         let projectDir = FileManager.default.currentDirectoryPath + "/.claude/commands"
@@ -163,15 +230,24 @@ enum SlashCommands {
         let userDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/commands").path
         commands += scanCommandDir(userDir)
-        // Dedupe and sort
-        return Array(Set(commands)).sorted()
+        // Dedupe by name and sort
+        var seen = Set<String>()
+        var unique: [SlashCommand] = []
+        for cmd in commands {
+            if !seen.contains(cmd.name) {
+                seen.insert(cmd.name)
+                unique.append(cmd)
+            }
+        }
+        return unique.sorted { $0.name < $1.name }
     }
 
-    private static func scanCommandDir(_ path: String) -> [String] {
+    private static func scanCommandDir(_ path: String) -> [SlashCommand] {
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: path) else { return [] }
-        return files.compactMap { file -> String? in
+        return files.compactMap { file -> SlashCommand? in
             guard file.hasSuffix(".md") else { return nil }
-            return "/" + file.replacingOccurrences(of: ".md", with: "")
+            let name = "/" + file.replacingOccurrences(of: ".md", with: "")
+            return SlashCommand(name: name, desc: "Custom command")
         }
     }
 }

@@ -24,7 +24,7 @@ struct IMEInputBar: View {
 
     @State private var text: String = ""
     @State private var history: [String] = IMEHistory.load()   // Q4: fast sync init; merged async in .task
-    @State private var slashCommands: [String] = SlashCommands.loadAll()
+    @State private var slashCommands: [SlashCommand] = SlashCommands.loadAll()
     @State private var historyIndex: Int = -1   // -1 = editing draft
     @State private var historyDraft: String = ""
     @State private var isComposing: Bool = false
@@ -97,15 +97,15 @@ struct IMEInputBar: View {
         )
     }
 
-    private var filteredSlashCommands: [String] {
+    private var filteredSlashCommands: [SlashCommand] {
         guard showSlashPicker else { return [] }
         let query = text.lowercased()
         if query == "/" {
-            return Array(slashCommands.prefix(10))
+            return Array(slashCommands.prefix(15))
         }
         return Array(slashCommands
-            .filter { $0.lowercased().hasPrefix(query) }
-            .prefix(10))
+            .filter { $0.name.lowercased().hasPrefix(query) }
+            .prefix(15))
     }
 
     // MARK: - Actions
@@ -224,7 +224,7 @@ struct IMEInputBar: View {
                     onHistorySearch: historySearch,
                     onComposingChanged: { isComposing = $0 },
                     history: history,
-                    slashCommands: slashCommands,
+                    slashCommands: slashCommands.map(\.name),
                     isHistoryPickerOpen: showHistoryPicker,
                     onHistoryPickerToggle: {
                         showHistoryPicker.toggle()
@@ -253,7 +253,7 @@ struct IMEInputBar: View {
                     },
                     onSlashPickerConfirm: {
                         guard slashPickerSelection < filteredSlashCommands.count else { return }
-                        text = filteredSlashCommands[slashPickerSelection] + " "
+                        text = filteredSlashCommands[slashPickerSelection].name + " "
                         showSlashPicker = false
                         slashPickerSelection = 0
                     },
@@ -508,37 +508,41 @@ struct IMEInputBar: View {
 
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 0) {
+                    VStack(spacing: 1) {
                         ForEach(Array(filteredSlashCommands.enumerated()), id: \.offset) { i, cmd in
                             Button(action: {
-                                text = cmd + " "
+                                text = cmd.name + " "
                                 showSlashPicker = false
                                 slashPickerSelection = 0
                             }) {
-                                HStack(spacing: 6) {
-                                    Text(cmd)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .lineLimit(1)
+                                HStack(spacing: 0) {
+                                    Text(cmd.name)
+                                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                                         .foregroundColor(i == slashPickerSelection ? .white : .primary)
+                                        .frame(minWidth: 140, alignment: .leading)
+                                    Text(cmd.desc)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(i == slashPickerSelection ? .white.opacity(0.7) : .secondary)
+                                        .lineLimit(1)
                                     Spacer()
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 4)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 2)
                                 .background(
                                     i == slashPickerSelection
                                         ? Color.teal.opacity(0.6)
                                         : Color.clear
                                 )
-                                .cornerRadius(4)
+                                .cornerRadius(3)
                             }
                             .buttonStyle(.plain)
                             .id(i)
                         }
                     }
                     .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 1)
                 }
-                .frame(maxHeight: 150)
+                .frame(maxHeight: 180)
                 .onChange(of: slashPickerSelection) { newVal in
                     withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(newVal, anchor: .center) }
                 }

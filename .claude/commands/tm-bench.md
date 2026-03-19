@@ -15,7 +15,8 @@ Parse `$ARGUMENTS` to determine the subcommand:
 
 | Input | Command |
 |-------|---------|
-| `agent` | `python3 scripts/bench-agent.py` (interactive menu) |
+| `agent` | **Interactive selector** (use `AskUserQuestion`, see below) |
+| (empty) | **Interactive selector** (same as `agent`) |
 | `agent --pane` | `python3 scripts/bench-agent.py --mode pane` |
 | `agent --headless` | `python3 scripts/bench-agent.py --mode headless` |
 | `agent --llm` | `python3 scripts/bench-agent.py --leader llm` |
@@ -28,28 +29,41 @@ Parse `$ARGUMENTS` to determine the subcommand:
 
 Map the first word of `$ARGUMENTS`:
 
-- **`agent`** → Run benchmarks. Without flags → interactive menu. Map `--pane` to `--mode pane`, `--headless` to `--mode headless`, `--llm` to `--leader llm`, `--terminal` to `--leader terminal`. Pass remaining flags through.
+- **`agent` (no flags)** or **empty** → Interactive selector (see Interactive Flow below)
+- **`agent` (with flags)** → Map `--pane` to `--mode pane`, `--headless` to `--mode headless`, `--llm` to `--leader llm`, `--terminal` to `--leader terminal`. Pass remaining flags through.
 - **`history`** → Show history: `python3 scripts/bench-agent.py --history`
 - **`compare`** → Compare runs: `python3 scripts/bench-agent.py --compare` followed by the remaining args.
 
-If `$ARGUMENTS` is empty, show this usage guide:
+## Interactive Flow (for bare `agent` or empty arguments)
 
-```
-tm-bench — Agent Team Communication Benchmark
+When `$ARGUMENTS` is empty or just `agent` with no flags:
 
-Usage:
-  /tm-bench agent                   Interactive mode selector
-  /tm-bench agent --pane            Pane infrastructure, terminal leader
-  /tm-bench agent --headless        Headless infrastructure
-  /tm-bench agent --llm             LLM leader (Claude --claude-leader)
-  /tm-bench agent --rpc             RPC infrastructure only
-  /tm-bench agent --e2e             E2E agent tests only
-  /tm-bench agent --note "..."      Add a change note to the run
-  /tm-bench history                 Show recent benchmark history
-  /tm-bench compare A B             Compare two runs by timestamp prefix
+1. **Detect current state** — Run `tm-agent status` to check for an active team (name, agent count).
 
-Results saved to: ~/.term-mesh/benchmarks/YYYY-MM-DDTHH-MM-SS.json
-```
+2. **Ask with `AskUserQuestion`** — Present a single-select question based on detected state:
+
+   **Question:** "Which benchmark to run?"
+   **Header:** "Benchmark"
+
+   Build options dynamically:
+
+   | Option label | Description | When to show | Maps to |
+   |---|---|---|---|
+   | **Existing team E2E (Recommended)** | `{team_name} ({N} agents), no new team — fastest` | Team detected | `--e2e-only --mode pane --leader terminal` |
+   | **Existing team E2E** | `No active team detected — will fail without one` | No team | `--e2e-only --mode pane --leader terminal` |
+   | **Full pane benchmark** | `RPC (temp team) + E2E (existing team)` | Always | `--mode pane --leader terminal` |
+   | **RPC only** | `Infrastructure latency only (creates temp team)` | Always | `--rpc-only --mode pane --leader terminal` |
+   | **LLM leader E2E** | `Creates new team with --claude-leader` | Always | `--leader llm` |
+
+   When team is detected: show 4 options (Existing team E2E recommended, Full pane, RPC only, LLM leader).
+   When no team: show 3 options (Full pane recommended, RPC only, LLM leader). Skip "Existing team E2E".
+
+3. **Run the mapped command** — Take the user's selection, map to the flags above, and execute:
+   ```
+   python3 scripts/bench-agent.py {mapped flags}
+   ```
+
+4. **Show output** to the user.
 
 ## Subcommand Reference
 

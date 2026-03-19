@@ -292,20 +292,12 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                     guard let sessionId = input["session_id"] as? String,
                           let text = input["text"] as? String else { continue }
                     if let panel = self.findTerminalPanel(agentSessionId: sessionId) {
-                        // Send text via key events (same mechanism as TeamOrchestrator).
-                        // Using sendInputText instead of sendText ensures text arrives
-                        // through the same input channel as the Return key event.
+                        // Use sendIMEText for atomic text+Enter delivery:
+                        // - PRESS+RELEASE pairs prevent key state ambiguity in TUI apps
+                        // - Synchronous Return after text eliminates GCD timing races
                         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
                         guard !trimmed.isEmpty else { continue }
-                        panel.sendInputText(trimmed)
-                        // Send Return after 0.3s delay to give TUIs (Claude Code,
-                        // kiro-cli, etc.) time to process text before Enter.
-                        // Use sendInputText("\n") instead of sendSurfaceKeyPress —
-                        // sendInputText passes text: "\r" with the Return key event,
-                        // which is required for ghostty to emit the correct byte to PTY.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            panel.sendInputText("\n")
-                        }
+                        panel.sendIMEText(trimmed, withReturn: true)
                     }
                 }
             }

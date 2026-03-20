@@ -32,6 +32,17 @@ case "${1:-}" in
     mcp|config|api-key) exec "$REAL_CLAUDE" "$@" ;;
 esac
 
+# Pass through headless/pipe mode — no interactive session to track.
+# Detects: -p flag, --print flag, or stdin piped (not a terminal).
+for arg in "$@"; do
+    case "$arg" in
+        -p|--print) exec "$REAL_CLAUDE" "$@" ;;
+    esac
+done
+if [[ ! -t 0 ]]; then
+    exec "$REAL_CLAUDE" "$@"
+fi
+
 # Unset CLAUDECODE to avoid "nested session" detection — term-mesh terminals are
 # independent sessions even when the parent shell was launched from Claude Code.
 unset CLAUDECODE

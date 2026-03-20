@@ -3,10 +3,13 @@
 
 _termmesh_send() {
     local payload="$1"
+    # All transports suppress responses and errors — these are fire-and-forget
+    # telemetry commands (report_pwd, report_git_branch, etc.) where the app
+    # response (including "Tab not found") is irrelevant to the shell.
     if command -v ncat >/dev/null 2>&1; then
-        print -r -- "$payload" | ncat -U "${TERMMESH_SOCKET_PATH:-$CMUX_SOCKET_PATH}" --send-only
+        print -r -- "$payload" | ncat -U "${TERMMESH_SOCKET_PATH:-$CMUX_SOCKET_PATH}" --send-only 2>/dev/null || true
     elif command -v socat >/dev/null 2>&1; then
-        print -r -- "$payload" | socat - "UNIX-CONNECT:${TERMMESH_SOCKET_PATH:-$CMUX_SOCKET_PATH}"
+        print -r -- "$payload" | socat - "UNIX-CONNECT:${TERMMESH_SOCKET_PATH:-$CMUX_SOCKET_PATH}" >/dev/null 2>&1 || true
     elif command -v nc >/dev/null 2>&1; then
         # Some nc builds don't support unix sockets, but keep as a last-ditch fallback.
         #

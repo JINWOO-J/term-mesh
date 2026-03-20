@@ -4320,7 +4320,9 @@ struct TermMeshCLI {
                 surfaceId: fallbackSurfaceId
             )
             let workspaceId = consumedSession?.workspaceId ?? fallbackWorkspaceId
-            try clearClaudeStatus(client: client, workspaceId: workspaceId)
+            // Clearing status is best-effort — the tab may have been closed or the
+            // workspace ID may be stale (e.g. subprocess claude -p invocations).
+            try? clearClaudeStatus(client: client, workspaceId: workspaceId)
 
             if let completion = summarizeClaudeHookStop(
                 parsedInput: parsedInput,

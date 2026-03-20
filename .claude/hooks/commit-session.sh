@@ -6,12 +6,21 @@
 
 set -euo pipefail
 
+# Skip for team agents — only the leader (or standalone sessions) should auto-commit.
+# Agents set TERMMESH_AGENT_NAME; leaders and normal sessions do not.
+[[ -n "${TERMMESH_AGENT_NAME:-}" ]] && exit 0
+
 # Resolve the git repo root (worktree-safe)
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT="$CLAUDE_PROJECT_DIR"
 cd "$REPO_ROOT" || exit 0
 
-# Stage all changes
-git add -A 2>/dev/null || true
+# Stage tracked files only (new files require manual git add).
+git add -u 2>/dev/null || true
+# Alternative: stage all + exclude sensitive patterns
+# git add -A 2>/dev/null || true
+# git reset HEAD -- '*.env' '*.env.*' '*.pem' '*.key' '*.p12' '*.keystore' \
+#   '*.credentials' 'credentials.json' 'secrets.*' \
+#   '*.xcarchive' '*.ipa' '*.dmg' 2>/dev/null || true
 
 # Exit if nothing to commit
 if git diff-index --quiet HEAD 2>/dev/null; then
@@ -20,6 +29,13 @@ fi
 
 # Extract diff for commit message generation (truncated to 2000 lines)
 DIFF=$(git diff --cached 2>/dev/null | head -2000)
+FILE_COUNT=$(git diff --cached --name-only | wc -l | tr -d ' ')
+
+# Clear term-mesh env vars — claude -p is headless and doesn't need
+# shell integration or claude-hook injection. Without this, the term-mesh
+# claude wrapper injects Stop hooks that call `term-mesh claude-hook stop`
+# which fails with "Tab not found" when the workspace ID is stale.
+unset CMUX_SURFACE_ID TERMMESH_TAB_ID CMUX_TAB_ID TERMMESH_PANEL_ID CMUX_PANEL_ID 2>/dev/null || true
 
 # Generate commit message via Claude headless mode
 COMMIT_MSG=""
@@ -36,12 +52,15 @@ fi
 
 # Fallback if claude -p failed or returned empty
 if [ -z "$COMMIT_MSG" ]; then
-  FILE_COUNT=$(git diff --cached --name-only | wc -l | tr -d ' ')
   COMMIT_MSG="wip: update $FILE_COUNT files"
 fi
 
 # Commit using -F - to safely handle special characters
-echo "$COMMIT_MSG" | git commit -F - --no-verify 2>/dev/null || true
+if echo "$COMMIT_MSG" | git commit -F - --no-verify 2>/dev/null; then
+  FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+  SHORT_SHA=$(git rev-parse --short HEAD 2>/dev/null)
+  echo "Auto-committed: ${SHORT_SHA} ${FIRST_LINE} (${FILE_COUNT} files)"
+fi
 
 # Update CHANGELOG if it exists
 CHANGELOG="$REPO_ROOT/docs/CHANGELOG.md"

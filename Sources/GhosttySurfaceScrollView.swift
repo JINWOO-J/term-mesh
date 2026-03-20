@@ -1203,6 +1203,11 @@ final class GhosttySurfaceScrollView: NSView {
         if !window.isKeyWindow {
             window.makeKeyAndOrderFront(nil)
         }
+        // Suppress onFocus to prevent the same re-entrant layout loop as
+        // applyFirstResponderIfNeeded (see comment there for full chain).
+        let savedOnFocus = surfaceView.onFocus
+        surfaceView.onFocus = nil
+        defer { surfaceView.onFocus = savedOnFocus }
         _ = window.makeFirstResponder(surfaceView)
 
         if !isSurfaceViewFirstResponder() {
@@ -1261,8 +1266,8 @@ final class GhosttySurfaceScrollView: NSView {
         // becomeFirstResponder before ensureSurfaceReadyForInput() runs.
         let savedOnFocus = surfaceView.onFocus
         surfaceView.onFocus = nil
+        defer { surfaceView.onFocus = savedOnFocus }
         window.makeFirstResponder(surfaceView)
-        surfaceView.onFocus = savedOnFocus
     }
 
 #if DEBUG

@@ -66,7 +66,31 @@ final class Workspace: Identifiable, ObservableObject {
 
     /// Toggle zoom on the focused pane. If already zoomed, restores original layout.
     func togglePaneZoom() {
+        let wasZoomed = isPaneZoomed
         bonsplitController.togglePaneZoom()
+        let isZoomed = isPaneZoomed
+
+        if isZoomed, let zoomedPaneId = bonsplitController.zoomedPaneId {
+            // Hide terminal portal views in non-zoomed panes so Metal/IOSurface
+            // content doesn't render above the zoomed browser pane. Portal hosts
+            // live in the window content view, outside Bonsplit's hierarchy, so
+            // Bonsplit hiding the pane doesn't hide the Metal surface.
+            let zoomedTabIds = Set(bonsplitController.tabs(inPane: zoomedPaneId).map(\.id.uuid))
+            for (_, panel) in panels {
+                guard let terminal = panel as? TerminalPanel else { continue }
+                if !zoomedTabIds.contains(terminal.id) {
+                    terminal.hostedView.setVisibleInUI(false)
+                    TerminalWindowPortalRegistry.hideHostedView(terminal.hostedView)
+                }
+            }
+        } else if wasZoomed && !isZoomed {
+            // Restore portal visibility for all terminal panels after zoom exit.
+            for (_, panel) in panels {
+                guard let terminal = panel as? TerminalPanel else { continue }
+                terminal.hostedView.setVisibleInUI(true)
+            }
+        }
+
         objectWillChange.send()
     }
 

@@ -1253,7 +1253,16 @@ final class GhosttySurfaceScrollView: NSView {
            fr === surfaceView || fr.isDescendant(of: surfaceView) {
             return
         }
+        // Temporarily remove the onFocus callback to prevent re-entrant layout loop:
+        // makeFirstResponder → becomeFirstResponder → onFocus → focusPanel →
+        // state mutation → SwiftUI re-evaluate → updateNSView → makeFirstResponder → ...
+        // The workspace already knows about this focus (it set isActive/isVisibleInUI).
+        // We must NOT use suppressingReparentFocus because it early-returns from
+        // becomeFirstResponder before ensureSurfaceReadyForInput() runs.
+        let savedOnFocus = surfaceView.onFocus
+        surfaceView.onFocus = nil
         window.makeFirstResponder(surfaceView)
+        surfaceView.onFocus = savedOnFocus
     }
 
 #if DEBUG

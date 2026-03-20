@@ -7,7 +7,12 @@
       "mcp__mem-mesh__search",
       "WebSearch",
       "mcp__mem-mesh__pin_add",
-      "Bash(cd /Users/jinwoo/work/project/term-mesh/daemon && cargo build --release 2>&1)"
+      "Bash(cd /Users/jinwoo/work/project/term-mesh/daemon && cargo build --release 2>&1)",
+      "Bash(xcodebuild -project GhosttyTabs.xcodeproj -scheme term-mesh -configuration Release -destination 'platform=macOS' build)",
+      "Bash(./scripts/reloadp.sh)",
+      "mcp__mem-mesh__add",
+      "Bash(./scripts/reload.sh --tag fix-layout-loop)",
+      "Bash(pkill -f 'term-mesh DEV fix-layout-loop')"
     ]
   },
   "enabledPlugins": {

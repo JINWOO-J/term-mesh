@@ -2650,31 +2650,45 @@ struct GhosttyTerminalView: NSViewRepresentable {
     private final class HostContainerView: NSView {
         var onDidMoveToWindow: (() -> Void)?
         var onGeometryChanged: (() -> Void)?
+        private var hasScheduledGeometryCallback = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onDidMoveToWindow?()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func layout() {
             super.layout()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func setFrameOrigin(_ newOrigin: NSPoint) {
             super.setFrameOrigin(newOrigin)
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func setFrameSize(_ newSize: NSSize) {
             super.setFrameSize(newSize)
-            onGeometryChanged?()
+            scheduleGeometryCallback()
+        }
+
+        /// Coalesce geometry callbacks to prevent re-entrant layout loops.
+        /// Multiple layout/frame changes during a single AppKit layout pass
+        /// are batched into one deferred synchronizeForAnchor call.
+        private func scheduleGeometryCallback() {
+            guard !hasScheduledGeometryCallback else { return }
+            hasScheduledGeometryCallback = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.hasScheduledGeometryCallback = false
+                self.onGeometryChanged?()
+            }
         }
     }
 
@@ -2832,17 +2846,6 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.lastBoundHostId = nil
-
-        // Propagate visibility=false to the portal entry so synchronizeHostedView
-        // correctly hides the individual hosted view. Safe for transient SwiftUI
-        // dismantles because the subsequent updateNSView/bind will restore visibleInUI
-        // before the deferred portal sync fires.
-        if let hostedView = coordinator.hostedView {
-            TerminalWindowPortalRegistry.updateEntryVisibility(
-                for: hostedView,
-                visibleInUI: false
-            )
-        }
 
         let hostedView = coordinator.hostedView
 #if DEBUG

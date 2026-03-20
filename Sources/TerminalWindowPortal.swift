@@ -43,6 +43,15 @@ final class WindowTerminalHostView: NSView {
         }
     }
 
+    // Compositor-level z-order: terminal portal (zPosition 100) always renders below browser portal (zPosition 200).
+    // CALayer.zPosition survives NSView reordering, layout passes, and deferred portal sync races.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        layer.zPosition = 100
+        return layer
+    }
+
     override var isOpaque: Bool { false }
     private static let sidebarLeadingEdgeEpsilon: CGFloat = 1
     private static let minimumVisibleLeadingContentWidth: CGFloat = 24
@@ -567,6 +576,7 @@ final class WindowTerminalPortal: NSObject {
         super.init()
         hostView.wantsLayer = true
         hostView.layer?.masksToBounds = true
+        hostView.layer?.zPosition = 100  // best-effort early set; makeBackingLayer is the reliable path
         hostView.postsFrameChangedNotifications = true
         hostView.postsBoundsChangedNotifications = true
         hostView.translatesAutoresizingMaskIntoConstraints = false
@@ -741,11 +751,24 @@ final class WindowTerminalPortal: NSObject {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
         }
 
+        // Z-order contract: terminal portal must render below browser portal.
+        // This mirrors the enforcement in BrowserWindowPortal.ensureInstalled().
+        if let browserHost = container.subviews.first(where: { $0 is WindowBrowserHostView }),
+           Self.isView(hostView, above: browserHost, in: container) {
+            container.addSubview(hostView, positioned: .below, relativeTo: browserHost)
+        }
+
         // Keep the drag/mouse forwarding overlay above portal-hosted terminal views.
         if let overlay = objc_getAssociatedObject(window, &fileDropOverlayKey) as? NSView,
            overlay.superview === container,
            !Self.isView(overlay, above: hostView, in: container) {
             container.addSubview(overlay, positioned: .above, relativeTo: hostView)
+        }
+        // Ensure file drop overlay renders above both portal hosts at compositor level.
+        if let overlay = objc_getAssociatedObject(window, &fileDropOverlayKey) as? NSView,
+           overlay.superview === container {
+            overlay.wantsLayer = true
+            overlay.layer?.zPosition = 300
         }
 
         synchronizeLayoutHierarchy()
@@ -909,6 +932,7 @@ final class WindowTerminalPortal: NSObject {
         if let hostedView = entry.hostedView, hostedView.superview === hostView {
             hostedView.removeFromSuperview()
         }
+        updateHostViewVisibility()
     }
 
     /// Hide a portal entry without detaching it. Updates visibleInUI to false and
@@ -923,19 +947,41 @@ final class WindowTerminalPortal: NSObject {
 #if DEBUG
         dlog("portal.hideEntry hosted=\(portalDebugToken(entry.hostedView)) reason=workspaceUnmount")
 #endif
+        updateHostViewVisibility()
     }
 
     /// Update the visibleInUI flag on an existing entry without rebinding.
     /// Used when a deferred bind is pending — this ensures synchronizeHostedView
     /// won't hide a view that updateNSView has already marked as visible.
+    /// When setting to false, also immediately hides the hosted view and updates
+    /// host visibility to remove Metal/IOSurface content from the compositor.
     func updateEntryVisibility(forHostedId hostedId: ObjectIdentifier, visibleInUI: Bool) {
         guard var entry = entriesByHostedId[hostedId] else { return }
         entry.visibleInUI = visibleInUI
         entriesByHostedId[hostedId] = entry
+
+        // When marking invisible, immediately hide the view so the Metal surface
+        // stops compositing. Safe for transient SwiftUI dismantles because the
+        // subsequent bind() in the same run loop will unhide before display.
+        if !visibleInUI {
+            entry.hostedView?.isHidden = true
+#if DEBUG
+            dlog("portal.hideEntry hosted=\(portalDebugToken(entry.hostedView)) reason=visibilityUpdate")
+#endif
+            updateHostViewVisibility()
+        }
     }
 
     func bind(hostedView: GhosttySurfaceScrollView, to anchorView: NSView, visibleInUI: Bool, zPriority: Int = 0) {
         guard ensureInstalled() else { return }
+
+        // Unhide host view before adding content so the first frame renders correctly.
+        if hostView.isHidden {
+            hostView.isHidden = false
+#if DEBUG
+            dlog("portal.hostView.hidden value=0 reason=bind")
+#endif
+        }
 
         let hostedId = ObjectIdentifier(hostedView)
         let anchorId = ObjectIdentifier(anchorView)
@@ -1076,6 +1122,7 @@ final class WindowTerminalPortal: NSObject {
             if hostedId == hostedIdToSkip { continue }
             synchronizeHostedView(withId: hostedId)
         }
+        updateHostViewVisibility()
     }
 
     private func synchronizeHostedView(withId hostedId: ObjectIdentifier) {
@@ -1263,6 +1310,24 @@ final class WindowTerminalPortal: NSObject {
 #endif
 
         ensureDividerOverlayOnTop()
+    }
+
+    /// Hide/unhide the entire host view based on whether any entry is currently visible.
+    /// When all entries are hidden (e.g. during browser pane zoom), this removes the host
+    /// from the macOS compositor pipeline — the only reliable way to prevent Metal/IOSurface
+    /// content from painting over sibling views regardless of zPosition.
+    private func updateHostViewVisibility() {
+        let hasAnyVisibleEntry = entriesByHostedId.values.contains { entry in
+            guard let hostedView = entry.hostedView else { return false }
+            return !hostedView.isHidden
+        }
+
+        if hostView.isHidden == hasAnyVisibleEntry {
+            hostView.isHidden = !hasAnyVisibleEntry
+#if DEBUG
+            dlog("portal.hostView.hidden value=\(hostView.isHidden ? 1 : 0) visibleEntries=\(hasAnyVisibleEntry ? 1 : 0)")
+#endif
+        }
     }
 
     private func pruneDeadEntries() {

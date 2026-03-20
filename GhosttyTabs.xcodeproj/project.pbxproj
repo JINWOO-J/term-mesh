@@ -19,6 +19,7 @@
 			CVB00008 /* MenuBarExtra.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00008 /* MenuBarExtra.swift */; };
 			CVB00009 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00009 /* SettingsView.swift */; };
 			CVB00010 /* AppearanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00010 /* AppearanceSettings.swift */; };
+			CVB00039 /* TerminalSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00039 /* TerminalSettings.swift */; };
 			CVB00011 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00011 /* Logging.swift */; };
 			CVB00012 /* AppDelegateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00012 /* AppDelegateHelpers.swift */; };
 			CVB00013 /* SettingsDebugViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00013 /* SettingsDebugViews.swift */; };
@@ -209,6 +210,7 @@
 			CVS00008 /* MenuBarExtra.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarExtra.swift; sourceTree = "<group>"; };
 			CVS00009 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 			CVS00010 /* AppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettings.swift; sourceTree = "<group>"; };
+			CVS00039 /* TerminalSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettings.swift; sourceTree = "<group>"; };
 			CVS00011 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 			CVS00012 /* AppDelegateHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateHelpers.swift; sourceTree = "<group>"; };
 			CVS00013 /* SettingsDebugViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDebugViews.swift; sourceTree = "<group>"; };
@@ -447,6 +449,7 @@
 					CVS00008 /* MenuBarExtra.swift */,
 					CVS00009 /* SettingsView.swift */,
 					CVS00010 /* AppearanceSettings.swift */,
+					CVS00039 /* TerminalSettings.swift */,
 					CVS00011 /* Logging.swift */,
 					CVS00012 /* AppDelegateHelpers.swift */,
 					CVS00013 /* SettingsDebugViews.swift */,
@@ -749,6 +752,7 @@
 					CVB00008 /* MenuBarExtra.swift in Sources */,
 					CVB00009 /* SettingsView.swift in Sources */,
 					CVB00010 /* AppearanceSettings.swift in Sources */,
+					CVB00039 /* TerminalSettings.swift in Sources */,
 					CVB00011 /* Logging.swift in Sources */,
 					CVB00012 /* AppDelegateHelpers.swift in Sources */,
 					CVB00013 /* SettingsDebugViews.swift in Sources */,
@@ -973,7 +977,7 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -982,7 +986,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-framework",
@@ -1013,7 +1017,7 @@
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1022,7 +1026,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				OTHER_LDFLAGS = (
 					"-lc++",
 					"-framework",
@@ -1077,10 +1081,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.termmesh.appuitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1094,10 +1098,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.termmesh.appuitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1111,10 +1115,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.termmesh.apptests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1130,10 +1134,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 90;
+				CURRENT_PROJECT_VERSION = 91;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.73.0;
+				MARKETING_VERSION = 0.74.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.termmesh.apptests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

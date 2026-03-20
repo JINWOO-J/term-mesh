@@ -67,10 +67,18 @@ enum TerminalThemeOverride {
     }
 
     /// Write (or remove) the theme override file based on the current appearance mode.
+    /// When the user has selected a GUI theme in Settings, the hardcoded palettes are unnecessary
+    /// because the named theme already provides colors — skip writing the override in that case.
     static func write(for rawMode: String) {
         let mode = AppearanceMode(rawValue: rawMode) ?? .system
         let fm = FileManager.default
         guard let url = overrideURL() else { return }
+
+        // If the user picked a named theme via Settings GUI, the theme file handles colors.
+        if TerminalSettingsOverride.hasThemeOverride() {
+            try? fm.removeItem(at: url)
+            return
+        }
 
         switch mode {
         case .light:

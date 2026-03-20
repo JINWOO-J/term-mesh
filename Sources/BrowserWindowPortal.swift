@@ -38,6 +38,15 @@ final class WindowBrowserHostView: NSView {
         }
     }
 
+    // Compositor-level z-order: browser portal (zPosition 200) always renders above terminal portal (zPosition 100).
+    // CALayer.zPosition survives NSView reordering, layout passes, and deferred portal sync races.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        layer.zPosition = 200
+        return layer
+    }
+
     override var isOpaque: Bool { false }
     private static let sidebarLeadingEdgeEpsilon: CGFloat = 1
     private static let minimumVisibleLeadingContentWidth: CGFloat = 24
@@ -317,6 +326,17 @@ final class WindowBrowserSlotView: NSView {
     required init?(coder: NSCoder) {
         nil
     }
+
+    // Guarantee masksToBounds regardless of when AppKit creates the backing layer.
+    // In AppKit, `layer` can be nil at init time (before the view joins the hierarchy),
+    // so the `layer?.masksToBounds = true` in init may silently no-op. Overriding
+    // makeBackingLayer ensures the layer clips from the moment it exists, preventing
+    // WKWebView compositing layers from painting outside the portal container on zoom.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.masksToBounds = true
+        return layer
+    }
 }
 
 @MainActor
@@ -345,6 +365,7 @@ final class WindowBrowserPortal: NSObject {
         super.init()
         hostView.wantsLayer = true
         hostView.layer?.masksToBounds = true
+        hostView.layer?.zPosition = 200  // best-effort early set; makeBackingLayer is the reliable path
         hostView.translatesAutoresizingMaskIntoConstraints = true
         hostView.autoresizingMask = []
         installGeometryObservers(for: window)
@@ -448,6 +469,15 @@ final class WindowBrowserPortal: NSObject {
             installedReferenceView = reference
         } else if !Self.isView(hostView, above: reference, in: container) {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
+        }
+
+        // Z-order contract: browser portal must always render above terminal portal.
+        // Both portals install .above the same reference view, so the last to run wins.
+        // Explicitly enforce browser > terminal ordering to prevent Metal terminal surfaces
+        // from painting over browser WebView content (visible during pane zoom).
+        if let terminalHost = container.subviews.first(where: { $0 is WindowTerminalHostView }),
+           !Self.isView(hostView, above: terminalHost, in: container) {
+            container.addSubview(hostView, positioned: .above, relativeTo: terminalHost)
         }
 
         synchronizeHostFrameToReference()
@@ -794,7 +824,7 @@ final class WindowBrowserPortal: NSObject {
         }
     }
 
-    private func synchronizeWebView(withId webViewId: ObjectIdentifier, source: String) {
+    fileprivate func synchronizeWebView(withId webViewId: ObjectIdentifier, source: String) {
         guard ensureInstalled() else { return }
         guard let entry = entriesByWebViewId[webViewId] else { return }
         guard let webView = entry.webView else {
@@ -1193,6 +1223,16 @@ enum BrowserWindowPortalRegistry {
         guard let windowId = webViewToWindowId[webViewId],
               let portal = portalsByWindowId[windowId] else { return }
         portal.updateEntryVisibility(forWebViewId: webViewId, visibleInUI: visibleInUI, zPriority: zPriority)
+    }
+
+    /// Re-synchronize a specific web view's portal frame.
+    /// Called after operations that may shift the web view frame (e.g. pageZoom changes)
+    /// without triggering an anchor geometry callback.
+    static func synchronizeForWebView(_ webView: WKWebView) {
+        let webViewId = ObjectIdentifier(webView)
+        guard let windowId = webViewToWindowId[webViewId],
+              let portal = portalsByWindowId[windowId] else { return }
+        portal.synchronizeWebView(withId: webViewId, source: "pageZoom")
     }
 
     static func detach(webView: WKWebView) {

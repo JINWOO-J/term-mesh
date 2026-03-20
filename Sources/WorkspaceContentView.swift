@@ -48,7 +48,11 @@ struct WorkspaceContentView: View {
             if let panel = workspace.panel(for: tab.id) {
                 let isFocused = isWorkspaceInputActive && workspace.focusedPanelId == panel.id
                 let isSelectedInPane = workspace.bonsplitController.selectedTab(inPane: paneId)?.id == tab.id
-                let isVisibleInUI = isWorkspaceVisible && isSelectedInPane
+                let isHiddenByPaneZoom: Bool = {
+                    guard let zoomed = workspace.bonsplitController.zoomedPaneId else { return false }
+                    return zoomed != paneId
+                }()
+                let isVisibleInUI = isWorkspaceVisible && isSelectedInPane && !isHiddenByPaneZoom
                 let hasUnreadNotification = Workspace.shouldShowUnreadIndicator(
                     hasUnreadNotification: notificationStore.hasUnreadNotification(forTabId: workspace.id, surfaceId: panel.id),
                     isManuallyUnread: workspace.manualUnreadPanelIds.contains(panel.id)

@@ -13,6 +13,16 @@ struct TermMeshApp: App {
     private let browserHistory: any BrowserHistoryService = BrowserHistoryStore.shared
     private let primaryWindowId = UUID()
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
+    @AppStorage(TerminalSettingsOverride.fontFamilyKey) private var terminalFontFamily = ""
+    @AppStorage(TerminalSettingsOverride.fontSizeKey) private var terminalFontSize: Double = 0
+    @AppStorage(TerminalSettingsOverride.themeLightKey) private var terminalThemeLight = ""
+    @AppStorage(TerminalSettingsOverride.themeDarkKey) private var terminalThemeDark = ""
+    @AppStorage(TerminalSettingsOverride.backgroundOpacityKey) private var terminalBgOpacity: Double = -1
+    @AppStorage(TerminalSettingsOverride.cursorColorKey) private var terminalCursorColor = ""
+    @AppStorage(TerminalSettingsOverride.cursorStyleKey) private var terminalCursorStyle = ""
+    @AppStorage(TerminalSettingsOverride.scrollbackLimitKey) private var terminalScrollback: Int = 0
+    @AppStorage(TerminalSettingsOverride.unfocusedSplitOpacityKey) private var terminalUnfocusedOpacity: Double = -1
+    @AppStorage(TerminalSettingsOverride.splitDividerColorKey) private var terminalDividerColor = ""
     @AppStorage("titlebarControlsStyle") private var titlebarControlsStyle = TitlebarControlsStyle.classic.rawValue
     @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey) private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
     @AppStorage(SocketControlSettings.appStorageKey) private var socketControlMode = SocketControlSettings.defaultMode.rawValue
@@ -219,6 +229,16 @@ struct TermMeshApp: App {
                     TerminalThemeOverride.write(for: appearanceMode)
                     configProvider.reloadConfiguration(source: "appearance.toggle")
                 }
+                .onChange(of: terminalFontFamily) { _ in applyTerminalSettings() }
+                .onChange(of: terminalFontSize) { _ in applyTerminalSettings() }
+                .onChange(of: terminalThemeLight) { _ in applyTerminalSettings() }
+                .onChange(of: terminalThemeDark) { _ in applyTerminalSettings() }
+                .onChange(of: terminalBgOpacity) { _ in applyTerminalSettings() }
+                .onChange(of: terminalCursorColor) { _ in applyTerminalSettings() }
+                .onChange(of: terminalCursorStyle) { _ in applyTerminalSettings() }
+                .onChange(of: terminalScrollback) { _ in applyTerminalSettings() }
+                .onChange(of: terminalUnfocusedOpacity) { _ in applyTerminalSettings() }
+                .onChange(of: terminalDividerColor) { _ in applyTerminalSettings() }
                 .onChange(of: socketControlMode) { _ in
                     updateSocketController()
                 }
@@ -756,6 +776,12 @@ struct TermMeshApp: App {
             appearanceMode = mode.rawValue
         }
         Self.applyAppearance(mode)
+    }
+
+    private func applyTerminalSettings() {
+        TerminalSettingsOverride.write()
+        TerminalThemeOverride.write(for: appearanceMode)
+        configProvider.reloadConfiguration(source: "settings.terminal")
     }
 
     private static func applyAppearance(_ mode: AppearanceMode) {

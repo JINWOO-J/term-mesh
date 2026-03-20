@@ -658,8 +658,8 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Use force remove since user explicitly confirmed
-            let success = self.daemon.removeWorktree(repoPath: repoPath, name: name)
+            // Use force remove since user explicitly confirmed (even if dirty)
+            let success = self.daemon.removeWorktree(repoPath: repoPath, name: name, force: true)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if success {

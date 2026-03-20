@@ -22,7 +22,7 @@ protocol DaemonService: AnyObject {
     func createWorktree(repoPath: String, branch: String?, baseBranch: String?) -> WorktreeInfo?
     func createWorktreeWithError(repoPath: String, branch: String?, baseBranch: String?) -> Result<WorktreeInfo, WorktreeCreateError>
     func findGitRoot(from path: String) -> String?
-    func removeWorktree(repoPath: String, name: String) -> Bool
+    func removeWorktree(repoPath: String, name: String, force: Bool) -> Bool
     func listWorktrees(repoPath: String) -> [WorktreeInfo]
     func listBranches(repoPath: String) -> [String]
     func worktreeStatus(repoPath: String, name: String) -> TermMeshDaemon.WorktreeStatusResult

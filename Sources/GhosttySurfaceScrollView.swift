@@ -1203,6 +1203,11 @@ final class GhosttySurfaceScrollView: NSView {
         if !window.isKeyWindow {
             window.makeKeyAndOrderFront(nil)
         }
+        // Suppress onFocus to prevent the same re-entrant layout loop as
+        // applyFirstResponderIfNeeded (see comment there for full chain).
+        let savedOnFocus = surfaceView.onFocus
+        surfaceView.onFocus = nil
+        defer { surfaceView.onFocus = savedOnFocus }
         _ = window.makeFirstResponder(surfaceView)
 
         if !isSurfaceViewFirstResponder() {
@@ -1253,6 +1258,15 @@ final class GhosttySurfaceScrollView: NSView {
            fr === surfaceView || fr.isDescendant(of: surfaceView) {
             return
         }
+        // Temporarily remove the onFocus callback to prevent re-entrant layout loop:
+        // makeFirstResponder → becomeFirstResponder → onFocus → focusPanel →
+        // state mutation → SwiftUI re-evaluate → updateNSView → makeFirstResponder → ...
+        // The workspace already knows about this focus (it set isActive/isVisibleInUI).
+        // We must NOT use suppressingReparentFocus because it early-returns from
+        // becomeFirstResponder before ensureSurfaceReadyForInput() runs.
+        let savedOnFocus = surfaceView.onFocus
+        surfaceView.onFocus = nil
+        defer { surfaceView.onFocus = savedOnFocus }
         window.makeFirstResponder(surfaceView)
     }
 

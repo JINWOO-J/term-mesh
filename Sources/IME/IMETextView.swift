@@ -486,7 +486,7 @@ final class IMETextView: NSTextView {
     /// then captures the first word (the command name).
     private static let commandRegex: NSRegularExpression? =
         try? NSRegularExpression(
-            pattern: #"(?:^|[;]|&&|\|\||\|)\s*([A-Za-z/_][A-Za-z0-9_\-./]*)"#,
+            pattern: #"(?:[;]|&&|\|\||\|)\s*([A-Za-z/_][A-Za-z0-9_\-./]*)"#,
             options: [.anchorsMatchLines]
         )
 

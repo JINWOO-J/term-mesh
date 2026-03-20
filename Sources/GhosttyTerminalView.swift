@@ -942,8 +942,14 @@ final class TerminalSurface: Identifiable, ObservableObject {
     /// Unlike sendInputText which sends PRESS-only for text chars (causing key state
     /// ambiguity), this sends proper PRESS+RELEASE pairs per chunk, then an atomic
     /// Return key event — all synchronously within one call.
-    func sendIMEText(_ text: String, withReturn: Bool = true) {
-        guard let surface = surface else { return }
+    @discardableResult
+    func sendIMEText(_ text: String, withReturn: Bool = true) -> Bool {
+        guard let surface = surface else {
+            #if DEBUG
+            dlog("ime.send.fail reason=surface_nil")
+            #endif
+            return false
+        }
 
         if !text.isEmpty {
             // Chunk long text at UTF-8 safe boundaries
@@ -1011,6 +1017,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             keyEvent.text = nil
             _ = ghostty_surface_key(surface, keyEvent)
         }
+        return true
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {
@@ -1198,6 +1205,7 @@ static func focusLog(_ message: String) {
         installEventMonitor()
         updateTrackingAreas()
         registerForDraggedTypes(Array(Self.dropTypes))
+
     }
 
     private func effectiveBackgroundColor() -> NSColor {
@@ -1480,9 +1488,6 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         updateSurfaceSize()
     }
 
-    private func nearlyEqual(_ lhs: CGFloat, _ rhs: CGFloat, epsilon: CGFloat = 0.0001) -> Bool {
-        abs(lhs - rhs) <= epsilon
-    }
 
     func expectedPixelSize(for pointsSize: CGSize) -> CGSize {
         let backing = convertToBacking(NSRect(origin: .zero, size: pointsSize)).size
@@ -2646,31 +2651,45 @@ struct GhosttyTerminalView: NSViewRepresentable {
     private final class HostContainerView: NSView {
         var onDidMoveToWindow: (() -> Void)?
         var onGeometryChanged: (() -> Void)?
+        private var hasScheduledGeometryCallback = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onDidMoveToWindow?()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func layout() {
             super.layout()
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func setFrameOrigin(_ newOrigin: NSPoint) {
             super.setFrameOrigin(newOrigin)
-            onGeometryChanged?()
+            scheduleGeometryCallback()
         }
 
         override func setFrameSize(_ newSize: NSSize) {
             super.setFrameSize(newSize)
-            onGeometryChanged?()
+            scheduleGeometryCallback()
+        }
+
+        /// Coalesce geometry callbacks to prevent re-entrant layout loops.
+        /// Multiple layout/frame changes during a single AppKit layout pass
+        /// are batched into one deferred synchronizeForAnchor call.
+        private func scheduleGeometryCallback() {
+            guard !hasScheduledGeometryCallback else { return }
+            hasScheduledGeometryCallback = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.hasScheduledGeometryCallback = false
+                self.onGeometryChanged?()
+            }
         }
     }
 
@@ -2828,6 +2847,7 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.lastBoundHostId = nil
+
         let hostedView = coordinator.hostedView
 #if DEBUG
         if let hostedView {

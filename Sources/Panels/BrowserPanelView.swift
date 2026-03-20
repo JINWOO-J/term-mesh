@@ -2857,6 +2857,15 @@ struct WebViewRepresentable: NSViewRepresentable {
         var onDidMoveToWindow: (() -> Void)?
         var onGeometryChanged: (() -> Void)?
 
+        // Clip WKWebView compositing layers that extend beyond bounds after pageZoom
+        // changes. Without this, zoomed web content can overflow into adjacent panels
+        // in non-portal mode.
+        override func makeBackingLayer() -> CALayer {
+            let layer = super.makeBackingLayer()
+            layer.masksToBounds = true
+            return layer
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onDidMoveToWindow?()

@@ -1205,6 +1205,7 @@ static func focusLog(_ message: String) {
         installEventMonitor()
         updateTrackingAreas()
         registerForDraggedTypes(Array(Self.dropTypes))
+
     }
 
     private func effectiveBackgroundColor() -> NSColor {

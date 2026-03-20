@@ -504,6 +504,7 @@ class GhosttyApp {
         ghostty_config_load_default_files(config)
         loadLegacyGhosttyConfigIfNeeded(config)
         loadTermMeshThemeOverride(config)
+        loadTermMeshSettingsOverride(config)
         ghostty_config_finalize(config)
     }
 
@@ -519,6 +520,19 @@ class GhosttyApp {
         }
         #if DEBUG
         Self.initLog("loaded term-mesh theme override: \(url.path)")
+        #endif
+    }
+
+    /// Load the term-mesh terminal settings override file (if present).
+    /// This file is written by TerminalSettingsOverride when the user changes font/size/theme in Settings.
+    private func loadTermMeshSettingsOverride(_ config: ghostty_config_t) {
+        guard let url = TerminalSettingsOverride.overrideURL(),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        url.path.withCString { path in
+            ghostty_config_load_file(config, path)
+        }
+        #if DEBUG
+        Self.initLog("loaded term-mesh settings override: \(url.path)")
         #endif
     }
 

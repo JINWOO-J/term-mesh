@@ -3,6 +3,7 @@ import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
     case app = "app"
+    case terminal = "terminal"
     case workspaceColors = "workspaceColors"
     case automation = "automation"
     case agentTeams = "agentTeams"
@@ -20,6 +21,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .app: return "App"
+        case .terminal: return "Terminal"
         case .workspaceColors: return "Workspace Colors"
         case .automation: return "Automation"
         case .agentTeams: return "Agent Teams"
@@ -37,6 +39,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .app: return "gear"
+        case .terminal: return "character.cursor.ibeam"
         case .workspaceColors: return "paintpalette"
         case .automation: return "bolt.horizontal"
         case .agentTeams: return "person.3"
@@ -53,7 +56,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 
     var category: SettingsSectionCategory {
         switch self {
-        case .app, .workspaceColors: return .general
+        case .app, .terminal, .workspaceColors: return .general
         case .automation, .agentTeams, .agentCLIPaths, .worktrees: return .agents
         case .dashboard, .services: return .network
         case .browser: return .browser
@@ -65,6 +68,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var searchKeywords: [String] {
         switch self {
         case .app: return ["app", "theme", "appearance", "dark", "light", "workspace", "placement", "session", "restore", "dock", "badge", "quit", "warn", "rename", "sidebar", "branch", "reorder", "notification"]
+        case .terminal: return ["terminal", "font", "size", "theme", "monospace", "family"]
         case .workspaceColors: return ["workspace", "color", "indicator", "palette", "custom"]
         case .automation: return ["automation", "socket", "claude", "port", "integration", "password"]
         case .agentTeams: return ["agent", "team", "leader", "model", "directory", "rendering", "interval", "refresh"]
@@ -131,6 +135,16 @@ struct SettingsView: View {
     @AppStorage(TermMeshDaemon.dashboardLocalhostOnlyKey) private var dashboardLocalhostOnly = true
     @AppStorage(TermMeshDaemon.dashboardPortKey) private var dashboardPort = 9876
     @AppStorage(TermMeshDaemon.dashboardPasswordKey) private var dashboardPassword = ""
+    @AppStorage(TerminalSettingsOverride.fontFamilyKey) private var terminalFontFamily = ""
+    @AppStorage(TerminalSettingsOverride.fontSizeKey) private var terminalFontSize: Double = 0
+    @AppStorage(TerminalSettingsOverride.themeLightKey) private var terminalThemeLight = ""
+    @AppStorage(TerminalSettingsOverride.themeDarkKey) private var terminalThemeDark = ""
+    @AppStorage(TerminalSettingsOverride.backgroundOpacityKey) private var terminalBgOpacity: Double = -1
+    @AppStorage(TerminalSettingsOverride.cursorColorKey) private var terminalCursorColor = ""
+    @AppStorage(TerminalSettingsOverride.cursorStyleKey) private var terminalCursorStyle = ""
+    @AppStorage(TerminalSettingsOverride.scrollbackLimitKey) private var terminalScrollback: Int = 0
+    @AppStorage(TerminalSettingsOverride.unfocusedSplitOpacityKey) private var terminalUnfocusedOpacity: Double = -1
+    @AppStorage(TerminalSettingsOverride.splitDividerColorKey) private var terminalDividerColor = ""
 
     @Environment(\.daemonService) private var daemonService
     @Environment(\.browserHistoryService) private var browserHistory
@@ -561,6 +575,8 @@ struct SettingsView: View {
         switch section {
         case .app:
             sectionApp
+        case .terminal:
+            sectionTerminal
         case .workspaceColors:
             sectionWorkspaceColors
         case .automation:
@@ -715,6 +731,219 @@ struct SettingsView: View {
                         }
 
         }
+    }
+
+    // MARK: - Section: Terminal
+
+    @ViewBuilder
+    private var sectionTerminal: some View {
+        SettingsCard {
+            if settingsMatch("font", "family", "monospace", "terminal") {
+                SettingsCardRow(
+                    "Font Family",
+                    subtitle: terminalFontFamily.isEmpty ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    Picker("", selection: $terminalFontFamily) {
+                        Text("Default (from config)").tag("")
+                        let fonts = MonospaceFontList.list()
+                        let monoCount = MonospaceFontList.monospaceFontCount
+                        if monoCount > 0 {
+                            Divider()
+                            ForEach(fonts.prefix(monoCount), id: \.self) { font in
+                                Text(font).tag(font)
+                            }
+                        }
+                        if fonts.count > monoCount {
+                            Divider()
+                            ForEach(fonts.suffix(from: monoCount), id: \.self) { font in
+                                Text(font).tag(font)
+                            }
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+
+            if settingsMatch("font", "size", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Font Size",
+                    subtitle: terminalFontSize == 0 ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    HStack(spacing: 6) {
+                        TextField("", value: Binding(
+                            get: { terminalFontSize == 0 ? 13 : Int(terminalFontSize) },
+                            set: { terminalFontSize = Double($0) }
+                        ), format: .number)
+                        .frame(width: 50)
+                        .textFieldStyle(.roundedBorder)
+
+                        Stepper("", value: Binding(
+                            get: { terminalFontSize == 0 ? 13.0 : terminalFontSize },
+                            set: { terminalFontSize = $0 }
+                        ), in: 8...32, step: 1)
+                        .labelsHidden()
+
+                        if terminalFontSize > 0 {
+                            Button("Reset") {
+                                terminalFontSize = 0
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundColor(.accentColor)
+                            .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            if settingsMatch("theme", "light", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Light Theme",
+                    subtitle: terminalThemeLight.isEmpty ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    Picker("", selection: $terminalThemeLight) {
+                        Text("Default (from config)").tag("")
+                        Divider()
+                        ForEach(TerminalThemeList.bundledThemeNames(), id: \.self) { theme in
+                            Text(theme).tag(theme)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+
+            if settingsMatch("theme", "dark", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Dark Theme",
+                    subtitle: terminalThemeDark.isEmpty ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    Picker("", selection: $terminalThemeDark) {
+                        Text("Default (from config)").tag("")
+                        Divider()
+                        ForEach(TerminalThemeList.bundledThemeNames(), id: \.self) { theme in
+                            Text(theme).tag(theme)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+
+        SettingsCard {
+            // Background Opacity: requires CAMetalLayer.isOpaque=false in ghostty — deferred
+
+            if settingsMatch("cursor", "style", "block", "bar", "underline", "terminal") {
+                SettingsCardRow(
+                    "Cursor Style",
+                    subtitle: terminalCursorStyle.isEmpty ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    Picker("", selection: $terminalCursorStyle) {
+                        Text("Default (from config)").tag("")
+                        Divider()
+                        Text("Block").tag("block")
+                        Text("Bar").tag("bar")
+                        Text("Underline").tag("underline")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+
+            if settingsMatch("cursor", "color", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Cursor Color",
+                    subtitle: terminalCursorColor.isEmpty ? "Using ghostty config value" : nil,
+                    controlWidth: pickerColumnWidth
+                ) {
+                    HStack(spacing: 6) {
+                        ColorPicker("", selection: Binding(
+                            get: {
+                                if terminalCursorColor.isEmpty { return .white }
+                                return Color(nsColor: NSColor(hex: terminalCursorColor) ?? .white)
+                            },
+                            set: { newValue in
+                                terminalCursorColor = NSColor(newValue).hexString()
+                            }
+                        ))
+                        .labelsHidden()
+                        if !terminalCursorColor.isEmpty {
+                            Button("Reset") { terminalCursorColor = "" }
+                                .buttonStyle(.borderless)
+                                .foregroundColor(.accentColor)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            if settingsMatch("unfocused", "split", "opacity", "dim", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Unfocused Split Opacity",
+                    subtitle: terminalUnfocusedOpacity < 0 ? "Using ghostty config value" : "\(Int(terminalUnfocusedOpacity * 100))%",
+                    controlWidth: pickerColumnWidth
+                ) {
+                    HStack(spacing: 6) {
+                        Slider(
+                            value: Binding(
+                                get: { terminalUnfocusedOpacity < 0 ? 0.7 : terminalUnfocusedOpacity },
+                                set: { terminalUnfocusedOpacity = $0 }
+                            ),
+                            in: 0...1,
+                            step: 0.05
+                        )
+                        if terminalUnfocusedOpacity >= 0 {
+                            Button("Reset") { terminalUnfocusedOpacity = -1 }
+                                .buttonStyle(.borderless)
+                                .foregroundColor(.accentColor)
+                                .font(.caption)
+                        }
+                    }
+                }
+            }
+
+            // Split Divider Color requires Bonsplit public API — deferred for now
+
+            if settingsMatch("scrollback", "limit", "history", "buffer", "terminal") {
+                SettingsCardDivider()
+
+                SettingsCardRow(
+                    "Scrollback Limit",
+                    subtitle: terminalScrollback == 0 ? "Using ghostty config value" : "\(terminalScrollback.formatted()) bytes",
+                    controlWidth: pickerColumnWidth
+                ) {
+                    Picker("", selection: $terminalScrollback) {
+                        Text("Default (from config)").tag(0)
+                        Divider()
+                        Text("1 MB").tag(1_000_000)
+                        Text("10 MB").tag(10_000_000)
+                        Text("50 MB").tag(50_000_000)
+                        Text("100 MB").tag(100_000_000)
+                        Text("Unlimited").tag(Int.max)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
+        }
+
+        SettingsCardNote("These settings override your ghostty config file. Select \"Default\" or \"Reset\" to use the config file value.")
     }
 
     // MARK: - Section: Workspace Colors
@@ -1948,6 +2177,17 @@ struct SettingsView: View {
 
     private func resetAllSettings() {
         appearanceMode = AppearanceSettings.defaultMode.rawValue
+        terminalFontFamily = ""
+        terminalFontSize = 0
+        terminalThemeLight = ""
+        terminalThemeDark = ""
+        terminalBgOpacity = -1
+        terminalCursorColor = ""
+        terminalCursorStyle = ""
+        terminalScrollback = 0
+        terminalUnfocusedOpacity = -1
+        terminalDividerColor = ""
+        TerminalSettingsOverride.remove()
         socketControlMode = SocketControlSettings.defaultMode.rawValue
         claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
         browserSearchEngine = BrowserSearchSettings.defaultSearchEngine.rawValue

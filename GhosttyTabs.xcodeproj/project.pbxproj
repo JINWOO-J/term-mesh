@@ -19,6 +19,7 @@
 			CVB00008 /* MenuBarExtra.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00008 /* MenuBarExtra.swift */; };
 			CVB00009 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00009 /* SettingsView.swift */; };
 			CVB00010 /* AppearanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00010 /* AppearanceSettings.swift */; };
+			CVB00039 /* TerminalSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00039 /* TerminalSettings.swift */; };
 			CVB00011 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00011 /* Logging.swift */; };
 			CVB00012 /* AppDelegateHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00012 /* AppDelegateHelpers.swift */; };
 			CVB00013 /* SettingsDebugViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CVS00013 /* SettingsDebugViews.swift */; };
@@ -209,6 +210,7 @@
 			CVS00008 /* MenuBarExtra.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarExtra.swift; sourceTree = "<group>"; };
 			CVS00009 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 			CVS00010 /* AppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettings.swift; sourceTree = "<group>"; };
+			CVS00039 /* TerminalSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSettings.swift; sourceTree = "<group>"; };
 			CVS00011 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 			CVS00012 /* AppDelegateHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegateHelpers.swift; sourceTree = "<group>"; };
 			CVS00013 /* SettingsDebugViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDebugViews.swift; sourceTree = "<group>"; };
@@ -447,6 +449,7 @@
 					CVS00008 /* MenuBarExtra.swift */,
 					CVS00009 /* SettingsView.swift */,
 					CVS00010 /* AppearanceSettings.swift */,
+					CVS00039 /* TerminalSettings.swift */,
 					CVS00011 /* Logging.swift */,
 					CVS00012 /* AppDelegateHelpers.swift */,
 					CVS00013 /* SettingsDebugViews.swift */,
@@ -749,6 +752,7 @@
 					CVB00008 /* MenuBarExtra.swift in Sources */,
 					CVB00009 /* SettingsView.swift in Sources */,
 					CVB00010 /* AppearanceSettings.swift in Sources */,
+					CVB00039 /* TerminalSettings.swift in Sources */,
 					CVB00011 /* Logging.swift in Sources */,
 					CVB00012 /* AppDelegateHelpers.swift in Sources */,
 					CVB00013 /* SettingsDebugViews.swift in Sources */,

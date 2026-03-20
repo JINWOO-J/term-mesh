@@ -67,6 +67,16 @@ struct GhosttyConfig {
             config.loadTheme(themeName)
         }
 
+        // Load term-mesh override files (same order as GhosttyApp.loadDefaultConfigFilesWithLegacyFallback)
+        if let themeOverrideURL = TerminalThemeOverride.overrideURL(),
+           let contents = readConfigFile(at: themeOverrideURL.path) {
+            config.parse(contents)
+        }
+        if let settingsOverrideURL = TerminalSettingsOverride.overrideURL(),
+           let contents = readConfigFile(at: settingsOverrideURL.path) {
+            config.parse(contents)
+        }
+
         return config
     }
 

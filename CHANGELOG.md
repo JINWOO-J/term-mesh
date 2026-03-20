@@ -2,6 +2,25 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.74.0] - 2026-03-20
+
+### Added
+- Terminal settings GUI — configure font family, font size, light/dark theme, cursor style, cursor color, unfocused split opacity, and scrollback limit from Settings without editing config files
+- 459 bundled ghostty themes available in theme picker
+- System monospace fonts listed first in font picker with all fonts available
+
+### Fixed
+- Metal terminal surfaces no longer bleed through browser panels during pane zoom
+- Infinite layout loops in portal sync and focus chains resolved
+- IME command highlighting no longer triggers at line start — only after pipe/separator
+- Worktree creation from an existing worktree now correctly resolves the main repo
+- Agent Enter key delivery made reliable with atomic IME-style press/release pairs
+- Worktree deletion now checks for uncommitted changes by default — dirty worktrees are protected unless explicitly force-removed
+- Stale worktree cleanup during branch re-creation refuses to prune dirty worktrees
+
+### Changed
+- `worktree.remove` RPC now defaults to safe mode (rejects dirty worktrees); pass `force=true` to override
+
 ## [0.69.0] - 2026-03-17
 
 ### Fixed

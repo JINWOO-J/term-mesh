@@ -1487,9 +1487,6 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         updateSurfaceSize()
     }
 
-    private func nearlyEqual(_ lhs: CGFloat, _ rhs: CGFloat, epsilon: CGFloat = 0.0001) -> Bool {
-        abs(lhs - rhs) <= epsilon
-    }
 
     func expectedPixelSize(for pointsSize: CGSize) -> CGSize {
         let backing = convertToBacking(NSRect(origin: .zero, size: pointsSize)).size
@@ -2835,6 +2832,18 @@ struct GhosttyTerminalView: NSViewRepresentable {
         coordinator.desiredShowsUnreadNotificationRing = false
         coordinator.desiredPortalZPriority = 0
         coordinator.lastBoundHostId = nil
+
+        // Propagate visibility=false to the portal entry so synchronizeHostedView
+        // correctly hides the individual hosted view. Safe for transient SwiftUI
+        // dismantles because the subsequent updateNSView/bind will restore visibleInUI
+        // before the deferred portal sync fires.
+        if let hostedView = coordinator.hostedView {
+            TerminalWindowPortalRegistry.updateEntryVisibility(
+                for: hostedView,
+                visibleInUI: false
+            )
+        }
+
         let hostedView = coordinator.hostedView
 #if DEBUG
         if let hostedView {

@@ -33,8 +33,29 @@ pub fn create(params: serde_json::Value) -> Result<WorktreeInfo, String> {
     let params: CreateParams =
         serde_json::from_value(params).map_err(|e| format!("invalid params: {e}"))?;
 
-    let repo = Repository::open(&params.repo_path)
-        .map_err(|e| format!("cannot open repo at {}: {e}", params.repo_path))?;
+    // Open the repo — if repo_path is itself a worktree, resolve to the main
+    // repo. Git does not support nested worktrees, so creating a worktree from
+    // a worktree would fail.
+    //
+    // For a worktree, repo.path() returns `<main>/.git/worktrees/<name>/`.
+    // Walking up to the `.git` dir and opening its parent gives us the main repo.
+    let repo = {
+        let candidate = Repository::open(&params.repo_path)
+            .map_err(|e| format!("cannot open repo at {}: {e}", params.repo_path))?;
+        if candidate.is_worktree() {
+            let git_path = candidate.path(); // e.g. <main>/.git/worktrees/<name>/
+            // Walk up: worktrees/<name> -> worktrees -> .git -> main repo root
+            let main_git_dir = git_path.parent() // worktrees/<name>
+                .and_then(|p| p.parent())        // worktrees
+                .and_then(|p| p.parent())        // .git
+                .ok_or_else(|| format!("cannot resolve main repo from worktree path: {}", git_path.display()))?;
+            tracing::debug!("resolved worktree to main repo: {}", main_git_dir.display());
+            Repository::open(main_git_dir)
+                .map_err(|e| format!("cannot open main repo at {}: {e}", main_git_dir.display()))?
+        } else {
+            candidate
+        }
+    };
 
     let short_id = &Uuid::new_v4().to_string()[..8];
     let wt_name = format!("term-mesh_wt_{short_id}");

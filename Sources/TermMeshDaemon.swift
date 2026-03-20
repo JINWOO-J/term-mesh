@@ -397,9 +397,9 @@ final class TermMeshDaemon: ObservableObject {
         return nil
     }
 
-    /// Remove a worktree by name (force — skips dirty check).
-    func removeWorktree(repoPath: String, name: String) -> Bool {
-        let params: [String: Any] = ["repo_path": repoPath, "name": name]
+    /// Remove a worktree by name. Refuses if dirty unless `force` is true.
+    func removeWorktree(repoPath: String, name: String, force: Bool = false) -> Bool {
+        let params: [String: Any] = ["repo_path": repoPath, "name": name, "force": force]
         return rpcCall(method: "worktree.remove", params: params) != nil
     }
 

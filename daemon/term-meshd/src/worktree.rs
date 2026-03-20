@@ -89,6 +89,20 @@ pub fn create(params: serde_json::Value) -> Result<WorktreeInfo, String> {
                     if let Ok(wt_repo) = Repository::open(&wt_path) {
                         if let Ok(head) = wt_repo.head() {
                             if head.shorthand() == Some(&branch_name) {
+                                // Safety: skip if worktree has uncommitted changes
+                                let is_dirty = wt_repo
+                                    .statuses(Some(
+                                        git2::StatusOptions::new()
+                                            .include_untracked(true)
+                                            .recurse_untracked_dirs(true),
+                                    ))
+                                    .map(|s| !s.is_empty())
+                                    .unwrap_or(false);
+                                if is_dirty {
+                                    return Err(format!(
+                                        "existing worktree '{existing_wt}' on branch '{branch_name}' has uncommitted changes — remove it manually first"
+                                    ));
+                                }
                                 let _ = wt.prune(Some(
                                     git2::WorktreePruneOptions::new()
                                         .working_tree(true)
@@ -199,11 +213,14 @@ pub fn list_branches(params: serde_json::Value) -> Result<Vec<String>, String> {
 }
 
 /// Remove a worktree by name.
+/// When `force` is false (default), refuses to remove dirty or unpushed worktrees.
 pub fn remove(params: serde_json::Value) -> Result<(), String> {
     #[derive(Deserialize)]
     struct RemoveParams {
         repo_path: String,
         name: String,
+        #[serde(default)]
+        force: bool,
     }
 
     let params: RemoveParams =
@@ -218,6 +235,24 @@ pub fn remove(params: serde_json::Value) -> Result<(), String> {
         .map_err(|e| format!("worktree '{}' not found: {e}", params.name))?;
     let wt_path = wt.path().to_path_buf();
 
+    // Safety check: refuse to remove dirty/unpushed worktrees unless forced
+    if !params.force {
+        if let Ok(wt_repo) = Repository::open(&wt_path) {
+            if let Ok(statuses) = wt_repo.statuses(Some(
+                git2::StatusOptions::new()
+                    .include_untracked(true)
+                    .recurse_untracked_dirs(true),
+            )) {
+                if !statuses.is_empty() {
+                    return Err(format!(
+                        "worktree '{}' has uncommitted changes — use force=true or discard changes first",
+                        params.name
+                    ));
+                }
+            }
+        }
+    }
+
     wt.prune(Some(
         git2::WorktreePruneOptions::new()
             .working_tree(true)
@@ -231,7 +266,7 @@ pub fn remove(params: serde_json::Value) -> Result<(), String> {
             .map_err(|e| format!("cannot remove directory: {e}"))?;
     }
 
-    tracing::info!("removed worktree {}", params.name);
+    tracing::info!("removed worktree {} (force={})", params.name, params.force);
     Ok(())
 }
 
@@ -369,36 +404,10 @@ pub fn status(params: serde_json::Value) -> Result<WorktreeStatus, String> {
 }
 
 /// Remove a worktree only if it has no uncommitted changes.
-/// Returns an error describing the unsafe state if the worktree is dirty.
+/// Delegates to `remove()` with `force=false` (the default).
 pub fn safe_remove(params: serde_json::Value) -> Result<(), String> {
-    #[derive(Deserialize)]
-    struct SafeRemoveParams {
-        repo_path: String,
-        name: String,
-    }
-
-    let raw = params.clone();
-    let params: SafeRemoveParams =
-        serde_json::from_value(raw).map_err(|e| format!("invalid params: {e}"))?;
-
-    // Check status first
-    let st = status(serde_json::json!({
-        "repo_path": params.repo_path,
-        "name": params.name,
-    }))?;
-
-    if st.dirty {
-        return Err(format!(
-            "worktree '{}' has uncommitted changes — remove manually or discard changes first",
-            params.name
-        ));
-    }
-
-    // Safe to remove
-    remove(serde_json::json!({
-        "repo_path": params.repo_path,
-        "name": params.name,
-    }))
+    // remove() now checks dirty by default (force=false)
+    remove(params)
 }
 
 /// Detect orphan worktrees left behind by crashed sessions.

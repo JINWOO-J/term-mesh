@@ -6,14 +6,19 @@
 # so that Claude Code hooks fire back into term-mesh for notifications/status.
 # Outside term-mesh, it passes through to the real claude binary unchanged.
 
-# Find the real claude binary, skipping our own directory.
+# Find the real claude binary, skipping our own directory and other term-mesh wrappers.
 find_real_claude() {
     local self_dir
     self_dir="$(cd "$(dirname "$0")" && pwd)"
     local IFS=:
     for d in $PATH; do
         [[ "$d" == "$self_dir" ]] && continue
-        [[ -x "$d/claude" ]] && printf '%s' "$d/claude" && return 0
+        if [[ -x "$d/claude" ]]; then
+            # Skip other term-mesh wrapper copies to avoid infinite exec loop
+            # (tagged debug app ↔ production app both carry this wrapper)
+            head -2 "$d/claude" 2>/dev/null | grep -q "term-mesh claude wrapper" && continue
+            printf '%s' "$d/claude" && return 0
+        fi
     done
     return 1
 }

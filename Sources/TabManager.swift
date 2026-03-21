@@ -172,6 +172,7 @@ class TabManager: ObservableObject {
 
     deinit {
         workspaceCycleCooldownTask?.cancel()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     private func wireClosedBrowserTracking(for workspace: Workspace) {

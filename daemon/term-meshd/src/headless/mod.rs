@@ -77,6 +77,9 @@ pub struct SpawnParams {
     /// Swift app socket path — agents use this as TERMMESH_SOCKET for team.* commands.
     #[serde(default)]
     pub app_socket_path: Option<String>,
+    /// Agent-specific instructions (preset system prompt).
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 fn default_cli() -> String { "claude".into() }
@@ -105,6 +108,9 @@ pub struct AgentSpec {
     pub model: String,
     /// Resolved absolute path to the CLI binary (from Swift's agentBinaryPath).
     pub cli_path: Option<String>,
+    /// Agent-specific instructions (preset system prompt).
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 /// Manages all headless agent subprocesses and teams.
@@ -166,6 +172,7 @@ impl HeadlessManager {
                 &daemon_socket,
                 params.cli_path.as_deref(),
                 params.app_socket_path.as_deref(),
+                params.instructions.as_deref(),
             ),
         };
 
@@ -402,6 +409,7 @@ impl HeadlessManager {
                 working_directory: params.working_directory.clone(),
                 cli_path: spec.cli_path.clone(),
                 app_socket_path: params.app_socket_path.clone(),
+                instructions: spec.instructions.clone(),
             };
 
             match self.spawn_agent(spawn_params).await {

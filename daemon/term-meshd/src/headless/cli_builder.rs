@@ -64,16 +64,26 @@ pub fn build_claude_command(
     daemon_socket: &str,
     cli_path: Option<&str>,
     app_socket_path: Option<&str>,
+    instructions: Option<&str>,
 ) -> CliCommand {
     let program = resolve_cli_path(cli_path, "CLAUDE_PATH", "claude");
 
-    let args = vec![
+    let mut args = vec![
         "--input-format".into(), "stream-json".into(),
         "--output-format".into(), "stream-json".into(),
         "--verbose".into(),
         "--dangerously-skip-permissions".into(),
         "--model".into(), model.to_string(),
     ];
+
+    // Pass agent-specific instructions as --append-system-prompt
+    if let Some(inst) = instructions {
+        if !inst.is_empty() {
+            let escaped = inst.replace('\'', "'\\''");
+            args.push("--append-system-prompt".into());
+            args.push(escaped);
+        }
+    }
 
     let env = base_env(name, team_name, daemon_socket, app_socket_path);
 
@@ -193,7 +203,7 @@ pub fn build_codex_command(
 /// Map short model names to Gemini CLI model identifiers.
 fn gemini_model_name(short: &str) -> &str {
     match short.to_lowercase().as_str() {
-        "opus" => "gemini-3-pro",
+        "opus" => "gemini-3.1-pro-preview",
         "sonnet" => "gemini-3-flash",
         "haiku" => "gemini-3-flash",
         _ => short,

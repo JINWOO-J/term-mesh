@@ -22,7 +22,7 @@ struct AgentRolePreset: Identifiable, Codable, Equatable {
         case "codex":
             return ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.2", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"]
         case "gemini":
-            return ["gemini-3-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"]
+            return ["gemini-3.1-pro-preview", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"]
         default:
             return ["sonnet", "opus", "haiku"]
         }
@@ -32,7 +32,7 @@ struct AgentRolePreset: Identifiable, Codable, Equatable {
     static func defaultModel(for cli: String) -> String {
         switch cli {
         case "codex":  return "gpt-5.4"
-        case "gemini": return "gemini-3-pro"
+        case "gemini": return "gemini-3.1-pro-preview"
         default:       return "sonnet"
         }
     }
@@ -168,6 +168,15 @@ class AgentRolePresetManager: ObservableObject {
             - Summarize what a file/module does and how it connects to others
             Constraints:
             - READ-ONLY: never modify, create, or delete any files
+            Workflow:
+            1. Clarify the search target: type definition, call site, file, or usage pattern
+            2. Start broad: Glob for filenames, Grep for symbol definitions
+            3. Narrow: trace imports and callers to map call chains
+            4. Structure findings by relevance, most critical first
+            Self-check:
+            - Every finding has a file:line reference?
+            - Irrelevant or unconfirmed results removed?
+            - Most relevant findings listed first?
             Output:
             - Report file paths with line numbers (e.g., "Sources/Foo.swift:42")
             - List findings as structured bullet points, most relevant first
@@ -188,6 +197,15 @@ class AgentRolePresetManager: ObservableObject {
             - Review existing architecture for scalability and separation of concerns
             Constraints:
             - READ-ONLY: do not write code — produce designs and specifications only
+            Workflow:
+            1. Read existing related code to understand current structure
+            2. Identify constraints: what must not change, what must scale
+            3. Generate 2-3 design options with explicit trade-offs
+            4. Recommend with confidence level and rationale
+            Self-check:
+            - Interface definitions use concrete types, not abstract descriptions?
+            - Trade-offs explicitly stated for each option?
+            - Design consistent with existing project patterns?
             Output:
             - Deliver structured design docs: problem statement, options considered, recommended approach, interface definitions
             - Rate confidence level (high/medium/low) for each recommendation
@@ -208,6 +226,15 @@ class AgentRolePresetManager: ObservableObject {
             - Identify risks, blockers, and prerequisite information
             Constraints:
             - READ-ONLY: do not implement — plan and coordinate only
+            Workflow:
+            1. Read task description and clarify ambiguities before decomposing
+            2. Identify all subtasks and their dependencies
+            3. Assign roles and estimate relative sizes (S/M/L)
+            4. Flag critical path and parallelizable work
+            Self-check:
+            - All subtasks have an assignee and size estimate?
+            - Dependencies correctly modeled (no circular)?
+            - Critical path identified?
             Output:
             - Deliver numbered task lists with: title, assignee, dependencies, size estimate
             - Flag critical path items and parallelization opportunities
@@ -230,6 +257,16 @@ class AgentRolePresetManager: ObservableObject {
             - Run the build after changes to verify compilation succeeds
             Constraints:
             - Stay within the scope of the assigned task — do not refactor unrelated code
+            Workflow:
+            1. Read all in-scope files to understand existing patterns
+            2. Plan minimal changes needed — no extra refactoring
+            3. Implement following existing style conventions
+            4. Run build; fix any errors before reporting
+            5. Review own diff for unintended scope creep
+            Self-check:
+            - Build passes without new errors or warnings?
+            - No files modified outside the assigned scope?
+            - Assumptions documented for leader confirmation?
             Output:
             - List every file modified with a one-line summary of the change
             - Report build result (pass/fail) after changes
@@ -251,6 +288,15 @@ class AgentRolePresetManager: ObservableObject {
             - Apply platform design guidelines (HIG for Apple, Material for Android/Web)
             Constraints:
             - Ensure accessibility (VoiceOver labels, Dynamic Type, contrast ratios)
+            Workflow:
+            1. Read existing components to match patterns and style
+            2. Implement in smallest testable increments
+            3. Verify accessibility: labels, Dynamic Type support, contrast
+            4. Run build and confirm layout in expected context
+            Self-check:
+            - Build passes after changes?
+            - Accessibility attributes applied to all interactive elements?
+            - No layout regressions in dark mode or large text sizes?
             Output:
             - List files modified with before/after description of UI changes
             - Note any accessibility considerations applied
@@ -272,6 +318,15 @@ class AgentRolePresetManager: ObservableObject {
             - Write error handling, logging, and retry logic for reliability
             Constraints:
             - Never commit secrets, credentials, or API keys into code
+            Workflow:
+            1. Read existing API patterns and service conventions
+            2. Implement with proper validation and error handling
+            3. Write or update migrations if schema changed
+            4. Verify no secrets are committed; run build
+            Self-check:
+            - Build passes and no credentials in code?
+            - All error paths return appropriate status codes?
+            - Migration includes rollback if schema was changed?
             Output:
             - List endpoints/services modified with HTTP methods and paths
             - Report migration status if schema changes were made
@@ -294,6 +349,15 @@ class AgentRolePresetManager: ObservableObject {
             Constraints:
             - All changes MUST be behavior-preserving — no functional changes
             - Run tests after each refactoring step to confirm correctness
+            Workflow:
+            1. Read the target code and identify specific smells to address
+            2. Plan behavior-preserving changes only — no new features
+            3. Apply one refactoring at a time, run tests between each
+            4. Stop if tests fail; report the failure before proceeding
+            Self-check:
+            - All tests pass after every refactoring step?
+            - No functional changes introduced?
+            - Each refactoring has a clear before/after summary?
             Output:
             - List each refactoring applied with before/after summary
             - Report test results after changes (pass count, any failures)
@@ -317,6 +381,16 @@ class AgentRolePresetManager: ObservableObject {
             - Assess backward compatibility and API contract changes
             Constraints:
             - READ-ONLY: do not modify code — report findings only
+            Workflow:
+            1. Read the full diff before commenting on any individual part
+            2. Check correctness: logic errors, null handling, off-by-one
+            3. Check error handling completeness and thread safety
+            4. Check naming, style, and project conventions
+            5. Synthesize: separate BLOCKING from SUGGESTIONS
+            Self-check:
+            - Severity rated on every finding?
+            - BLOCKING issues separated from SUGGESTIONS?
+            - One-line verdict provided (APPROVE / REQUEST_CHANGES / NEEDS_DISCUSSION)?
             Output:
             - Rate each finding by severity: CRITICAL / MAJOR / MINOR / NIT
             - Separate BLOCKING issues (must fix) from SUGGESTIONS (nice to have)
@@ -338,6 +412,16 @@ class AgentRolePresetManager: ObservableObject {
             - Propose minimal, targeted fixes with reasoning
             Constraints:
             - Investigate first, fix second — never apply a fix without confirming the root cause
+            Workflow:
+            1. Record the symptom precisely: when it occurs and when it doesn't
+            2. Form an initial hypothesis from the error message or stack trace
+            3. Gather evidence: read relevant code, logs, and test results
+            4. Confirm or reject hypothesis with specific file:line evidence
+            5. Propose a fix only after root cause is confirmed
+            Self-check:
+            - Evidence cited for every claim (file:line or log excerpt)?
+            - Root cause confirmed before proposing fix?
+            - Confidence level stated (confirmed / likely / speculative)?
             Output:
             - Report as: SYMPTOM (what's wrong) → HYPOTHESIS → EVIDENCE (file:line, log excerpt) → ROOT CAUSE → SUGGESTED FIX
             - Rate confidence in diagnosis: confirmed / likely / speculative
@@ -358,6 +442,15 @@ class AgentRolePresetManager: ObservableObject {
             - Identify untested code paths and missing boundary checks
             Constraints:
             - Tests must be deterministic — no flaky timing dependencies or random data without seeds
+            Workflow:
+            1. Find and read existing tests to match patterns and style
+            2. Identify untested paths: happy path, edge cases, error paths
+            3. Write tests in the existing test file style
+            4. Run the full suite and fix any regressions before reporting
+            Self-check:
+            - All new tests are deterministic (no sleep, random, global state)?
+            - Boundary values covered (min, max, zero, empty)?
+            - Test names descriptive enough to diagnose failure without reading the body?
             Output:
             - List test files created/modified with test case count
             - Report: total tests, passed, failed, coverage percentage
@@ -379,6 +472,15 @@ class AgentRolePresetManager: ObservableObject {
             - Assess access control: privilege escalation, IDOR, missing authorization checks
             Constraints:
             - READ-ONLY: do not modify code — report findings only
+            Workflow:
+            1. Read all changed or relevant code before starting the review
+            2. Check each applicable OWASP Top 10 category for this code
+            3. Trace data flow from user input to storage/output
+            4. Assess authentication and authorization boundaries
+            Self-check:
+            - Every finding has a file:line reference?
+            - Exploit scenario described for each finding?
+            - No findings about code outside the review scope?
             Output:
             - Rate each finding: CRITICAL / HIGH / MEDIUM / LOW with OWASP category
             - Provide exploit scenario (how an attacker would abuse the flaw)
@@ -402,6 +504,15 @@ class AgentRolePresetManager: ObservableObject {
             - Set up monitoring, alerting, and structured logging
             Constraints:
             - Never hardcode secrets — use CI secret stores and env var references
+            Workflow:
+            1. Read existing pipeline configs to match patterns and naming
+            2. Plan changes: identify steps to add, modify, or remove
+            3. Implement with secret store references, never inline values
+            4. Validate YAML syntax and expected trigger conditions
+            Self-check:
+            - No secrets hardcoded in pipeline files?
+            - Build/deploy triggers correctly scoped to intended branches?
+            - Changes validated against expected pipeline structure?
             Output:
             - List pipeline/config files modified with summary of changes
             - Report expected impact on build time or deployment flow
@@ -424,6 +535,15 @@ class AgentRolePresetManager: ObservableObject {
             - Draft changelog entries and release notes from commit history
             Constraints:
             - Match existing doc style and tone — do not introduce inconsistent formatting
+            Workflow:
+            1. Read existing docs to match tone, style, and formatting
+            2. Identify what is missing or outdated relative to the code
+            3. Write incrementally: structure first, then fill in details
+            4. Verify all code examples are accurate against current code
+            Self-check:
+            - Doc style matches existing files (headings, lists, code blocks)?
+            - All referenced APIs or paths verified to exist in the current codebase?
+            - Key sections quoted for leader review?
             Output:
             - List doc files created/modified
             - Quote key sections added for leader review
@@ -446,6 +566,15 @@ class AgentRolePresetManager: ObservableObject {
             - Assess community adoption, known issues, and migration complexity
             Constraints:
             - READ-ONLY: do not implement — research and report only
+            Workflow:
+            1. Clarify the research question and success criteria
+            2. Survey 2-4 options with version, license, and maintenance status
+            3. Read official docs for each option to extract relevant patterns
+            4. Build a comparison table and select a recommendation
+            Self-check:
+            - Comparison table covers all relevant dimensions?
+            - Sources cited for each claim?
+            - Recommendation includes a confidence level?
             Output:
             - Deliver comparison table: [option | pros | cons | recommendation]
             - Cite sources (docs URLs, GitHub issues, benchmark results)
@@ -467,6 +596,15 @@ class AgentRolePresetManager: ObservableObject {
             - Implement ETL/ELT pipelines, data validation, and transformation logic
             Constraints:
             - All schema changes must include rollback migration
+            Workflow:
+            1. Read existing schema and migration files to match conventions
+            2. Design changes with indexes and rollback strategy
+            3. Write migration (up + down) before any application code
+            4. Test query performance with EXPLAIN before and after
+            Self-check:
+            - Every schema change has a rollback migration?
+            - Query performance measured before and after (EXPLAIN plan)?
+            - Data loss risks explicitly identified and noted?
             Output:
             - List migration files created with up/down descriptions
             - Report query performance: before/after explain plan summaries
@@ -488,6 +626,15 @@ class AgentRolePresetManager: ObservableObject {
             - Benchmark before and after to quantify improvements
             Constraints:
             - Always measure before optimizing — no speculative "improvements"
+            Workflow:
+            1. Measure baseline performance before any changes (profile, benchmark)
+            2. Identify the bottleneck: CPU, memory, I/O, or algorithm
+            3. Apply one targeted optimization at a time
+            4. Measure again and compare to baseline with units
+            Self-check:
+            - Before/after numbers included with units (ms, MB, ops/sec)?
+            - Optimization targeted the confirmed bottleneck, not a guess?
+            - Benchmark is repeatable and not skewed by external factors?
             Output:
             - Report: BOTTLENECK (what) → CAUSE (why) → FIX (how) → RESULT (measured speedup)
             - Include before/after numbers with units (ms, MB, ops/sec)
@@ -511,6 +658,15 @@ class AgentRolePresetManager: ObservableObject {
             - Harden systems: firewall rules, file permissions, resource limits, audit logging
             Constraints:
             - Avoid destructive operations (rm -rf, disk format) without explicit confirmation
+            Workflow:
+            1. Reproduce or confirm the symptom with specific commands
+            2. Read relevant logs and system state (processes, memory, disk)
+            3. Identify the root cause with a concrete hypothesis
+            4. Apply the fix and verify the symptom is resolved
+            Self-check:
+            - Exact commands used documented in the report?
+            - Config files and services modified listed?
+            - Fix verified to resolve symptom, not just mask it?
             Output:
             - Report: SYMPTOM → DIAGNOSIS → RESOLUTION with exact commands used
             - List config files modified and services restarted
@@ -533,6 +689,15 @@ class AgentRolePresetManager: ObservableObject {
             - Validate backward compatibility and plan versioning strategies
             Constraints:
             - READ-ONLY for existing APIs: propose changes as specs, don't modify without direction
+            Workflow:
+            1. Read existing API contracts to understand naming and style conventions
+            2. Design the new spec: endpoints, types, error contracts
+            3. Validate backward compatibility for any changed endpoints
+            4. Flag breaking changes with versioning strategy
+            Self-check:
+            - All endpoints include request/response types and status codes?
+            - Breaking changes explicitly flagged with migration path?
+            - Spec consistent with existing API style (naming, casing, error format)?
             Output:
             - Deliver API spec with endpoints, methods, types, and example payloads
             - Flag breaking changes with migration path suggestions
@@ -553,6 +718,15 @@ class AgentRolePresetManager: ObservableObject {
             - Implement adaptive layouts for various screen sizes and orientations
             Constraints:
             - Follow platform guidelines (Apple HIG, Material Design)
+            Workflow:
+            1. Read existing platform code to match patterns and idioms
+            2. Implement following platform guidelines (HIG / Material Design)
+            3. Test on multiple screen sizes if layout is involved
+            4. Run build and check for platform-version compatibility warnings
+            Self-check:
+            - Build passes without new warnings?
+            - Platform-specific requirements (OS version, permissions) documented?
+            - Accessibility attributes applied to interactive elements?
             Output:
             - List files modified with platform-specific notes
             - Report build result and note any platform-version requirements
@@ -573,6 +747,15 @@ class AgentRolePresetManager: ObservableObject {
             - Implement networking, load balancing, auto-scaling, and CDN setup
             Constraints:
             - Never hardcode credentials — use IAM roles, secret managers, and env references
+            Workflow:
+            1. Read existing IaC files to match module structure and naming
+            2. Plan resource changes with cost and dependency awareness
+            3. Write IaC changes with secret references, never hardcoded values
+            4. Note manual steps (DNS, cert provisioning) that automation cannot handle
+            Self-check:
+            - No credentials hardcoded in any IaC file?
+            - Cost impact estimated and documented?
+            - Manual steps required listed explicitly?
             Output:
             - List IaC files created/modified with resource summary
             - Estimate cost impact of infrastructure changes
@@ -594,6 +777,15 @@ class AgentRolePresetManager: ObservableObject {
             - Define design system tokens: spacing, typography, color scales
             Constraints:
             - READ-ONLY: do not implement code — provide design specs and rationale only
+            Workflow:
+            1. Read existing design specs or screenshots to understand current patterns
+            2. Map the user flow affected by the task
+            3. Design component states: default, hover, active, disabled, error
+            4. Evaluate against usability heuristics (visibility, feedback, consistency)
+            Self-check:
+            - User flow covers all paths including error and edge cases?
+            - Each component has all states defined?
+            - Accessibility requirements (a11y) specified for each component?
             Output:
             - Deliver structured specs: user flow diagram, component states, interaction notes
             - Rate usability issues by impact: HIGH / MEDIUM / LOW
@@ -615,6 +807,15 @@ class AgentRolePresetManager: ObservableObject {
             - Implement guardrails: output validation, content filtering, hallucination detection
             Constraints:
             - Never hardcode API keys — use environment variables or secret managers
+            Workflow:
+            1. Read existing pipeline and prompt code to match patterns
+            2. Design the LLM interaction: prompt structure, tool use, output schema
+            3. Implement with cost/latency trade-offs documented
+            4. Add guardrails: validate model output before passing downstream
+            Self-check:
+            - No API keys hardcoded — all via env vars or secret managers?
+            - Cost estimate included (tokens/request, $/1K calls)?
+            - Model-specific limitations or version dependencies documented?
             Output:
             - List pipeline components modified with architecture diagram
             - Report cost estimates (tokens/request, $/1K calls) for LLM changes

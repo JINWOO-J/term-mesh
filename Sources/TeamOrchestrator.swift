@@ -630,6 +630,9 @@ final class TeamOrchestrator: ObservableObject {
                 if let path = cliPaths[cli] {
                     spec["cli_path"] = path
                 }
+                if !a.instructions.isEmpty {
+                    spec["instructions"] = a.instructions
+                }
                 return spec
             }
             let createParams: [String: Any] = [
@@ -1137,6 +1140,14 @@ final class TeamOrchestrator: ObservableObject {
 
         **When in doubt, DELEGATE.** An idle agent is a wasted resource.
 
+        ## TOOL RESTRICTIONS (CRITICAL)
+
+        You MUST use `\(tmAgent)` for ALL team operations. The following Claude Code built-in tools create a parallel, disconnected team state and MUST NEVER be used:
+
+        **BANNED:** Agent (spawns disconnected subprocesses), TeamCreate, TeamDelete, SendMessage, TaskCreate, TaskList, TaskGet, TaskUpdate
+
+        If you catch yourself about to use the Agent tool — STOP and use `\(tmAgent) delegate` instead.
+
         ## Your Agents
         \(agentList)
 
@@ -1167,6 +1178,18 @@ final class TeamOrchestrator: ObservableObject {
         \(tmAgent) inbox
         ```
 
+        ## Writing Good Delegation Instructions
+
+        A good delegation includes:
+        - WHAT: clear description of the task
+        - WHERE: specific file paths or directories to look at
+        - HOW MUCH: scope boundaries (what NOT to touch)
+        - OUTPUT: what format the result should be in
+
+        Good: `\(tmAgent) delegate explorer 'Find all socket command handlers in TerminalController.swift. Search for case patterns in the RPC dispatch switch. Report: method name, line number, and threading (MainActor or off-main). Focus only on TerminalController.swift.'`
+
+        Bad: `\(tmAgent) delegate explorer 'look at the socket stuff'`
+
         ## Reading Agent Results (MANDATORY)
 
         After delegating tasks, you MUST collect results before responding to the user.
@@ -1178,6 +1201,7 @@ final class TeamOrchestrator: ObservableObject {
         \(tmAgent) wait --timeout 120
         \(tmAgent) wait --mode blocked --timeout 120
         \(tmAgent) wait --mode review_ready --timeout 120
+        \(tmAgent) wait --mode report --timeout 120
         ```
 
         ## Message Channel
@@ -1199,13 +1223,16 @@ final class TeamOrchestrator: ObservableObject {
 
         ## Your Workflow
 
-        For EVERY user request, follow this pattern:
+        For EVERY user message, execute these steps IN ORDER:
 
-        1. **Decompose** — Break the request into concrete subtasks
-        2. **Route** — Match each subtask to the best-fit agent by specialty
-        3. **Delegate** — Send tasks to agents in parallel when independent
-        4. **Monitor** — Use `wait`/`inbox`/`read` to track progress; unblock stuck agents
-        5. **Synthesize** — Collect all results and present a unified answer to the user
+        1. `\(tmAgent) status` — check which agents are idle
+        2. Decompose the request into 1-3 concrete subtasks
+        3. Delegate IMMEDIATELY to idle agents — do NOT analyze the problem yourself first
+        4. `\(tmAgent) wait --timeout 120 --mode report` — wait for results
+        5. `\(tmAgent) read <agent> --lines 100` — read each agent's output
+        6. Synthesize results and respond to the user
+
+        **CRITICAL:** Step 3 must happen BEFORE you read any source files or form your own analysis. Your job is to write good delegation instructions, not to do the work.
 
         **Anti-patterns to AVOID:**
         - Answering a question by reading files yourself when an explorer agent exists
@@ -1216,9 +1243,33 @@ final class TeamOrchestrator: ObservableObject {
 
         ## Keeping Agents Busy
 
-        After each user message, check: are any agents idle? If yes and there is work to do, delegate to them.
-        After completing a task cycle, check inbox and task board — reassign or create follow-up tasks as needed.
-        Proactively break large tasks into parallel subtasks to maximize throughput.
+        **Parallel:** tasks that don't need each other's output
+        - Example: explorer searches for X while architect reads existing design docs
+
+        **Serial:** task B needs task A's result as input
+        - Example: architect designs API → THEN executor implements it
+
+        **Always parallel when possible.** After each delegation round, check `\(tmAgent) status` — if any agent is idle and there is remaining work, delegate to them immediately.
+
+        ## Error Recovery
+
+        - Agent not responding: `\(tmAgent) read <agent> --lines 50` then `\(tmAgent) send <agent> 'status?'`
+        - Agent stuck/blocked: `\(tmAgent) task reassign <id> <other_agent>`
+        - Need to stop all: `\(tmAgent) broadcast 'STOP'`
+        - Results truncated: full reports at `~/.term-mesh/results/\(teamName)/<agent>-reply.md`
+
+        ## Example Workflow
+
+        User: "IME 입력창에서 방향키가 동작하지 않는 버그를 고쳐줘"
+
+        Step 1: `\(tmAgent) status` → explorer idle, executor idle, tester idle
+        Step 2: Decompose → (a) 원인 조사, (b) 수정 구현, (c) 테스트
+        Step 3: Parallel delegation:
+          `\(tmAgent) delegate explorer 'Sources/에서 IME 키 이벤트 처리를 찾아라. performKeyEquivalent, keyDown, flagsChanged에서 방향키 처리. NSEvent.keyCode 123-126 관련 코드 보고.'`
+          `\(tmAgent) delegate architect 'IME markedText 상태에서 방향키 이벤트의 올바른 처리 흐름 분석. NSTextInputClient 관점에서 정리.'`
+        Step 4: `\(tmAgent) wait --timeout 120 --mode report`
+        Step 5: Read results → delegate executor with fix instructions
+        Step 6: After fix → delegate tester to verify
 
         Environment: TERMMESH_SOCKET=\(socketPath)
         """
@@ -2084,11 +2135,11 @@ final class TeamOrchestrator: ObservableObject {
     }
 
     /// Map short model names to Gemini CLI model identifiers.
-    /// New-style names (gemini-3-pro, gemini-3-flash, etc.) pass through directly.
+    /// New-style names (gemini-3.1-pro, gemini-3-flash, etc.) pass through directly.
     /// Legacy short names kept for backward compatibility with saved presets.
     private static func geminiModelName(_ shortName: String) -> String {
         switch shortName.lowercased() {
-        case "opus":   return "gemini-3-pro"
+        case "opus":   return "gemini-3.1-pro"
         case "sonnet": return "gemini-3-flash"
         case "haiku":  return "gemini-3-flash"
         default:       return shortName

@@ -315,6 +315,7 @@ struct TermMeshApp: App {
         // are NSWindow-backed via AppDelegate.createMainWindow().
         .handlesExternalEvents(matching: Set(["term-mesh-primary"]))
         .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1200, height: 800)
         .commands {
             // MARK: - Agents Menu (combined agents + worktrees)
             CommandMenu("Agents") {

@@ -54,6 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         func windowWillClose(_ notification: Notification) {
             onClose?()
         }
+
+        // Prevent NSHostingView/AppKit from shrinking the window during
+        // appearance transitions (dark/light toggle). Mirrors the pattern
+        // used by SettingsWindowController (AboutView.swift:50-55).
+        func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+            NSSize(width: max(frameSize.width, 800), height: max(frameSize.height, 600))
+        }
     }
 
     weak var tabManager: TabManager?
@@ -1059,7 +1066,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // duplicates that share the SwiftUI WindowGroup's @StateObject tabManager.
         window.isRestorable = false
         window.center()
-        window.contentView = NSHostingView(rootView: root)
+        let hostingView = NSHostingView(rootView: root)
+        if #available(macOS 13.0, *) {
+            hostingView.sizingOptions = []
+        }
+        window.contentView = hostingView
+        window.minSize = NSSize(width: 800, height: 600)
 
         // Apply shared window styling (skip titlebar accessory for flush layout).
         applyWindowDecorations(to: window)

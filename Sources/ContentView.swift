@@ -5,6 +5,20 @@ import ObjectiveC
 import UniformTypeIdentifiers
 import WebKit
 
+// MARK: - NSHostingView sizing control
+
+/// Protocol to access `sizingOptions` on any `NSHostingView<V>` without knowing `V`.
+/// Swift generics are invariant, so `NSHostingView<AnyView>` casts always fail.
+/// This protocol-based type erasure lets us disable sizingOptions on the primary
+/// window's hosting view (fixes dark/light mode toggle causing window shrink).
+@available(macOS 13.0, *)
+private protocol HostingViewSizingControl: AnyObject {
+    func disableSizingOptions()
+}
+@available(macOS 13.0, *)
+extension NSHostingView: HostingViewSizingControl {
+    func disableSizingOptions() { sizingOptions = [] }
+}
 
 /// Installs a FileDropOverlayView on the window's theme frame for Finder file drag support.
 
@@ -1593,6 +1607,15 @@ struct ContentView: View {
             // Let the system titlebar handle window dragging (Warp-style flush layout).
             window.isMovable = true
             window.styleMask.insert(.fullSizeContentView)
+
+            // Prevent NSHostingView from shrinking the window when appearance
+            // changes (dark/light toggle). macOS 13+ default sizingOptions include
+            // .preferredContentSize which causes the hosting view to report
+            // preferred size (800×600) during re-layout, shrinking the window.
+            if #available(macOS 13.0, *) {
+                (window.contentView as? HostingViewSizingControl)?.disableSizingOptions()
+            }
+            window.minSize = NSSize(width: 800, height: 600)
 
             // Track this window for fullscreen notifications
             if observedWindow !== window {

@@ -20,7 +20,8 @@ BASE_APP      := $(BUILD_DIR)/term-mesh DEV.app
 PROD_APP      := $(PROD_DIR)/term-mesh.app
 INSTALL_APP   := /Applications/term-mesh.app
 BUNDLE_ID     := com.term-mesh.app.debug
-DMG_NAME      := term-mesh-macos.dmg
+APP_VERSION   := $(shell grep 'MARKETING_VERSION' GhosttyTabs.xcodeproj/project.pbxproj | head -1 | sed 's/.*= *//;s/ *;.*//')
+DMG_NAME      := term-mesh-macos-$(APP_VERSION).dmg
 PROJECT_DIR   := $(shell pwd)
 
 .PHONY: build prod deploy deploy-prod dmg run stop clean daemon test
@@ -177,7 +178,9 @@ dmg: prod
 		(echo "ERROR: term-meshd not found. Run 'cd daemon && cargo build --release' first." && exit 1)
 	@test -f "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" || \
 		(echo "ERROR: term-mesh-run not found. Run 'cd daemon && cargo build --release' first." && exit 1)
-	@echo "==> Creating DMG..."
+	@test -f "$(PROJECT_DIR)/daemon/target/release/tm-agent" || \
+		(echo "ERROR: tm-agent not found. Run 'cd daemon && cargo build --release' first." && exit 1)
+	@echo "==> Creating DMG (version $(APP_VERSION))..."
 	@rm -f "$(DMG_NAME)"
 	@if command -v create-dmg >/dev/null 2>&1; then \
 		STAGING=$$(mktemp -d) && \
@@ -185,7 +188,7 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin" && \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd" && \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run" && \
-		(cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" 2>/dev/null || true) && \
+		cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" && \
 		echo "==> Re-signing app bundle for DMG..." && \
 		codesign --force --deep --sign - "$$STAGING/term-mesh.app" && \
 		echo "==> Bundled binaries:" && \
@@ -207,7 +210,7 @@ dmg: prod
 		mkdir -p "$$STAGING/term-mesh.app/Contents/Resources/bin" && \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-meshd" && \
 		cp "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$$STAGING/term-mesh.app/Contents/Resources/bin/term-mesh-run" && \
-		(cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" 2>/dev/null || true) && \
+		cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$$STAGING/term-mesh.app/Contents/Resources/bin/tm-agent" && \
 		echo "==> Re-signing app bundle for DMG..." && \
 		codesign --force --deep --sign - "$$STAGING/term-mesh.app" && \
 		echo "==> Bundled binaries:" && \
@@ -216,9 +219,15 @@ dmg: prod
 		hdiutil create -volname "term-mesh" -srcfolder "$$STAGING" -ov -format UDZO "$(DMG_NAME)"; \
 		rm -rf "$$STAGING"; \
 	fi
-	@echo "==> DMG created: $(DMG_NAME)"
-	@echo "    Install: open $(DMG_NAME), drag term-mesh to Applications"
-	@echo "    Unsigned: run 'xattr -cr /Applications/term-mesh.app' after install"
+	@echo ""
+	@echo "================================================"
+	@echo "  DMG created: $(DMG_NAME)"
+	@echo "  Version:     $(APP_VERSION)"
+	@echo "  Size:        $$(du -h "$(DMG_NAME)" | cut -f1)"
+	@echo "================================================"
+	@echo "  Install: open $(DMG_NAME), drag term-mesh to Applications"
+	@echo "  Unsigned: run 'xattr -cr /Applications/term-mesh.app' after install"
+	@echo "================================================"
 
 clean:
 	@echo "==> Cleaning build artifacts..."

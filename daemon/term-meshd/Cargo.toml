@@ -13,7 +13,7 @@ path = "src/main.rs"
 tokio = { version = "1", features = ["full"] }
 
 # Git worktree orchestration (F-01)
-git2 = { version = "0.19", features = ["vendored-openssl"] }
+git2 = { version = "0.19", features = ["vendored-openssl", "vendored-libgit2"] }
 
 # Serialization (JSON-RPC over Unix Socket)
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +48,11 @@ uuid = { version = "1", features = ["v4"] }
 
 # Platform directories
 dirs = "6"
+
+# Force static zlib linking so term-meshd doesn't depend on Homebrew's libz.
+# Without this, libgit2-sys links dynamically to /opt/homebrew/opt/zlib/lib/libz.1.dylib
+# which crashes on machines without Homebrew (e.g. DMG installs).
+libz-sys = { version = "1", features = ["static"] }
 
 [dev-dependencies]
 tempfile = "3"

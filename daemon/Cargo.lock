@@ -1456,6 +1456,7 @@ dependencies = [
  "dirs",
  "git2",
  "libc",
+ "libz-sys",
  "notify",
  "rusqlite",
  "serde",

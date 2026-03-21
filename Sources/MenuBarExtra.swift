@@ -574,7 +574,7 @@ enum MenuBarIconRenderer {
         image.lockFocus()
         defer { image.unlockFocus() }
 
-        let glyphRect = NSRect(x: 1.2, y: 1.5, width: 11.6, height: 15.0)
+        let glyphRect = NSRect(x: 0.5, y: 0.5, width: 15.0, height: 17.0)
         drawGlyph(in: glyphRect)
 
         if let text = badgeText {
@@ -586,7 +586,7 @@ enum MenuBarIconRenderer {
 
     // Change this value to preview different icon styles (0–3).
     // 0: full-mesh pentagon, 1: hub-and-spoke, 2: prompt+mesh, 3: tri-mesh layered
-    private static let glyphStyle = 0
+    private static let glyphStyle = 1
 
     private static func drawGlyph(in rect: NSRect) {
         switch glyphStyle {
@@ -625,7 +625,7 @@ enum MenuBarIconRenderer {
     private static func drawHubAndSpoke(in rect: NSRect) {
         let cx = rect.midX
         let cy = rect.midY
-        let r: CGFloat = min(rect.width, rect.height) * 0.44
+        let r: CGFloat = min(rect.width, rect.height) * 0.48
 
         var nodes: [(CGFloat, CGFloat)] = [(cx, cy)]  // center hub
         for i in 0..<6 {
@@ -638,7 +638,7 @@ enum MenuBarIconRenderer {
         for i in 1...6 { edges.append((0, i)) }
         for i in 1...6 { edges.append((i, i == 6 ? 1 : i + 1)) }
 
-        drawMeshNetwork(nodes: nodes, edges: edges, in: rect, lineWidth: 0.7, nodeRadius: 1.4, hubIndex: 0, hubRadius: 2.0)
+        drawMeshNetwork(nodes: nodes, edges: edges, in: rect, lineWidth: 0.9, nodeRadius: 1.6, hubIndex: 0, hubRadius: 2.2)
     }
 
     // ── Style 2: Prompt + mesh dots ──
@@ -770,4 +770,3 @@ enum MenuBarIconRenderer {
         (text as NSString).draw(in: textRect, withAttributes: attrs)
     }
 }
-

@@ -274,6 +274,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if !isRunningUnderXCTest {
             daemon.startDaemon()
         }
+
+        // Install Claude slash commands from bundle to ~/.claude/commands/
+        if !isRunningUnderXCTest {
+            DispatchQueue.global(qos: .utility).async {
+                ClaudeCommandInstaller.installIfNeeded()
+            }
+        }
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
         if (env["TERMMESH_UI_TEST_MODE"] ?? env["CMUX_UI_TEST_MODE"]) == "1" {

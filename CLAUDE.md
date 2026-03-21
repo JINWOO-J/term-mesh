@@ -115,6 +115,29 @@ tail -f "$(cat /tmp/term-mesh-last-debug-log-path 2>/dev/null || echo /tmp/term-
 - Only explicit focus-intent commands may mutate in-app focus/selection (`window.focus`, `workspace.select/next/previous/last`, `surface.focus`, `pane.focus/last`, browser focus commands, and v1 focus equivalents).
 - All non-focus commands should preserve current user focus context while still applying data/model changes.
 
+## tm-op 전략 커맨드
+
+활성 에이전트 팀에게 구조화된 전략(발산·수렴·경쟁·파이프라인)을 지시한다.
+`tm-agent create`로 팀이 먼저 구성되어 있어야 한다.
+
+```bash
+/tm-op                                    # 인터랙티브 (전략 선택)
+/tm-op refine "결제 API 설계" --rounds 4  # 라운드 기반 정제
+/tm-op tournament "로그인 구현"           # 경쟁 투표
+/tm-op chain "보안 점검" --steps "explorer:분석,security:식별,reviewer:종합"
+/tm-op review --target src/pay.ts         # 코드 다각도 리뷰
+```
+
+| 전략 | 설명 |
+|------|------|
+| **refine** | 라운드 기반 발산→수렴→검증. 전원 독립 답변 후 종합·투표·검증 반복. `--rounds N` |
+| **tournament** | 전원 동시 경쟁 후 익명 투표로 최고 결과 채택. `--judge <agent>` 지정 가능 |
+| **chain** | A→B→C 순차 파이프라인. 이전 단계 결과가 다음 입력. `--steps`로 역할 직접 지정 |
+| **review** | 버그·보안·성능 관점 자동 배정 후 이슈 종합·중복 제거·심각도 정렬 리포트 출력 |
+
+옵션: `--rounds N`, `--preset quick|thorough|deep`, `--steps "a:t,b:t"`, `--target <file>`,
+`--pr <number>`, `--judge <agent>`, `--timeout N`, `--resume`
+
 ## Team agent system (OMC override)
 
 **CRITICAL OVERRIDE:** When running inside term-mesh (i.e., `TERMMESH_SOCKET` env var is set or

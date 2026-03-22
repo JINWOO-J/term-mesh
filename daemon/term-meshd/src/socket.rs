@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::time::{timeout, Duration};
@@ -58,9 +58,9 @@ pub struct SessionInfo {
 }
 
 /// Shared session store.
-pub type SessionStore = Arc<Mutex<Vec<SessionInfo>>>;
+pub type SessionStore = Arc<RwLock<Vec<SessionInfo>>>;
 /// Shared team dashboard state pushed by the Swift app.
-pub type TeamStateStore = Arc<Mutex<serde_json::Value>>;
+pub type TeamStateStore = Arc<RwLock<serde_json::Value>>;
 
 /// Shared context passed to each connection handler.
 pub struct Context {
@@ -251,7 +251,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             match serde_json::from_value::<SyncParams>(req.params.clone()) {
                 Ok(p) => {
                     let count = p.sessions.len();
-                    *ctx.sessions.lock().unwrap() = p.sessions;
+                    *ctx.sessions.write().unwrap() = p.sessions;
                     tracing::debug!("session.sync: {count} sessions");
                     Ok(serde_json::json!({"synced": count}))
                 }
@@ -259,7 +259,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             }
         }
         "session.list" => {
-            let sessions = ctx.sessions.lock().unwrap().clone();
+            let sessions = ctx.sessions.read().unwrap().clone();
             Ok(serde_json::to_value(sessions).unwrap())
         }
         "team.sync" => {
@@ -287,7 +287,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                         "tasks": synced["tasks"].as_array().map(|v| v.len()).unwrap_or(0),
                         "attention": synced["attention"].as_array().map(|v| v.len()).unwrap_or(0),
                     });
-                    *ctx.team_state.lock().unwrap() = synced;
+                    *ctx.team_state.write().unwrap() = synced;
                     tracing::debug!("team.sync: {:?}", counts);
                     Ok(counts)
                 }
@@ -295,7 +295,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             }
         }
         "team.get" => {
-            let team_state = ctx.team_state.lock().unwrap().clone();
+            let team_state = ctx.team_state.read().unwrap().clone();
             Ok(team_state)
         }
 

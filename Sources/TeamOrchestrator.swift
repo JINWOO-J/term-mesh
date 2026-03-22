@@ -2547,7 +2547,14 @@ final class TeamOrchestrator: ObservableObject {
 
     func postHeartbeat(teamName: String, agentName: String, summary: String?) {
         guard teams[teamName] != nil else { return }
-        heartbeats[teamName, default: [:]][agentName] = (Date(), summary?.nilIfBlank)
+        let now = Date()
+        heartbeats[teamName, default: [:]][agentName] = (now, summary?.nilIfBlank)
+        // Update lastProgressAt for the agent's active in_progress task
+        if var tasks = taskBoards[teamName],
+           let idx = tasks.firstIndex(where: { $0.assignee == agentName && $0.status == "in_progress" }) {
+            tasks[idx].lastProgressAt = now
+            taskBoards[teamName] = tasks
+        }
         syncTeamStateToDaemon()
     }
 

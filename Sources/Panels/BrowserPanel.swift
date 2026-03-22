@@ -498,35 +498,48 @@ final class BrowserHistoryStore: ObservableObject {
         guard let fileURL else { return }
         migrateLegacyTaggedHistoryFileIfNeeded(to: fileURL)
 
-        // Load synchronously on first access so the first omnibar query can use
-        // persisted history immediately (important for deterministic UI behavior).
-        let data: Data
-        do {
-            data = try Data(contentsOf: fileURL)
-        } catch {
-            return
-        }
+        // Load asynchronously on a background task to avoid blocking the main thread.
+        // `entries` will be populated shortly after; callers that need entries immediately
+        // (e.g. first omnibar query) will see an empty array until load completes, which
+        // is acceptable — the omnibar re-queries on each keystroke so history appears
+        // within the same interaction.
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
 
-        let decoded: [Entry]
-        do {
-            decoded = try JSONDecoder().decode([Entry].self, from: data)
-        } catch {
-            return
-        }
+            let data: Data
+            do {
+                data = try Data(contentsOf: fileURL)
+            } catch {
+                return
+            }
 
-        // Most-recent first.
-        entries = decoded.sorted(by: { $0.lastVisited > $1.lastVisited })
+            let decoded: [Entry]
+            do {
+                decoded = try JSONDecoder().decode([Entry].self, from: data)
+            } catch {
+                return
+            }
 
-        // Remove entries with invalid hosts (no TLD), e.g. "https://news."
-        let beforeCount = entries.count
-        entries.removeAll { entry in
-            guard let url = URL(string: entry.url),
-                  let host = url.host?.lowercased() else { return false }
-            let trimmed = host.hasSuffix(".") ? String(host.dropLast()) : host
-            return !trimmed.contains(".")
-        }
-        if entries.count != beforeCount {
-            scheduleSave()
+            // Sort and filter off-main before touching any published state.
+            // Most-recent first.
+            var loaded = decoded.sorted(by: { $0.lastVisited > $1.lastVisited })
+
+            // Remove entries with invalid hosts (no TLD), e.g. "https://news."
+            let beforeCount = loaded.count
+            loaded.removeAll { entry in
+                guard let url = URL(string: entry.url),
+                      let host = url.host?.lowercased() else { return false }
+                let trimmed = host.hasSuffix(".") ? String(host.dropLast()) : host
+                return !trimmed.contains(".")
+            }
+            let needsSave = loaded.count != beforeCount
+
+            // Assign to @Published entries on the main actor.
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.entries = loaded
+                if needsSave { self.scheduleSave() }
+            }
         }
     }
 

@@ -267,7 +267,7 @@ async fn brand_icon_handler() -> impl IntoResponse {
 
 /// GET /api/sessions — list terminal sessions from the Swift app
 async fn sessions_handler(State(state): State<Arc<HttpState>>) -> impl IntoResponse {
-    let sessions = state.sessions.lock().unwrap().clone();
+    let sessions = state.sessions.read().unwrap().clone();
     Json(serde_json::to_value(sessions).unwrap())
 }
 
@@ -298,14 +298,14 @@ async fn team_instance_handler(State(state): State<Arc<HttpState>>) -> impl Into
 
 async fn refreshed_team_state(state: &Arc<HttpState>) -> serde_json::Value {
     if let Some(live) = fetch_live_team_state(state).await {
-        *state.team_state.lock().unwrap() = live.clone();
+        *state.team_state.write().unwrap() = live.clone();
         return live;
     }
-    state.team_state.lock().unwrap().clone()
+    state.team_state.read().unwrap().clone()
 }
 
 async fn fetch_live_team_state(state: &Arc<HttpState>) -> Option<serde_json::Value> {
-    let cached = state.team_state.lock().unwrap().clone();
+    let cached = state.team_state.read().unwrap().clone();
     let socket_path = team_socket_path(state).ok()?;
     let teams = rpc_team_socket(&socket_path, "team.list", serde_json::json!({}))
         .await
@@ -366,7 +366,7 @@ async fn fetch_live_team_state(state: &Arc<HttpState>) -> Option<serde_json::Val
 }
 
 fn team_socket_path(state: &HttpState) -> Result<String, String> {
-    let team_state = state.team_state.lock().unwrap().clone();
+    let team_state = state.team_state.read().unwrap().clone();
     team_state
         .get("instance")
         .and_then(|v| v.get("socket_path"))

@@ -1,9 +1,74 @@
+<p align="center">
+  <img src="Assets.xcassets/AppIcon.appiconset/256.png" width="128" height="128" alt="term-mesh logo">
+</p>
+
 <h1 align="center">term-mesh</h1>
-<p align="center">AI Agent Control Plane for macOS</p>
+
+<p align="center">
+  <strong>AI Agent Control Plane for macOS</strong>
+</p>
 
 <p align="center">
   Run multiple AI coding agents in parallel with sandboxed worktrees, real-time resource monitoring, and a unified dashboard — all powered by a native GPU-accelerated terminal.
 </p>
+
+<p align="center">
+  <a href="https://term-mesh.dev">Website</a> &middot;
+  <a href="https://github.com/JINWOO-J/term-mesh/releases/latest">Download</a> &middot;
+  <a href="#features">Features</a> &middot;
+  <a href="#quick-start">Quick Start</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/JINWOO-J/term-mesh/releases/latest"><img src="docs/assets/macos-badge.png" height="40" alt="Download for macOS"></a>
+</p>
+
+---
+
+<p align="center">
+  <img src="docs/assets/main-first-image.png" width="800" alt="term-mesh screenshot">
+</p>
+
+## Features
+
+### Sandbox Worktree Orchestration
+Agents get physically isolated `git worktree` environments. Each agent session runs in its own directory, preventing accidental modifications to the main repository. Worktrees are automatically cleaned up when tabs close.
+
+### Multi-Agent Native Terminal
+Built on [Ghostty](https://ghostty.org) (libghostty) for Metal GPU-accelerated terminal rendering. Vertical sidebar tabs show git branch, working directory, and notification status for each agent session.
+
+<p align="center">
+  <img src="docs/assets/vertical-horizontal-tabs-and-splits.png" width="800" alt="Vertical tabs and split panes">
+</p>
+
+### Notification Rings
+Visual notification rings on sidebar tabs alert you when agents need attention — completed tasks, errors, or prompts waiting for input.
+
+<p align="center">
+  <img src="docs/assets/notification-rings.png" width="800" alt="Notification rings on sidebar tabs">
+</p>
+
+### Built-in Browser
+Open web pages, documentation, or dashboards directly in a split panel without leaving the terminal.
+
+<p align="center">
+  <img src="docs/assets/built-in-browser.png" width="800" alt="Built-in browser panel">
+</p>
+
+### Budget Guard & Resource Monitoring
+- **CPU/Memory monitoring** with automatic process discovery
+- **SIGSTOP/SIGCONT** process control when thresholds are exceeded
+- **Real API cost tracking** by parsing Claude Code's JSONL logs with incremental reads
+- Model-specific pricing: Opus $5/$25, Sonnet $3/$15, Haiku $1/$5 per MTok
+
+### File Access Heatmap
+FSEvents-based file watcher tracks create/modify/remove events across watched directories. The dashboard renders a heatmap with top-10 hot files, recent events, and per-minute timeline buckets.
+
+### Real-time Dashboard
+Monitoring dashboard available as a **split panel** in-app (Cmd+Shift+D) or **standalone browser** at `http://localhost:9876`.
+
+### Socket API
+Full control via Unix socket and HTTP REST API — automate tab creation, pane management, notifications, and more from scripts or other tools.
 
 ## Architecture
 
@@ -38,28 +103,6 @@
 └──────────────────────────────────────────────────────────┘
 ```
 
-## Features
-
-### F-01: Sandbox Worktree Orchestration
-Agents get physically isolated `git worktree` environments. Each agent session runs in its own `../term-mesh_wt_<UUID>` directory, preventing accidental modifications to the main repository. Worktrees are automatically cleaned up when tabs close.
-
-### F-02: Multi-Agent Native Terminal
-Built on [term-mesh](https://github.com/JINWOO-J/term-mesh) with libghostty for Metal GPU-accelerated terminal rendering. Vertical sidebar tabs show git branch, working directory, and notification status for each agent session.
-
-### F-03/F-04: Budget Guard & Resource Monitoring
-- **CPU/Memory monitoring** via `sysinfo` with automatic process discovery (BFS tree walk from daemon parent PID)
-- **SIGSTOP/SIGCONT** process control when thresholds are exceeded
-- **Real API cost tracking** by parsing Claude Code's JSONL logs (`~/.claude/projects/`) with byte-offset incremental reads
-- Model-specific pricing: Opus $5/$25, Sonnet $3/$15, Haiku $1/$5 per MTok
-
-### F-05: File Access Heatmap
-FSEvents-based file watcher using the `notify` crate tracks create/modify/remove events across watched directories. The dashboard renders a heatmap with top-10 hot files, recent events, and per-minute timeline buckets.
-
-### Dashboard
-Real-time monitoring dashboard available as:
-- **Split panel** in-app (Cmd+Shift+D) via WKWebView
-- **Standalone browser** at `http://localhost:9876`
-
 ## Prerequisites
 
 | Component | Version | Notes |
@@ -73,12 +116,11 @@ Real-time monitoring dashboard available as:
 
 ```bash
 # 1. Clone and setup
-git clone <repo-url> && cd term-mesh-term-mesh
-git checkout term-mesh-mig
+git clone https://github.com/JINWOO-J/term-mesh.git && cd term-mesh
 
 # 2. Build libghostty + native app
 ./scripts/setup.sh
-./scripts/reload.sh --tag term-mesh
+./scripts/reload.sh --tag dev
 
 # 3. Run daemon only (for development)
 cd daemon && cargo run --bin term-meshd
@@ -101,19 +143,9 @@ term-mesh help
 
 Install location: `~/bin/term-mesh`
 
-## Dashboard
+## API Reference
 
-### HTTP Mode (standalone browser)
-
-The daemon serves the dashboard at `http://localhost:9876` with 2-second polling.
-
-### Split Mode (in-app)
-
-Press **Cmd+Shift+D** to open the dashboard as a split panel alongside your terminal.
-
-### API Endpoints
-
-#### HTTP REST API (port 9876)
+### HTTP REST API (port 9876)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -127,7 +159,7 @@ Press **Cmd+Shift+D** to open the dashboard as a split panel alongside your term
 | POST | `/api/watcher/watch` | Start watching a path `{"path": "/..."}` |
 | POST | `/api/watcher/unwatch` | Stop watching a path `{"path": "/..."}` |
 
-#### JSON-RPC 2.0 (Unix Socket)
+### JSON-RPC 2.0 (Unix Socket)
 
 Socket path: `$TMPDIR/term-meshd.sock`
 
@@ -140,7 +172,6 @@ Socket path: `$TMPDIR/term-meshd.sock`
 | `monitor.snapshot` | Get system/process resource snapshot |
 | `monitor.track` | Track a PID for monitoring |
 | `monitor.untrack` | Stop tracking a PID |
-| `monitor.tracked` | List tracked PIDs |
 | `process.stop` | Send SIGSTOP to a process |
 | `process.resume` | Send SIGCONT to a process |
 | `budget.auto_stop` | Enable/disable auto-stop |
@@ -148,13 +179,10 @@ Socket path: `$TMPDIR/term-meshd.sock`
 | `watcher.unwatch` | Unwatch a filesystem path |
 | `watcher.snapshot` | Get heatmap snapshot |
 | `usage.snapshot` | Get API cost/token snapshot |
-| `usage.scan` | Trigger immediate JSONL scan |
 | `session.sync` | Push session list from Swift app |
 | `session.list` | List terminal sessions |
 
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
 daemon/
@@ -179,10 +207,10 @@ scripts/
   reload.sh                    # Rebuild and reload
 ```
 
-### Build & Test
+## Build & Test
 
 ```bash
-# Run all Rust tests (39 tests across 4 modules)
+# Run all Rust tests
 cd daemon && cargo test
 
 # Run daemon in development mode
@@ -192,12 +220,8 @@ cd daemon && cargo run --bin term-meshd
 bash daemon/scripts/bench.sh
 ```
 
-### Git Branch
-
-Active development is on the `term-mesh-mig` branch.
-
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`).
+This project is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE) (`AGPL-3.0-or-later`).
 
-Built as a fork of [term-mesh](https://github.com/JINWOO-J/term-mesh). See `LICENSE` for the full text.
+Built on [Ghostty](https://ghostty.org) by Mitchell Hashimoto.

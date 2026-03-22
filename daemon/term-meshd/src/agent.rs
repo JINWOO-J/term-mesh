@@ -953,6 +953,11 @@ impl AgentSessionManager {
             params![params.id, log_msg, ts],
         );
 
+        // Auto-dispatch dependent tasks if this task just completed
+        if params.status.as_deref() == Some("completed") {
+            Self::dispatch_ready_dependents(&inner, &params.id);
+        }
+
         drop(inner);
         self.task_get(&params.id)
     }
@@ -1176,6 +1181,74 @@ impl AgentSessionManager {
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    /// After a task completes, auto-dispatch any dependent tasks whose all deps are now met.
+    /// Only dispatches tasks that are in 'pending' status with an assignee already set.
+    fn dispatch_ready_dependents(inner: &Inner, completed_task_id: &str) {
+        // Find tasks that depend on the just-completed task
+        let mut stmt = match inner.db.prepare(
+            "SELECT DISTINCT task_id FROM task_deps WHERE depends_on = ?1"
+        ) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let dependent_ids: Vec<String> = match stmt.query_map(params![completed_task_id], |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => return,
+        };
+
+        let ts = now_ms();
+        for task_id in &dependent_ids {
+            // Only dispatch pending tasks that already have an assignee
+            let task_info = match inner.db.query_row(
+                "SELECT status, assignee FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            ) {
+                Ok(info) => info,
+                Err(_) => continue,
+            };
+            let (status, assignee) = task_info;
+            if status != "pending" || assignee.is_none() {
+                continue;
+            }
+
+            // Check if ALL deps of this task are now completed
+            let deps = Self::load_deps(&inner.db, task_id);
+            if deps.is_empty() {
+                continue;
+            }
+            let placeholders: Vec<String> = deps.iter().enumerate()
+                .map(|(i, _)| format!("?{}", i + 1)).collect();
+            let sql = format!(
+                "SELECT COUNT(*) FROM tasks WHERE id IN ({}) AND status != 'completed'",
+                placeholders.join(", ")
+            );
+            let mut dep_stmt = match inner.db.prepare(&sql) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let dep_refs: Vec<&dyn rusqlite::types::ToSql> = deps.iter()
+                .map(|d| d as &dyn rusqlite::types::ToSql).collect();
+            let incomplete: i64 = match dep_stmt.query_row(dep_refs.as_slice(), |row| row.get(0)) {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+
+            if incomplete == 0 {
+                let agent_id = assignee.unwrap();
+                let _ = inner.db.execute(
+                    "UPDATE tasks SET status = 'assigned', updated_at_ms = ?1 WHERE id = ?2",
+                    params![ts, task_id],
+                );
+                let _ = inner.db.execute(
+                    "INSERT INTO task_log (task_id, agent_id, message, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+                    params![task_id, agent_id, "auto-dispatched: all dependencies completed", ts],
+                );
+                tracing::info!("auto-dispatched task {task_id} to {agent_id} (all deps completed)");
+            }
+        }
+    }
 
     fn load_deps(db: &Connection, task_id: &str) -> Vec<String> {
         let mut stmt = match db.prepare("SELECT depends_on FROM task_deps WHERE task_id = ?1") {

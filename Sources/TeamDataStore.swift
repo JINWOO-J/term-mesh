@@ -329,6 +329,31 @@ final class TeamDataStore: @unchecked Sendable {
         return tasks[idx]
     }
 
+    /// Work-stealing: atomically find the highest-priority pending/unassigned task
+    /// and assign it to the given agent (status → assigned).
+    /// Returns nil if no claimable task exists.
+    @discardableResult
+    func claimTask(teamName: String, agentName: String) -> TeamOrchestrator.TeamTask? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var tasks = taskBoards[teamName] else { return nil }
+        // Find pending tasks with no assignee, sorted by priority descending then createdAt ascending
+        guard let idx = tasks.indices.filter({
+            (tasks[$0].status == "pending" || tasks[$0].status == "queued") && tasks[$0].assignee == nil
+        }).sorted(by: { a, b in
+            if tasks[a].priority != tasks[b].priority { return tasks[a].priority > tasks[b].priority }
+            return tasks[a].createdAt < tasks[b].createdAt
+        }).first else { return nil }
+        let now = Date()
+        tasks[idx].assignee = agentName
+        tasks[idx].status = "assigned"
+        tasks[idx].updatedAt = now
+        tasks[idx].lastProgressAt = now
+        taskBoards[teamName] = tasks
+        notifyChanged()
+        return tasks[idx]
+    }
+
     @discardableResult
     func unblockTask(teamName: String, taskId: String) -> TeamOrchestrator.TeamTask? {
         lock.lock()
@@ -426,7 +451,15 @@ final class TeamDataStore: @unchecked Sendable {
     func postHeartbeat(teamName: String, agentName: String, summary: String?) {
         lock.lock()
         guard teamRegistry[teamName] != nil else { lock.unlock(); return }
-        heartbeats[teamName, default: [:]][agentName] = (Date(), summary?.teamDataNilIfBlank)
+        let now = Date()
+        heartbeats[teamName, default: [:]][agentName] = (now, summary?.teamDataNilIfBlank)
+        // Update lastProgressAt for the agent's active non-terminal task
+        let nonTerminalStatuses: Set<String> = ["pending", "assigned", "in_progress", "review_ready"]
+        if var tasks = taskBoards[teamName],
+           let idx = tasks.firstIndex(where: { $0.assignee == agentName && nonTerminalStatuses.contains($0.status) }) {
+            tasks[idx].lastProgressAt = now
+            taskBoards[teamName] = tasks
+        }
         lock.unlock()
         notifyChanged()
     }

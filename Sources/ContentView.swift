@@ -2168,6 +2168,7 @@ struct ContentView: View {
     }
 
     private var commandPaletteResults: [CommandPaletteSearchResult] {
+        guard isCommandPalettePresented else { return [] }
         let entries = commandPaletteEntries
         let query = commandPaletteQueryForMatching
         let queryIsEmpty = query.isEmpty

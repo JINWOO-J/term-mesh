@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import os
+import Security
 
 /// Client for communicating with the term-meshd Rust daemon over Unix socket.
 /// Uses JSON-RPC 2.0 (line-delimited) protocol.
@@ -51,8 +52,80 @@ final class TermMeshDaemon: ObservableObject {
     }
 
     var dashboardPassword: String {
-        get { UserDefaults.standard.string(forKey: Self.dashboardPasswordKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: Self.dashboardPasswordKey) }
+        get { Self.keychainLoadPassword() }
+        set { Self.keychainSavePassword(newValue) }
+    }
+
+    // MARK: - Keychain Helpers (Dashboard Password)
+
+    private static let keychainService = "com.termmesh.dashboard"
+    private static let keychainAccount = "dashboard-password"
+
+    /// Load the dashboard password from Keychain.
+    /// On first call, migrates any existing UserDefaults plaintext value to Keychain.
+    private static func keychainLoadPassword() -> String {
+        migratePasswordToKeychainIfNeeded()
+
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: keychainService,
+            kSecAttrAccount: keychainAccount,
+            kSecReturnData: kCFBooleanTrue!,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let password = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return password
+    }
+
+    /// Save the dashboard password to Keychain.
+    /// Passing an empty string removes the Keychain item.
+    private static func keychainSavePassword(_ password: String) {
+        if password.isEmpty {
+            keychainDeletePassword()
+            return
+        }
+        guard let data = password.data(using: .utf8) else { return }
+
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: keychainService,
+            kSecAttrAccount: keychainAccount,
+        ]
+        let attributes: [CFString: Any] = [
+            kSecValueData: data,
+        ]
+
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var addQuery = query
+            addQuery[kSecValueData] = data
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    /// Delete the Keychain item for the dashboard password.
+    private static func keychainDeletePassword() {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: keychainService,
+            kSecAttrAccount: keychainAccount,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// One-time migration: if a plaintext password exists in UserDefaults,
+    /// move it to Keychain and remove it from UserDefaults.
+    private static func migratePasswordToKeychainIfNeeded() {
+        guard let existing = UserDefaults.standard.string(forKey: dashboardPasswordKey),
+              !existing.isEmpty else { return }
+        keychainSavePassword(existing)
+        UserDefaults.standard.removeObject(forKey: dashboardPasswordKey)
     }
 
     // MARK: - Worktree Settings (UserDefaults)

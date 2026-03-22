@@ -247,6 +247,13 @@ enum Commands {
         #[arg(long)]
         from: Option<String>,
     },
+    /// Claim the next available pending task (work-stealing)
+    Claim,
+    /// Suggest the best agent for a task description based on capability mapping
+    Suggest {
+        /// Task description to match against agent capabilities
+        task: Vec<String>,
+    },
     /// Warm up agents (send pong task, wait for response, print latency)
     Warmup {
         /// Specific agent to warm up (default: all agents)
@@ -477,6 +484,29 @@ fn rpc_call_timeout(sock: &PathBuf, method: &str, params: Value, timeout_secs: u
     writer.flush().map_err(|e| format!("flush: {e}"))?;
 
     let mut reader = BufReader::new(&stream);
+    let mut response = String::new();
+    reader.read_line(&mut response).map_err(|e| format!("read: {e}"))?;
+
+    serde_json::from_str(&response).map_err(|e| format!("parse: {e}"))
+}
+
+/// Send a single JSON-RPC call on an already-connected UnixStream.
+/// Allows sequential dependent calls to reuse one connection.
+fn rpc_call_on_stream(stream: &UnixStream, method: &str, params: Value) -> Result<Value, String> {
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    });
+    let mut line = serde_json::to_string(&request).map_err(|e| format!("serialize: {e}"))?;
+    line.push('\n');
+
+    let mut writer = stream.try_clone().map_err(|e| format!("clone: {e}"))?;
+    writer.write_all(line.as_bytes()).map_err(|e| format!("write: {e}"))?;
+    writer.flush().map_err(|e| format!("flush: {e}"))?;
+
+    let mut reader = BufReader::new(stream);
     let mut response = String::new();
     reader.read_line(&mut response).map_err(|e| format!("read: {e}"))?;
 
@@ -1109,6 +1139,15 @@ fn main() {
             run_wait(&sock, &team, timeout, interval, &mode, task.as_deref(), &filter);
             return;
         }
+        Commands::Claim => {
+            run_claim(&sock, &team, &agent);
+            return;
+        }
+        Commands::Suggest { task } => {
+            let description = task.join(" ");
+            run_suggest(&sock, &team, &description);
+            return;
+        }
         Commands::Warmup { agent: ref target, timeout } => {
             run_warmup(&sock, &team, target.as_deref(), timeout);
             return;
@@ -1654,7 +1693,10 @@ fn run_delegate_result(
         }
     }
 
-    // Fallback: original 2-RPC path (server may not support team.delegate yet)
+    // Fallback: 2-RPC path (server may not support team.delegate yet).
+    // Reuse a single UnixStream connection for task.create → team.send to avoid
+    // two separate connect() calls. task_id from create is needed for the send
+    // instruction, so requests remain sequential but share one connection.
     let mut params = json!({
         "team_name": team,
         "title": resolved_title,
@@ -1665,7 +1707,12 @@ fn run_delegate_result(
     if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
     if !deps.is_empty() { params["depends_on"] = json!(deps); }
 
-    let created = rpc_call(sock, "team.task.create", params)
+    // Open one connection for both task.create and team.send.
+    let fallback_stream = UnixStream::connect(sock).map_err(|e| format!("connect: {e}"))?;
+    fallback_stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    fallback_stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
+
+    let created = rpc_call_on_stream(&fallback_stream, "team.task.create", params)
         .map_err(|e| format!("task.create: {e}"))?;
 
     let task = &created["result"];
@@ -1694,8 +1741,8 @@ fn run_delegate_result(
         }
     }
 
-    // In-app panel path
-    let sent = rpc_call(sock, "team.send", json!({
+    // In-app panel path: reuse the same connection for team.send.
+    let sent = rpc_call_on_stream(&fallback_stream, "team.send", json!({
         "team_name": team, "agent_name": target,
         "text": &send_text,
     })).map_err(|e| format!("team.send: {e}"))?;
@@ -1838,7 +1885,15 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
     }
 
     let mut elapsed: u32 = 0;
+    let mut current_interval: u64 = 0; // first poll is immediate (no sleep)
+    let min_interval: u64 = 1;
+    let max_interval: u64 = interval as u64;
+    let mut prev_progress_count: usize = 0;
     while elapsed < timeout {
+        if current_interval > 0 {
+            thread::sleep(Duration::from_secs(current_interval));
+            elapsed += current_interval as u32;
+        }
         let mut report_done = false;
         let mut report_progress = "0/0".to_string();
         let mut msg_done = false;
@@ -1846,7 +1901,27 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
 
         if mode == "report" || mode == "any" {
             // Primary: check task completion status (immune to stale reports)
-            match rpc_call(sock, "team.status", json!({ "team_name": team })) {
+            // Batch team.status + team.result.status into a single socket connection
+            let p_status = serde_json::to_string(&json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "team.status", "params": { "team_name": team }
+            })).unwrap_or_default();
+            let p_result_status = serde_json::to_string(&json!({
+                "jsonrpc": "2.0", "id": 2,
+                "method": "team.result.status", "params": { "team_name": team }
+            })).unwrap_or_default();
+            let (status_r, result_status_r) = match rpc_batch(sock, &[p_status, p_result_status]) {
+                Ok(mut results) if results.len() >= 2 => {
+                    let rs = results.remove(1);
+                    let r = results.remove(0);
+                    (Ok(r), Ok(rs))
+                }
+                Ok(_) | Err(_) => (
+                    rpc_call(sock, "team.status", json!({ "team_name": team })),
+                    rpc_call(sock, "team.result.status", json!({ "team_name": team })),
+                ),
+            };
+            match status_r {
                 Ok(r) => {
                     if let Some(agents) = r["result"]["agents"].as_array() {
                         let filtered: Vec<&Value> = agents.iter()
@@ -1861,7 +1936,7 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
                             .collect();
                         if with_tasks.is_empty() {
                             // Fallback: no tasks assigned, use legacy result.status
-                            if let Ok(rs) = rpc_call(sock, "team.result.status", json!({ "team_name": team })) {
+                            if let Ok(rs) = result_status_r {
                                 let done = rs["result"]["completed"].as_u64().unwrap_or(0);
                                 let total = rs["result"]["total"].as_u64().unwrap_or(0);
                                 report_done = rs["result"]["all_done"].as_bool().unwrap_or(false);
@@ -1906,21 +1981,41 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
         let mut task_obj = json!(null);
 
         if mode == "blocked" || mode == "review_ready" || mode == "idle" || task_id.is_some() {
-            match rpc_call(sock, "team.inbox", json!({ "team_name": team })) {
-                Ok(r) => {
-                    if let Some(items) = r["result"]["items"].as_array() {
-                        inbox_blocked = items.iter()
-                            .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("blocked"))
-                            .cloned().collect();
-                        inbox_review = items.iter()
-                            .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("review_ready"))
-                            .cloned().collect();
-                    }
-                }
-                Err(e) => eprintln!("  Warning: inbox RPC failed: {e}"),
-            }
             if let Some(tid) = task_id {
-                match rpc_call(sock, "team.task.get", json!({ "team_name": team, "task_id": tid })) {
+                // Batch team.inbox + team.task.get into a single socket connection
+                let p_inbox = serde_json::to_string(&json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "team.inbox", "params": { "team_name": team }
+                })).unwrap_or_default();
+                let p_task_get = serde_json::to_string(&json!({
+                    "jsonrpc": "2.0", "id": 2,
+                    "method": "team.task.get", "params": { "team_name": team, "task_id": tid }
+                })).unwrap_or_default();
+                let (inbox_r, task_r) = match rpc_batch(sock, &[p_inbox, p_task_get]) {
+                    Ok(mut results) if results.len() >= 2 => {
+                        let tr = results.remove(1);
+                        let ir = results.remove(0);
+                        (Ok(ir), Ok(tr))
+                    }
+                    Ok(_) | Err(_) => (
+                        rpc_call(sock, "team.inbox", json!({ "team_name": team })),
+                        rpc_call(sock, "team.task.get", json!({ "team_name": team, "task_id": tid })),
+                    ),
+                };
+                match inbox_r {
+                    Ok(r) => {
+                        if let Some(items) = r["result"]["items"].as_array() {
+                            inbox_blocked = items.iter()
+                                .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("blocked"))
+                                .cloned().collect();
+                            inbox_review = items.iter()
+                                .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("review_ready"))
+                                .cloned().collect();
+                        }
+                    }
+                    Err(e) => eprintln!("  Warning: inbox RPC failed: {e}"),
+                }
+                match task_r {
                     Ok(r) => {
                         if r["ok"].as_bool().unwrap_or(false) {
                             task_obj = r["result"].clone();
@@ -1928,6 +2023,20 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
                         }
                     }
                     Err(e) => eprintln!("  Warning: task.get RPC failed for {tid}: {e}"),
+                }
+            } else {
+                match rpc_call(sock, "team.inbox", json!({ "team_name": team })) {
+                    Ok(r) => {
+                        if let Some(items) = r["result"]["items"].as_array() {
+                            inbox_blocked = items.iter()
+                                .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("blocked"))
+                                .cloned().collect();
+                            inbox_review = items.iter()
+                                .filter(|i| i["kind"].as_str() == Some("task") && i["status"].as_str() == Some("review_ready"))
+                                .cloned().collect();
+                        }
+                    }
+                    Err(e) => eprintln!("  Warning: inbox RPC failed: {e}"),
                 }
             }
         }
@@ -2030,8 +2139,18 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
             _ => { eprintln!("Unknown wait mode: {mode}"); process::exit(1); }
         }
 
-        thread::sleep(Duration::from_secs(interval as u64));
-        elapsed += interval;
+        // Adaptive polling: speed up on progress, slow down on idle
+        let current_progress_count: usize = {
+            let r = report_progress.split('/').next().and_then(|s| s.parse().ok()).unwrap_or(0usize);
+            let m = msg_progress.split('/').next().and_then(|s| s.parse().ok()).unwrap_or(0usize);
+            r + m + inbox_blocked.len() + inbox_review.len()
+        };
+        if current_progress_count > prev_progress_count {
+            current_interval = min_interval;
+            prev_progress_count = current_progress_count;
+        } else {
+            current_interval = (current_interval + 1).min(max_interval);
+        }
     }
 
     eprintln!("Timeout: not all agents reported within {timeout}s");
@@ -2140,6 +2259,92 @@ fn run_warmup(sock: &PathBuf, team: &str, target: Option<&str>, timeout: u32) {
         println!("{pass} warm, {fail} timed out");
         process::exit(1);
     }
+}
+
+/// Work-stealing: claim the next available pending/unassigned task for this agent.
+fn run_claim(sock: &PathBuf, team: &str, agent: &str) {
+    let result = rpc_call(sock, "team.task.claim", json!({
+        "team_name": team,
+        "agent_name": agent,
+    }));
+    match result {
+        Ok(ref v) if v["ok"].as_bool().unwrap_or(false) => {
+            if v["result"].is_null() {
+                println!("{}", pretty(&json!({ "ok": true, "result": null, "message": "No claimable tasks available" })));
+            } else {
+                println!("{}", pretty(v));
+            }
+        }
+        Ok(ref v) => println!("{}", pretty(v)),
+        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+    }
+}
+
+/// Returns capabilities (keywords) for a given agent_type.
+/// Used by `tm-agent suggest` to match task descriptions to agents.
+fn capabilities_for_agent_type(agent_type: &str) -> Vec<&'static str> {
+    match agent_type.to_lowercase().as_str() {
+        "architect" => vec!["architecture", "design", "system", "review", "structure", "plan", "interface", "boundary"],
+        "executor"  => vec!["implement", "code", "coding", "refactor", "fix", "build", "develop", "feature"],
+        "explorer"  => vec!["explore", "discover", "search", "analyze", "investigate", "map", "find"],
+        "reviewer"  => vec!["review", "check", "audit", "quality", "lint", "standards", "critique"],
+        "tester"    => vec!["test", "testing", "qa", "verification", "unit", "integration", "e2e", "spec"],
+        "debugger"  => vec!["debug", "trace", "crash", "error", "bug", "fix", "diagnose", "root cause"],
+        "writer"    => vec!["document", "docs", "readme", "guide", "migration", "notes", "write"],
+        "security"  => vec!["security", "auth", "vulnerability", "pentest", "owasp", "injection", "xss"],
+        "ai"        => vec!["ai", "ml", "llm", "model", "inference", "prompt", "embedding", "rag"],
+        "backend"   => vec!["api", "server", "database", "backend", "service", "schema", "query", "rest"],
+        "frontend"  => vec!["ui", "frontend", "component", "react", "swiftui", "css", "layout", "ux"],
+        _ => vec![],
+    }
+}
+
+/// Score how well a task description matches an agent's capabilities.
+fn capability_score(description_lower: &str, capabilities: &[&str]) -> usize {
+    capabilities.iter().filter(|kw| description_lower.contains(*kw)).count()
+}
+
+/// Suggest the best agent for a task description based on capability mapping.
+fn run_suggest(sock: &PathBuf, team: &str, description: &str) {
+    let status = match rpc_call(sock, "team.status", json!({ "team_name": team })) {
+        Ok(v) => v,
+        Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+    };
+
+    let agents = match status["result"]["agents"].as_array() {
+        Some(a) => a.clone(),
+        None => { eprintln!("Error: no agents in team"); process::exit(1); }
+    };
+
+    let desc_lower = description.to_lowercase();
+    let mut scored: Vec<(String, String, Vec<&'static str>, usize)> = agents.iter().filter_map(|a| {
+        let name = a["name"].as_str()?.to_string();
+        let agent_type = a["agent_type"].as_str().unwrap_or(&name).to_string();
+        let caps = capabilities_for_agent_type(&agent_type);
+        let score = capability_score(&desc_lower, &caps);
+        Some((name, agent_type, caps, score))
+    }).collect();
+
+    scored.sort_by(|a, b| b.3.cmp(&a.3));
+
+    let suggestions: Vec<Value> = scored.iter().map(|(name, agent_type, caps, score)| {
+        json!({
+            "agent": name,
+            "agent_type": agent_type,
+            "capabilities": caps,
+            "score": score,
+        })
+    }).collect();
+
+    let best = scored.first().map(|(name, _, _, _)| name.as_str()).unwrap_or("none");
+    println!("{}", serde_json::to_string_pretty(&json!({
+        "ok": true,
+        "result": {
+            "task": description,
+            "best_match": best,
+            "ranking": suggestions,
+        }
+    })).unwrap_or_default());
 }
 
 fn run_brief(sock: &PathBuf, team: &str, target: &str, lines: u32) {

@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -337,6 +338,195 @@ def bench_rpc_batch(sock_path: str, team_name: str, batch_size: int = 10,
             "speedup": speedup, "target_speedup": 1.5, "passed": True}
 
 
+def bench_wait_detection_latency(sock_path: str, team_name: str,
+                                  iterations: int = 5) -> Dict:
+    """Measure time between task.done and tm-agent wait detection."""
+    import threading
+    latencies: List[float] = []
+    for i in range(iterations):
+        # 1. Create task
+        task = _rpc_call(sock_path, "team.task.create", {
+            "team_name": team_name, "title": f"wait-bench-{i}",
+            "assignee": "w1",
+        }, rid=800 + i)
+        task_id = task.get("result", {}).get("id", "")
+        if not task_id:
+            continue
+
+        # 2. Start task
+        _rpc_call(sock_path, "team.task.update", {
+            "team_name": team_name, "task_id": task_id, "status": "in_progress",
+        }, rid=810 + i)
+
+        # 3. Launch wait in background thread
+        wait_detected_at: List[Optional[float]] = [None]
+
+        def run_wait(tid: str = task_id) -> None:
+            subprocess.run(
+                ["tm-agent", "wait", "--timeout", "30",
+                 "--mode", "report", "--task", tid],
+                capture_output=True,
+            )
+            wait_detected_at[0] = time.monotonic()
+
+        t = threading.Thread(target=run_wait, daemon=True)
+        t.start()
+        time.sleep(0.5)  # let wait start polling
+
+        # 4. Complete task and record timestamp
+        done_at = time.monotonic()
+        _rpc_call(sock_path, "team.task.done", {
+            "team_name": team_name, "task_id": task_id, "result": "bench",
+        }, rid=820 + i)
+
+        t.join(timeout=15)
+        if wait_detected_at[0] is not None:
+            latency_ms = round((wait_detected_at[0] - done_at) * 1000, 2)
+            latencies.append(latency_ms)
+
+    stats = compute_stats(latencies)
+    passed = stats["p50_ms"] <= 1000 if latencies else False
+    return {"name": "Wait Detection Latency", "iterations": len(latencies),
+            "target_p50_ms": 1000, **stats, "passed": passed}
+
+
+def bench_connection_reuse(sock_path: str, iterations: int = 50) -> Dict:
+    """Compare single-connection 2-RPC vs dual-connection 2-RPC."""
+    team = BENCH_PANE_TEAM
+
+    # Method A: 2 separate connections (baseline)
+    latencies_separate: List[float] = []
+    for i in range(iterations):
+        t0 = time.perf_counter()
+        _rpc_call(sock_path, "team.task.create", {
+            "team_name": team, "title": f"pool-bench-{i}", "assignee": "w1",
+        }, rid=900 + i)
+        _rpc_call(sock_path, "team.status", {"team_name": team}, rid=950 + i)
+        latencies_separate.append((time.perf_counter() - t0) * 1000)
+
+    # Method B: 1 connection, 2 RPCs
+    latencies_reused: List[float] = []
+    for i in range(iterations):
+        t0 = time.perf_counter()
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(5)
+        try:
+            s.connect(sock_path)
+            # RPC 1
+            p1 = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "team.task.create",
+                             "params": {"team_name": team,
+                                        "title": f"pool-bench2-{i}",
+                                        "assignee": "w1"}}) + "\n"
+            s.sendall(p1.encode())
+            buf = b""
+            while b"\n" not in buf:
+                chunk = s.recv(8192)
+                if not chunk:
+                    break
+                buf += chunk
+            # RPC 2 on same socket
+            p2 = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "team.status",
+                             "params": {"team_name": team}}) + "\n"
+            s.sendall(p2.encode())
+            buf2 = b""
+            while b"\n" not in buf2:
+                chunk = s.recv(8192)
+                if not chunk:
+                    break
+                buf2 += chunk
+        except Exception:
+            pass
+        finally:
+            s.close()
+        latencies_reused.append((time.perf_counter() - t0) * 1000)
+
+    sep_avg = sum(latencies_separate) / len(latencies_separate) if latencies_separate else 0
+    reu_avg = sum(latencies_reused) / len(latencies_reused) if latencies_reused else 0
+    speedup_pct = round((1 - reu_avg / sep_avg) * 100, 1) if sep_avg > 0 else 0
+    passed = speedup_pct >= 10
+    return {
+        "iterations": iterations,
+        "separate_avg_ms": round(sep_avg, 2),
+        "reused_avg_ms": round(reu_avg, 2),
+        "speedup_pct": speedup_pct,
+        "target_speedup_pct": 10,
+        "passed": passed,
+    }
+
+
+def bench_concurrent_reads(sock_path: str, concurrency: int = 10,
+                            requests_per_worker: int = 50) -> Dict:
+    """Measure read throughput under concurrent load (RwLock benefit)."""
+    import concurrent.futures
+    team = BENCH_PANE_TEAM
+
+    def worker(_worker_id: int) -> List[float]:
+        lats: List[float] = []
+        for _ in range(requests_per_worker):
+            t0 = time.perf_counter()
+            _rpc_call(sock_path, "team.status", {"team_name": team})
+            lats.append((time.perf_counter() - t0) * 1000)
+        return lats
+
+    def write_worker(worker_id: int) -> List[float]:
+        lats: List[float] = []
+        for j in range(requests_per_worker // 5):
+            t0 = time.perf_counter()
+            _rpc_call(sock_path, "team.agent.heartbeat", {
+                "team_name": team, "agent_name": f"w{(worker_id % BENCH_AGENT_COUNT) + 1}",
+                "summary": f"write-{j}",
+            })
+            lats.append((time.perf_counter() - t0) * 1000)
+        return lats
+
+    # Sequential baseline
+    t_seq_start = time.perf_counter()
+    seq_latencies = worker(0)
+    t_seq_total = time.perf_counter() - t_seq_start
+    seq_rps = round(requests_per_worker / t_seq_total, 1) if t_seq_total > 0 else 0
+
+    # Concurrent reads only
+    t_conc_start = time.perf_counter()
+    all_latencies: List[float] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(worker, i) for i in range(concurrency)]
+        for f in concurrent.futures.as_completed(futures):
+            try:
+                all_latencies.extend(f.result())
+            except Exception:
+                pass
+    t_conc_total = time.perf_counter() - t_conc_start
+    conc_rps = round((concurrency * requests_per_worker) / t_conc_total, 1) if t_conc_total > 0 else 0
+
+    # Mixed read/write (80% reads, 20% writes)
+    t_mixed_start = time.perf_counter()
+    mixed_latencies: List[float] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+        read_futures = [pool.submit(worker, i) for i in range(concurrency - 2)]
+        write_futures = [pool.submit(write_worker, i) for i in range(2)]
+        for f in concurrent.futures.as_completed(read_futures + write_futures):
+            try:
+                mixed_latencies.extend(f.result())
+            except Exception:
+                pass
+    t_mixed_total = time.perf_counter() - t_mixed_start
+    total_mixed = (concurrency - 2) * requests_per_worker + 2 * (requests_per_worker // 5)
+    mixed_rps = round(total_mixed / t_mixed_total, 1) if t_mixed_total > 0 else 0
+
+    speedup = round(conc_rps / seq_rps, 2) if seq_rps > 0 else 0
+    passed = speedup >= 1.5
+    return {
+        "name": "Concurrent Read Throughput",
+        "concurrency": concurrency,
+        "sequential_rps": seq_rps,
+        "concurrent_rps": conc_rps,
+        "mixed_rps": mixed_rps,
+        "speedup": speedup,
+        "target_speedup": 1.5,
+        "passed": passed,
+    }
+
+
 def run_rpc_pane_benchmarks(sock_path: str) -> Dict:
     """Run pane-mode RPC benchmarks — creates/destroys a temp pane team (10 agents)."""
     results: Dict[str, Any] = {}
@@ -375,6 +565,12 @@ def run_rpc_pane_benchmarks(sock_path: str) -> Dict:
         results["heartbeat"] = bench_rpc_heartbeat(sock_path, BENCH_PANE_TEAM)
         print(f"  {dim('Running batch comparison...')}")
         results["batch_speedup"] = bench_rpc_batch(sock_path, BENCH_PANE_TEAM)
+        print(f"  {dim('Running wait detection latency...')}")
+        results["wait_detection"] = bench_wait_detection_latency(sock_path, BENCH_PANE_TEAM)
+        print(f"  {dim('Running connection reuse...')}")
+        results["connection_reuse"] = bench_connection_reuse(sock_path)
+        print(f"  {dim('Running concurrent reads...')}")
+        results["concurrent_reads"] = bench_concurrent_reads(sock_path)
     finally:
         try:
             _rpc_call(sock_path, "team.destroy", {"team_name": BENCH_PANE_TEAM}, rid=999)
@@ -1147,6 +1343,15 @@ def print_rpc_pane_results(results: Dict):
     if "batch_speedup" in results:
         r = results["batch_speedup"]
         _result_line("Batch Speedup", ">= 1.5x", f"{r['speedup']}x", r["passed"])
+    if "wait_detection" in results:
+        r = results["wait_detection"]
+        _result_line("Wait Detection (p50)", "<= 1000 ms", f"{r['p50_ms']} ms", r["passed"])
+    if "connection_reuse" in results:
+        r = results["connection_reuse"]
+        _result_line("Connection Reuse Speedup", ">= 10%", f"{r['speedup_pct']}%", r["passed"])
+    if "concurrent_reads" in results:
+        r = results["concurrent_reads"]
+        _result_line("Concurrent Reads Speedup", ">= 1.5x", f"{r['speedup']}x", r["passed"])
     print()
 
 

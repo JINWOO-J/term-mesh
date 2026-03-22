@@ -109,6 +109,9 @@ struct IMETextEditor: NSViewRepresentable {
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
         if let textView = scrollView.documentView as? IMETextView {
             textView.undoManager?.removeAllActions()
+            // Cancel any deferred applyHighlightingDeferred calls so they don't fire
+            // after the view has been removed from the SwiftUI tree (TERM-MESH-9 fix).
+            NSObject.cancelPreviousPerformRequests(withTarget: textView)
         }
     }
 

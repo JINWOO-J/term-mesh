@@ -457,8 +457,11 @@ final class IMETextView: NSTextView {
             attrStr.append(NSAttributedString(string: " ",
                 attributes: [.font: font ?? NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)]))
 
-            textStorage?.insert(attrStr, at: selectedRange().location)
-            setSelectedRange(NSRange(location: selectedRange().location + attrStr.length, length: 0))
+            // Capture selectedRange() once to avoid TOCTOU: if text changes between the
+            // insert and setSelectedRange calls, both calls see a consistent location.
+            let insertLoc = selectedRange().location
+            textStorage?.insert(attrStr, at: insertLoc)
+            setSelectedRange(NSRange(location: insertLoc + attrStr.length, length: 0))
             imageAttachments.append((attachment: attachment, path: path))
             delegate?.textDidChange?(Notification(name: NSText.didChangeNotification, object: self))
             return
@@ -571,9 +574,9 @@ final class IMETextView: NSTextView {
 
     @objc func applyHighlightingDeferred() {
         guard !isApplyingRainbow, !hasMarkedText() else { return }
-        isApplyingRainbow = true
+        // Do NOT set isApplyingRainbow here — applyRainbowKeywords manages it internally.
+        // Setting it before the call caused applyRainbowKeywords' own guard to exit immediately.
         applyRainbowKeywords()
-        isApplyingRainbow = false
         updateGhostSuggestion()
     }
 
@@ -582,24 +585,33 @@ final class IMETextView: NSTextView {
     /// Skips any active IME composing (marked) range.
     func applyRainbowKeywords() {
         guard !isApplyingRainbow else { return }
-        guard let storage = textStorage else { return }
-        let len = storage.length
-        guard len > 0 else { return }
+        guard let storage = textStorage, storage.length > 0 else { return }
         let markedRange = self.markedRange()
         let fullString = storage.string as NSString
 
-        storage.beginEditing()
+        isApplyingRainbow = true
+        defer { isApplyingRainbow = false }
 
-        // Reset foreground color to default outside the marked (composing) range
+        storage.beginEditing()
+        // Re-snapshot len INSIDE beginEditing so all NSRange construction uses
+        // the same authoritative value — guards against any deferred-call races
+        // where storage length changed between the early guard and here.
+        let len = storage.length
+        guard len > 0 else { storage.endEditing(); return }
+
+        // Reset foreground color to default outside the marked (composing) range.
+        // Clamp markedRange bounds against len to guard against stale IME state
+        // (e.g. text replaced externally while composition was active).
         if markedRange.location == NSNotFound || markedRange.length == 0 {
             storage.addAttribute(.foregroundColor, value: NSColor.textColor,
                                  range: NSRange(location: 0, length: len))
         } else {
-            if markedRange.location > 0 {
+            let clampedMarkedStart = min(markedRange.location, len)
+            if clampedMarkedStart > 0 {
                 storage.addAttribute(.foregroundColor, value: NSColor.textColor,
-                                     range: NSRange(location: 0, length: markedRange.location))
+                                     range: NSRange(location: 0, length: clampedMarkedStart))
             }
-            let afterLoc = markedRange.location + markedRange.length
+            let afterLoc = min(markedRange.location + markedRange.length, len)
             if afterLoc < len {
                 storage.addAttribute(.foregroundColor, value: NSColor.textColor,
                                      range: NSRange(location: afterLoc, length: len - afterLoc))

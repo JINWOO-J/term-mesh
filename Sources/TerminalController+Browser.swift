@@ -287,15 +287,15 @@ extension TerminalController {
         let url = urlStr.flatMap { URL(string: $0) }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to create browser", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
-            v2MaybeFocusWindow(for: tabManager)
-            v2MaybeSelectWorkspace(tabManager, workspace: ws)
+            self.v2MaybeFocusWindow(for: tabManager)
+            self.v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
-            let sourceSurfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            let sourceSurfaceId = self.v2UUID(params, "surface_id") ?? ws.focusedPanelId
             guard let sourceSurfaceId else {
                 result = .err(code: "not_found", message: "No focused surface to split", data: nil)
                 return
@@ -311,7 +311,7 @@ extension TerminalController {
             var placementStrategy = "split_right"
             let createdPanel: BrowserPanel?
             if let targetPane = ws.preferredBrowserTargetPane(fromPanelId: sourceSurfaceId) {
-                createdPanel = ws.newBrowserSurface(inPane: targetPane, url: url, focus: v2FocusAllowed())
+                createdPanel = ws.newBrowserSurface(inPane: targetPane, url: url, focus: self.v2FocusAllowed())
                 createdSplit = false
                 placementStrategy = "reuse_right_sibling"
             } else {
@@ -319,7 +319,7 @@ extension TerminalController {
                     from: sourceSurfaceId,
                     orientation: .horizontal,
                     url: url,
-                    focus: v2FocusAllowed()
+                    focus: self.v2FocusAllowed()
                 )
             }
 
@@ -329,26 +329,27 @@ extension TerminalController {
             }
 
             let targetPaneUUID = ws.paneId(forPanelId: browserPanelId)?.id
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
-                "pane_id": v2OrNull(targetPaneUUID?.uuidString),
-                "pane_ref": v2Ref(kind: .pane, uuid: targetPaneUUID),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
+                "pane_id": self.v2OrNull(targetPaneUUID?.uuidString),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: targetPaneUUID),
                 "surface_id": browserPanelId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: browserPanelId),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: browserPanelId),
                 "source_surface_id": sourceSurfaceId.uuidString,
-                "source_surface_ref": v2Ref(kind: .surface, uuid: sourceSurfaceId),
-                "source_pane_id": v2OrNull(sourcePaneUUID?.uuidString),
-                "source_pane_ref": v2Ref(kind: .pane, uuid: sourcePaneUUID),
-                "target_pane_id": v2OrNull(targetPaneUUID?.uuidString),
-                "target_pane_ref": v2Ref(kind: .pane, uuid: targetPaneUUID),
+                "source_surface_ref": self.v2Ref(kind: .surface, uuid: sourceSurfaceId),
+                "source_pane_id": self.v2OrNull(sourcePaneUUID?.uuidString),
+                "source_pane_ref": self.v2Ref(kind: .pane, uuid: sourcePaneUUID),
+                "target_pane_id": self.v2OrNull(targetPaneUUID?.uuidString),
+                "target_pane_ref": self.v2Ref(kind: .pane, uuid: targetPaneUUID),
                 "created_split": createdSplit,
                 "placement_strategy": placementStrategy
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -364,21 +365,22 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Surface not found or not a browser", data: ["surface_id": surfaceId.uuidString])
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager),
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager),
                   let browserPanel = ws.browserPanel(for: surfaceId) else { return }
             browserPanel.navigateSmart(url)
             var payload: [String: Any] = [
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
-                "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))
+                "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId),
+                "window_id": self.v2OrNull(self.v2ResolveWindowId(tabManager: tabManager)?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: self.v2ResolveWindowId(tabManager: tabManager))
             ]
-            v2BrowserAppendPostSnapshot(params: params, surfaceId: surfaceId, payload: &payload)
+            self.v2BrowserAppendPostSnapshot(params: params, surfaceId: surfaceId, payload: &payload)
             result = .ok(payload)
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -1514,8 +1516,8 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Surface not found or not a browser", data: ["surface_id": surfaceId.uuidString])
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager),
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager),
                   let browserPanel = ws.browserPanel(for: surfaceId) else { return }
             switch action {
             case "back":
@@ -1529,15 +1531,16 @@ extension TerminalController {
             }
             var payload: [String: Any] = [
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId),
-                "window_id": v2OrNull(v2ResolveWindowId(tabManager: tabManager)?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: v2ResolveWindowId(tabManager: tabManager))
+                "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId),
+                "window_id": self.v2OrNull(self.v2ResolveWindowId(tabManager: tabManager)?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: self.v2ResolveWindowId(tabManager: tabManager))
             ]
-            v2BrowserAppendPostSnapshot(params: params, surfaceId: surfaceId, payload: &payload)
+            self.v2BrowserAppendPostSnapshot(params: params, surfaceId: surfaceId, payload: &payload)
             result = .ok(payload)
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -1550,8 +1553,8 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Surface not found or not a browser", data: ["surface_id": surfaceId.uuidString])
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager),
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager),
                   let browserPanel = ws.browserPanel(for: surfaceId) else { return }
             result = .ok([
                 "workspace_id": ws.id.uuidString,
@@ -1559,6 +1562,7 @@ extension TerminalController {
                 "url": browserPanel.currentURL?.absoluteString ?? ""
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -1571,12 +1575,12 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Surface not found or not a browser", data: ["surface_id": surfaceId.uuidString])
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager),
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager),
                   let browserPanel = ws.browserPanel(for: surfaceId) else { return }
 
-            v2MaybeFocusWindow(for: tabManager)
-            v2MaybeSelectWorkspace(tabManager, workspace: ws)
+            self.v2MaybeFocusWindow(for: tabManager)
+            self.v2MaybeSelectWorkspace(tabManager, workspace: ws)
 
             // Prevent omnibar auto-focus from immediately stealing first responder back.
             browserPanel.suppressOmnibarAutofocus(for: 1.0)
@@ -1598,6 +1602,7 @@ extension TerminalController {
                 result = .err(code: "internal_error", message: "Focus did not move into web view", data: nil)
             }
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -1610,8 +1615,8 @@ extension TerminalController {
         }
 
         var focused = false
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager),
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager),
                   let browserPanel = ws.browserPanel(for: surfaceId) else { return }
             let webView = browserPanel.webView
             guard let window = webView.window,
@@ -1621,6 +1626,7 @@ extension TerminalController {
             }
             focused = fr.isDescendant(of: webView)
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return .ok(["focused": focused])
     }
 

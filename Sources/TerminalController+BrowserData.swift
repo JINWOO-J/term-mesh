@@ -532,31 +532,32 @@ extension TerminalController {
         }
 
         var payload: [String: Any]?
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
-            let browserPanels = orderedPanels(in: ws).compactMap { panel -> BrowserPanel? in
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
+            let browserPanels = self.orderedPanels(in: ws).compactMap { panel -> BrowserPanel? in
                 panel as? BrowserPanel
             }
             let tabs: [[String: Any]] = browserPanels.enumerated().map { index, panel in
                 [
                     "id": panel.id.uuidString,
-                    "ref": v2Ref(kind: .surface, uuid: panel.id),
+                    "ref": self.v2Ref(kind: .surface, uuid: panel.id),
                     "index": index,
                     "title": ws.panelTitle(panelId: panel.id) ?? panel.displayTitle,
                     "url": panel.currentURL?.absoluteString ?? "",
                     "focused": panel.id == ws.focusedPanelId,
-                    "pane_id": v2OrNull(ws.paneId(forPanelId: panel.id)?.id.uuidString),
-                    "pane_ref": v2Ref(kind: .pane, uuid: ws.paneId(forPanelId: panel.id)?.id)
+                    "pane_id": self.v2OrNull(ws.paneId(forPanelId: panel.id)?.id.uuidString),
+                    "pane_ref": self.v2Ref(kind: .pane, uuid: ws.paneId(forPanelId: panel.id)?.id)
                 ]
             }
             payload = [
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
-                "surface_id": v2OrNull(ws.focusedPanelId?.uuidString),
-                "surface_ref": v2Ref(kind: .surface, uuid: ws.focusedPanelId),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
+                "surface_id": self.v2OrNull(ws.focusedPanelId?.uuidString),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: ws.focusedPanelId),
                 "tabs": tabs
             ]
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
 
         guard let payload else {
             return .err(code: "not_found", message: "Workspace not found", data: nil)
@@ -571,14 +572,14 @@ extension TerminalController {
 
         let url = v2String(params, "url").flatMap(URL.init(string:))
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to create browser tab", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
-            let paneUUID = v2UUID(params, "pane_id")
-                ?? v2UUID(params, "target_pane_id")
-                ?? (v2UUID(params, "surface_id").flatMap { ws.paneId(forPanelId: $0)?.id })
+            let paneUUID = self.v2UUID(params, "pane_id")
+                ?? self.v2UUID(params, "target_pane_id")
+                ?? (self.v2UUID(params, "surface_id").flatMap { ws.paneId(forPanelId: $0)?.id })
                 ?? ws.paneId(forPanelId: ws.focusedPanelId ?? UUID())?.id
                 ?? ws.bonsplitController.focusedPaneId?.id
             guard let paneUUID,
@@ -587,20 +588,21 @@ extension TerminalController {
                 return
             }
 
-            guard let panel = ws.newBrowserSurface(inPane: pane, url: url, focus: v2FocusAllowed()) else {
+            guard let panel = ws.newBrowserSurface(inPane: pane, url: url, focus: self.v2FocusAllowed()) else {
                 result = .err(code: "internal_error", message: "Failed to create browser tab", data: nil)
                 return
             }
             result = .ok([
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "pane_id": pane.id.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: pane.id),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: pane.id),
                 "surface_id": panel.id.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: panel.id),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: panel.id),
                 "url": panel.currentURL?.absoluteString ?? ""
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -610,24 +612,24 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Browser tab not found", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
 
-            let browserIds = orderedPanels(in: ws).compactMap { panel -> UUID? in
+            let browserIds = self.orderedPanels(in: ws).compactMap { panel -> UUID? in
                 (panel as? BrowserPanel)?.id
             }
 
             let targetId: UUID? = {
-                if let explicit = v2UUID(params, "target_surface_id") ?? v2UUID(params, "tab_id") {
+                if let explicit = self.v2UUID(params, "target_surface_id") ?? self.v2UUID(params, "tab_id") {
                     return explicit
                 }
-                if let idx = v2Int(params, "index"), idx >= 0, idx < browserIds.count {
+                if let idx = self.v2Int(params, "index"), idx >= 0, idx < browserIds.count {
                     return browserIds[idx]
                 }
-                return v2UUID(params, "surface_id")
+                return self.v2UUID(params, "surface_id")
             }()
 
             guard let targetId, browserIds.contains(targetId) else {
@@ -638,11 +640,12 @@ extension TerminalController {
             ws.focusPanel(targetId)
             result = .ok([
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "surface_id": targetId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: targetId)
+                "surface_ref": self.v2Ref(kind: .surface, uuid: targetId)
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -652,13 +655,13 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Browser tab not found", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
 
-            let browserIds = orderedPanels(in: ws).compactMap { panel -> UUID? in
+            let browserIds = self.orderedPanels(in: ws).compactMap { panel -> UUID? in
                 (panel as? BrowserPanel)?.id
             }
             guard !browserIds.isEmpty else {
@@ -667,13 +670,13 @@ extension TerminalController {
             }
 
             let targetId: UUID? = {
-                if let explicit = v2UUID(params, "target_surface_id") ?? v2UUID(params, "tab_id") {
+                if let explicit = self.v2UUID(params, "target_surface_id") ?? self.v2UUID(params, "tab_id") {
                     return explicit
                 }
-                if let idx = v2Int(params, "index"), idx >= 0, idx < browserIds.count {
+                if let idx = self.v2Int(params, "index"), idx >= 0, idx < browserIds.count {
                     return browserIds[idx]
                 }
-                if let sid = v2UUID(params, "surface_id") {
+                if let sid = self.v2UUID(params, "surface_id") {
                     return sid
                 }
                 return ws.focusedPanelId
@@ -693,12 +696,13 @@ extension TerminalController {
             result = ok
                 ? .ok([
                     "workspace_id": ws.id.uuidString,
-                    "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                    "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                     "surface_id": targetId.uuidString,
-                    "surface_ref": v2Ref(kind: .surface, uuid: targetId)
+                    "surface_ref": self.v2Ref(kind: .surface, uuid: targetId)
                 ])
                 : .err(code: "internal_error", message: "Failed to close browser tab", data: ["surface_id": targetId.uuidString])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 

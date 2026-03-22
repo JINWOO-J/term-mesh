@@ -8,7 +8,7 @@ mod watcher;
 mod worktree;
 
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
@@ -59,8 +59,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("headless manager initialized");
 
     // Shared session store (populated by Swift app via session.sync RPC)
-    let sessions: socket::SessionStore = Arc::new(Mutex::new(Vec::new()));
-    let team_state: socket::TeamStateStore = Arc::new(Mutex::new(serde_json::json!({
+    let sessions: socket::SessionStore = Arc::new(RwLock::new(Vec::new()));
+    let team_state: socket::TeamStateStore = Arc::new(RwLock::new(serde_json::json!({
         "teams": [],
         "tasks": [],
         "attention": [],

@@ -11,8 +11,8 @@ extension TerminalController {
         }
 
         var payload: [String: Any]?
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
 
             let focusedPaneId = ws.bonsplitController.focusedPaneId
             let panes: [[String: Any]] = ws.bonsplitController.allPaneIds.enumerated().map { index, paneId in
@@ -22,26 +22,27 @@ extension TerminalController {
                 let selectedSurfaceUUID = selectedTab.flatMap { ws.panelIdFromSurfaceId($0.id) }
                 return [
                     "id": paneId.id.uuidString,
-                    "ref": v2Ref(kind: .pane, uuid: paneId.id),
+                    "ref": self.v2Ref(kind: .pane, uuid: paneId.id),
                     "index": index,
                     "focused": paneId == focusedPaneId,
                     "surface_ids": surfaceUUIDs.map { $0.uuidString },
-                    "surface_refs": surfaceUUIDs.map { v2Ref(kind: .surface, uuid: $0) },
-                    "selected_surface_id": v2OrNull(selectedSurfaceUUID?.uuidString),
-                    "selected_surface_ref": v2Ref(kind: .surface, uuid: selectedSurfaceUUID),
+                    "surface_refs": surfaceUUIDs.map { self.v2Ref(kind: .surface, uuid: $0) },
+                    "selected_surface_id": self.v2OrNull(selectedSurfaceUUID?.uuidString),
+                    "selected_surface_ref": self.v2Ref(kind: .surface, uuid: selectedSurfaceUUID),
                     "surface_count": surfaceUUIDs.count
                 ]
             }
 
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             payload = [
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "panes": panes,
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId)
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId)
             ]
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
 
         guard let payload else {
             return .err(code: "not_found", message: "Workspace not found", data: nil)
@@ -57,8 +58,8 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "Pane not found", data: ["pane_id": paneUUID.uuidString])
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
@@ -66,12 +67,13 @@ extension TerminalController {
                 result = .err(code: "not_found", message: "Pane not found", data: ["pane_id": paneUUID.uuidString])
                 return
             }
-            v2MaybeFocusWindow(for: tabManager)
-            v2MaybeSelectWorkspace(tabManager, workspace: ws)
+            self.v2MaybeFocusWindow(for: tabManager)
+            self.v2MaybeSelectWorkspace(tabManager, workspace: ws)
             ws.bonsplitController.focusPane(paneId)
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
-            result = .ok(["window_id": v2OrNull(windowId?.uuidString), "window_ref": v2Ref(kind: .window, uuid: windowId), "workspace_id": ws.id.uuidString, "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id), "pane_id": paneId.id.uuidString, "pane_ref": v2Ref(kind: .pane, uuid: paneId.id)])
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
+            result = .ok(["window_id": self.v2OrNull(windowId?.uuidString), "window_ref": self.v2Ref(kind: .window, uuid: windowId), "workspace_id": ws.id.uuidString, "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id), "pane_id": paneId.id.uuidString, "pane_ref": self.v2Ref(kind: .pane, uuid: paneId.id)])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -81,10 +83,10 @@ extension TerminalController {
         }
 
         var payload: [String: Any]?
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else { return }
 
-            let paneUUID = v2UUID(params, "pane_id")
+            let paneUUID = self.v2UUID(params, "pane_id")
             let paneId: PaneID? = {
                 if let paneUUID {
                     return ws.bonsplitController.allPaneIds.first(where: { $0.id == paneUUID })
@@ -100,26 +102,27 @@ extension TerminalController {
                 let panelId = ws.panelIdFromSurfaceId(tab.id)
                 let panel = panelId.flatMap { ws.panels[$0] }
                 return [
-                    "id": v2OrNull(panelId?.uuidString),
-                    "ref": v2Ref(kind: .surface, uuid: panelId),
+                    "id": self.v2OrNull(panelId?.uuidString),
+                    "ref": self.v2Ref(kind: .surface, uuid: panelId),
                     "index": index,
                     "title": tab.title,
-                    "type": v2OrNull(panel?.panelType.rawValue),
+                    "type": self.v2OrNull(panel?.panelType.rawValue),
                     "selected": tab.id == selectedTab?.id
                 ]
             }
 
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             payload = [
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "pane_id": paneId.id.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: paneId.id),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: paneId.id),
                 "surfaces": surfaces,
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId)
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId)
             ]
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
 
         guard let payload else {
             return .err(code: "not_found", message: "Pane or workspace not found", data: nil)
@@ -143,13 +146,13 @@ extension TerminalController {
         let insertFirst = direction.insertFirst
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to create pane", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
-            v2MaybeFocusWindow(for: tabManager)
-            v2MaybeSelectWorkspace(tabManager, workspace: ws)
+            self.v2MaybeFocusWindow(for: tabManager)
+            self.v2MaybeSelectWorkspace(tabManager, workspace: ws)
             guard let focusedPanelId = ws.focusedPanelId else {
                 result = .err(code: "not_found", message: "No focused surface to split", data: nil)
                 return
@@ -162,14 +165,14 @@ extension TerminalController {
                     orientation: orientation,
                     insertFirst: insertFirst,
                     url: url,
-                    focus: v2FocusAllowed()
+                    focus: self.v2FocusAllowed()
                 )?.id
             } else {
                 newPanelId = ws.newTerminalSplit(
                     from: focusedPanelId,
                     orientation: orientation,
                     insertFirst: insertFirst,
-                    focus: v2FocusAllowed()
+                    focus: self.v2FocusAllowed()
                 )?.id
             }
 
@@ -178,19 +181,20 @@ extension TerminalController {
                 return
             }
             let paneUUID = ws.paneId(forPanelId: newPanelId)?.id
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
-                "pane_id": v2OrNull(paneUUID?.uuidString),
-                "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
+                "pane_id": self.v2OrNull(paneUUID?.uuidString),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: paneUUID),
                 "surface_id": newPanelId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: newPanelId),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: newPanelId),
                 "type": panelType.rawValue
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -300,13 +304,13 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to resize pane", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
 
-            let paneUUID = v2UUID(params, "pane_id") ?? ws.bonsplitController.focusedPaneId?.id
+            let paneUUID = self.v2UUID(params, "pane_id") ?? ws.bonsplitController.focusedPaneId?.id
             guard let paneUUID else {
                 result = .err(code: "not_found", message: "No focused pane", data: nil)
                 return
@@ -318,7 +322,7 @@ extension TerminalController {
 
             let tree = ws.bonsplitController.treeSnapshot()
             var candidates: [V2PaneResizeCandidate] = []
-            let trace = v2PaneResizeCollectCandidates(
+            let trace = self.v2PaneResizeCollectCandidates(
                 node: tree,
                 targetPaneId: paneUUID.uuidString,
                 candidates: &candidates
@@ -359,14 +363,14 @@ extension TerminalController {
                 return
             }
 
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "pane_id": paneUUID.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: paneUUID),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: paneUUID),
                 "split_id": candidate.splitId.uuidString,
                 "direction": direction.rawValue,
                 "amount": amount,
@@ -374,6 +378,7 @@ extension TerminalController {
                 "new_divider_position": clamped
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -390,8 +395,8 @@ extension TerminalController {
         let focus = v2FocusAllowed(requested: v2Bool(params, "focus") ?? true)
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to swap panes", data: nil)
-        v2MainSync {
-            guard let located = v2LocatePane(sourcePaneUUID) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let located = self.v2LocatePane(sourcePaneUUID) else {
                 result = .err(code: "not_found", message: "Source pane not found", data: ["pane_id": sourcePaneUUID.uuidString])
                 return
             }
@@ -450,19 +455,20 @@ extension TerminalController {
             let windowId = located.windowId
             result = .ok([
                 "window_id": windowId.uuidString,
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": workspace.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: workspace.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: workspace.id),
                 "pane_id": sourcePane.id.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: sourcePane.id),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: sourcePane.id),
                 "target_pane_id": targetPane.id.uuidString,
-                "target_pane_ref": v2Ref(kind: .pane, uuid: targetPane.id),
+                "target_pane_ref": self.v2Ref(kind: .pane, uuid: targetPane.id),
                 "source_surface_id": sourceSurfaceId.uuidString,
-                "source_surface_ref": v2Ref(kind: .surface, uuid: sourceSurfaceId),
+                "source_surface_ref": self.v2Ref(kind: .surface, uuid: sourceSurfaceId),
                 "target_surface_id": targetSurfaceId.uuidString,
-                "target_surface_ref": v2Ref(kind: .surface, uuid: targetSurfaceId)
+                "target_surface_ref": self.v2Ref(kind: .surface, uuid: targetSurfaceId)
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -473,13 +479,13 @@ extension TerminalController {
         let focus = v2FocusAllowed(requested: v2Bool(params, "focus") ?? true)
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to break pane", data: nil)
-        v2MainSync {
-            guard let sourceWorkspace = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 5) {
+            guard let sourceWorkspace = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
 
-            let sourcePaneUUID = v2UUID(params, "pane_id")
+            let sourcePaneUUID = self.v2UUID(params, "pane_id")
             let sourcePane: PaneID? = {
                 if let sourcePaneUUID {
                     return sourceWorkspace.bonsplitController.allPaneIds.first(where: { $0.id == sourcePaneUUID })
@@ -488,7 +494,7 @@ extension TerminalController {
             }()
 
             let surfaceId: UUID? = {
-                if let explicitSurface = v2UUID(params, "surface_id") { return explicitSurface }
+                if let explicitSurface = self.v2UUID(params, "surface_id") { return explicitSurface }
                 if let sourcePane,
                    let selected = sourceWorkspace.bonsplitController.selectedTab(inPane: sourcePane) {
                     return sourceWorkspace.panelIdFromSurfaceId(selected.id)
@@ -538,18 +544,19 @@ extension TerminalController {
                 result = .err(code: "internal_error", message: "Failed to attach surface to new workspace", data: nil)
                 return
             }
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": destinationWorkspace.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: destinationWorkspace.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: destinationWorkspace.id),
                 "pane_id": destinationPane.id.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: destinationPane.id),
+                "pane_ref": self.v2Ref(kind: .pane, uuid: destinationPane.id),
                 "surface_id": surfaceId.uuidString,
-                "surface_ref": v2Ref(kind: .surface, uuid: surfaceId)
+                "surface_ref": self.v2Ref(kind: .surface, uuid: surfaceId)
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 
@@ -589,8 +596,8 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "not_found", message: "No alternate pane available", data: nil)
-        v2MainSync {
-            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+        let completed = v2MainExec(timeout: 2) {
+            guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
             }
@@ -605,18 +612,19 @@ extension TerminalController {
 
             ws.bonsplitController.focusPane(target)
             let selectedSurfaceId = ws.bonsplitController.selectedTab(inPane: target).flatMap { ws.panelIdFromSurfaceId($0.id) }
-            let windowId = v2ResolveWindowId(tabManager: tabManager)
+            let windowId = self.v2ResolveWindowId(tabManager: tabManager)
             result = .ok([
-                "window_id": v2OrNull(windowId?.uuidString),
-                "window_ref": v2Ref(kind: .window, uuid: windowId),
+                "window_id": self.v2OrNull(windowId?.uuidString),
+                "window_ref": self.v2Ref(kind: .window, uuid: windowId),
                 "workspace_id": ws.id.uuidString,
-                "workspace_ref": v2Ref(kind: .workspace, uuid: ws.id),
+                "workspace_ref": self.v2Ref(kind: .workspace, uuid: ws.id),
                 "pane_id": target.id.uuidString,
-                "pane_ref": v2Ref(kind: .pane, uuid: target.id),
-                "surface_id": v2OrNull(selectedSurfaceId?.uuidString),
-                "surface_ref": v2Ref(kind: .surface, uuid: selectedSurfaceId)
+                "pane_ref": self.v2Ref(kind: .pane, uuid: target.id),
+                "surface_id": self.v2OrNull(selectedSurfaceId?.uuidString),
+                "surface_ref": self.v2Ref(kind: .surface, uuid: selectedSurfaceId)
             ])
         }
+        if !completed { return .err(code: "timeout", message: "Main thread busy", data: nil) }
         return result
     }
 

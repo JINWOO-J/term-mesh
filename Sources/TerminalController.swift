@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Foundation
+import os
 import Bonsplit
 import WebKit
 
@@ -305,6 +306,11 @@ class TerminalController {
 
             let chunk = String(bytes: buffer[0..<bytesRead], encoding: .utf8) ?? ""
             pending.append(chunk)
+
+            if pending.utf8.count > 1_048_576 { // 1 MB — no newline arrived; drop connection
+                Logger.socket.warning("handleClient: pending buffer exceeded 1 MB, closing connection")
+                break
+            }
 
             while let newlineIndex = pending.firstIndex(of: "\n") {
                 let line = String(pending[..<newlineIndex])
@@ -1869,6 +1875,8 @@ class TerminalController {
             return teamDataTaskDependents(params: params, id: id, store: store)
         case "team.task.clear":
             return teamDataTaskClear(params: params, id: id, store: store)
+        case "team.task.claim":
+            return teamDataTaskClaim(params: params, id: id, store: store)
         case "team.task.create":
             return teamDataTaskCreate(params: params, id: id, store: store)
         case "team.task.update":
@@ -2934,6 +2942,19 @@ class TerminalController {
         }
         store.clearTasks(teamName: teamName)
         return v2Ok(id: id, result: ["cleared": true, "team_name": teamName])
+    }
+
+    private func teamDataTaskClaim(params: [String: Any], id: Any?, store: TeamDataStore) -> String {
+        guard let teamName = params["team_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let agentName = params["agent_name"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing agent_name")
+        }
+        if let task = store.claimTask(teamName: teamName, agentName: agentName) {
+            return v2Ok(id: id, result: store.taskDictionary(task))
+        }
+        return v2Ok(id: id, result: NSNull())
     }
 
     private func teamDataTaskCreate(params: [String: Any], id: Any?, store: TeamDataStore) -> String {

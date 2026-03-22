@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 enum SocketControlMode: String, CaseIterable, Identifiable {
     case off
@@ -46,7 +47,11 @@ enum SocketControlMode: String, CaseIterable, Identifiable {
     var socketFilePermissions: UInt16 {
         switch self {
         case .allowAll:
-            return 0o666
+            // 0o660: owner+group only — removes world-readable/writable access.
+            // Other local users on the machine can no longer connect to the socket
+            // even in allowAll mode. The owning group (typically the user's primary
+            // group) retains access, which is sufficient for local automation tools.
+            return 0o660
         case .off, .termMeshOnly, .automation, .password:
             return 0o600
         }
@@ -173,6 +178,43 @@ struct SocketControlSettings {
     static let allowSocketPathOverrideKeyLegacy = "CMUX_ALLOW_SOCKET_OVERRIDE"
     static let socketPasswordEnvKey = "TERMMESH_SOCKET_PASSWORD"
     static let socketPasswordEnvKeyLegacy = "CMUX_SOCKET_PASSWORD"
+
+    // MARK: - allowAll Auto-Expiry
+
+    /// Duration after which allowAll mode automatically reverts to termMeshOnly.
+    /// This limits the exposure window if a developer accidentally leaves the app
+    /// running in allowAll mode (e.g. after a test session).
+    static let allowAllExpiryInterval: TimeInterval = 3600 // 1 hour
+
+    private static let allowAllLock = NSLock()
+    /// Timestamp when allowAll mode was first entered in this process lifetime.
+    /// Reset to nil when mode leaves allowAll.
+    private static var allowAllActivatedAt: Date? = nil
+    /// Pending work item that fires after allowAllExpiryInterval to enforce auto-downgrade.
+    /// Cancellable so that an explicit mode change before expiry stops the timer.
+    private static var allowAllExpiryWorkItem: DispatchWorkItem? = nil
+
+    private static let logger = Logger(subsystem: "com.termmesh.app", category: "socket-security")
+
+    /// Emit a one-time security warning when allowAll mode activates.
+    /// Prints to stderr (visible in terminal) and os_log (visible in Console.app).
+    static func logAllowAllSecurityWarning() {
+        let msg = "[term-mesh security] allowAll socket mode active — the control socket " +
+            "accepts connections from any process in the owner group. " +
+            "Commands include keystroke injection, terminal read, and browser JS eval. " +
+            "Mode reverts automatically after \(Int(allowAllExpiryInterval / 60)) minutes. " +
+            "Disable via Settings → Socket Control or TERMMESH_SOCKET_MODE=termMeshOnly."
+        fputs(msg + "\n", stderr)
+        logger.warning("\(msg, privacy: .public)")
+    }
+
+    /// Log when allowAll mode expires and downgrades automatically.
+    static func logAllowAllExpiry() {
+        let msg = "[term-mesh security] allowAll socket mode expired after " +
+            "\(Int(allowAllExpiryInterval / 60)) minutes — reverted to termMeshOnly."
+        fputs(msg + "\n", stderr)
+        logger.notice("\(msg, privacy: .public)")
+    }
 
     private static func normalizeMode(_ raw: String) -> String {
         raw
@@ -322,20 +364,76 @@ struct SocketControlSettings {
         userMode: SocketControlMode,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> SocketControlMode {
+        let resolved: SocketControlMode
         if let overrideEnabled = envOverrideEnabled(environment: environment) {
             if !overrideEnabled {
-                return .off
+                resolved = .off
+            } else if let overrideMode = envOverrideMode(environment: environment) {
+                resolved = overrideMode
+            } else {
+                resolved = userMode == .off ? .termMeshOnly : userMode
             }
-            if let overrideMode = envOverrideMode(environment: environment) {
-                return overrideMode
-            }
-            return userMode == .off ? .termMeshOnly : userMode
+        } else if let overrideMode = envOverrideMode(environment: environment) {
+            resolved = overrideMode
+        } else {
+            resolved = userMode
         }
 
-        if let overrideMode = envOverrideMode(environment: environment) {
-            return overrideMode
+        return applyAllowAllPolicy(resolved)
+    }
+
+    /// Apply allowAll-specific security policy:
+    /// - On first entry to allowAll, record activation time, emit a security warning, and
+    ///   schedule a DispatchWorkItem that fires after allowAllExpiryInterval. The work item
+    ///   writes termMeshOnly to UserDefaults, which triggers the @AppStorage binding →
+    ///   onChange(of: socketControlMode) → updateSocketController() chain — actually
+    ///   restarting the socket with the downgraded mode regardless of whether effectiveMode()
+    ///   is ever called again.
+    /// - If the mode exits allowAll before expiry, cancel the pending work item.
+    /// - Defensive time check on each effectiveMode() call catches any edge cases where
+    ///   the work item was cancelled or the env var overrides UserDefaults.
+    private static func applyAllowAllPolicy(_ mode: SocketControlMode) -> SocketControlMode {
+        allowAllLock.lock()
+        defer { allowAllLock.unlock() }
+
+        guard mode == .allowAll else {
+            // Exiting allowAll — cancel pending expiry timer and clear state.
+            allowAllExpiryWorkItem?.cancel()
+            allowAllExpiryWorkItem = nil
+            allowAllActivatedAt = nil
+            return mode
         }
 
-        return userMode
+        let now = Date()
+
+        // Defensive check: time-based expiry in case work item was cancelled externally.
+        if let activatedAt = allowAllActivatedAt {
+            if now.timeIntervalSince(activatedAt) >= allowAllExpiryInterval {
+                allowAllExpiryWorkItem?.cancel()
+                allowAllExpiryWorkItem = nil
+                allowAllActivatedAt = nil
+                DispatchQueue.global(qos: .background).async { logAllowAllExpiry() }
+                return .termMeshOnly
+            }
+            // Timer already scheduled; still within the expiry window.
+            return .allowAll
+        }
+
+        // First activation — record timestamp, warn, and schedule the hard expiry timer.
+        allowAllActivatedAt = now
+
+        // The work item runs on the main queue after allowAllExpiryInterval.
+        // Writing to UserDefaults triggers @AppStorage(appStorageKey) bindings in
+        // TermMeshApp/SettingsView, which calls updateSocketController() and actually
+        // restarts the socket in termMeshOnly mode — no polling required.
+        let workItem = DispatchWorkItem {
+            logAllowAllExpiry()
+            UserDefaults.standard.set(SocketControlMode.termMeshOnly.rawValue, forKey: appStorageKey)
+        }
+        allowAllExpiryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + allowAllExpiryInterval, execute: workItem)
+
+        DispatchQueue.global(qos: .background).async { logAllowAllSecurityWarning() }
+        return .allowAll
     }
 }

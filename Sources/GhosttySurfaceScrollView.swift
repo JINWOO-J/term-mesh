@@ -760,6 +760,17 @@ final class GhosttySurfaceScrollView: NSView {
 
         // Trigger layout to position the bar at the bottom and shrink the terminal
         needsLayout = true
+
+        // Explicitly move focus to IMETextView after the next layout pass.
+        // Without this, applyFirstResponderIfNeeded fires before SwiftUI materializes
+        // the IMETextView, finds nil, and steals focus back to the terminal — causing
+        // the "first open input dropped" bug.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            if let imeTextView = self.findIMETextView() {
+                window.makeFirstResponder(imeTextView)
+            }
+        }
     }
 
     private func dismissIMEInputBar() {
@@ -1056,9 +1067,23 @@ final class GhosttySurfaceScrollView: NSView {
             if let previous, previous !== self {
                 _ = previous.surfaceView.resignFirstResponder()
             }
-            // If IME bar is active in this pane, redirect focus to IMETextView
-            if let imeTextView = self.findIMETextView() {
-                window.makeFirstResponder(imeTextView)
+            // If IME bar is active in this pane, redirect focus to IMETextView.
+            // findIMETextView() may return nil right after toggleIMEInputBar because
+            // SwiftUI hasn't materialized the NSView subtree yet.  In that case,
+            // schedule a retry so we don't accidentally send focus to the terminal.
+            if self.imeInputBarHostingView != nil {
+                if let imeTextView = self.findIMETextView() {
+                    window.makeFirstResponder(imeTextView)
+                } else {
+                    // SwiftUI view not yet materialized — retry after layout pass
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, let window = self.window else { return }
+                        if let imeTextView = self.findIMETextView() {
+                            window.makeFirstResponder(imeTextView)
+                        }
+                        // If still nil, IME bar was dismissed in the meantime — no-op
+                    }
+                }
             } else {
                 window.makeFirstResponder(self.surfaceView)
             }
@@ -1283,7 +1308,7 @@ final class GhosttySurfaceScrollView: NSView {
             return
         }
         guard surfaceView.terminalSurface?.searchState == nil else { return }
-        guard findIMETextView() == nil else { return }
+        guard imeInputBarHostingView == nil else { return }
         guard let window, window.isKeyWindow else { return }
         if let fr = window.firstResponder as? NSView,
            fr === surfaceView || fr.isDescendant(of: surfaceView) {

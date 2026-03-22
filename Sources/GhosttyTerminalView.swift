@@ -1198,6 +1198,41 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     ]
     private static let shellEscapeCharacters = "\\ ()[]{}<>\"'`!#$&;|*?\t"
 
+    // MARK: - TERM-MESH-1: Startup NSTextInputContext gate
+    //
+    // NSApplication.updateWindows fires on every run-loop cycle and calls
+    // NSTextInputContext.currentInputContext_withFirstResponderSync for the
+    // current first responder. If GhosttyNSView is the first responder during
+    // the *first* updateWindows cycle (uptime ≈ 0 s), AppKit lazily initialises
+    // NSKeyBindingManager, which synchronously reads DefaultKeyBinding.dict via
+    // NSDictionary.dictionaryWithContentsOfFile: on the main thread — causing
+    // 2 s+ App Hangs captured in Sentry (TERM-MESH-1, 44 events).
+    //
+    // Returning nil from inputContext during startup prevents AppKit from
+    // activating NSTextInputContext at all, so NSKeyBindingManager is never
+    // touched until we deliberately call enableInputContext() one run-loop
+    // after applicationDidFinishLaunching.
+    private static var inputContextReady = false
+
+    override var inputContext: NSTextInputContext? {
+#if DEBUG
+        if !Self.inputContextReady {
+            dlog("inputContext.deferred reason=startupGuard")
+        }
+#endif
+        guard Self.inputContextReady else { return nil }
+        return super.inputContext
+    }
+
+    /// Call once, after the first run-loop cycle post-launch, to allow
+    /// NSTextInputContext (and therefore NSKeyBindingManager) to activate.
+    static func enableInputContext() {
+#if DEBUG
+        dlog("inputContext.enabled reason=postStartup")
+#endif
+        inputContextReady = true
+    }
+
 static func focusLog(_ message: String) {
         guard focusDebugEnabled else { return }
         FocusLogStore.shared.append(message)

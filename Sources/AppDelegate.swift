@@ -323,6 +323,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
 #endif
+
+        // TERM-MESH-1: Enable NSTextInputContext after the first run-loop cycle.
+        // During startup, GhosttyNSView.inputContext returns nil to prevent
+        // NSApplication.updateWindows from triggering NSKeyBindingManager's lazy
+        // singleton init (which reads DefaultKeyBinding.dict synchronously on the
+        // main thread and causes 2 s+ App Hangs at uptime ≈ 0 s).
+        DispatchQueue.main.async {
+            GhosttyNSView.enableInputContext()
+        }
+
+        // TERM-MESH-1: Pre-cache the user keybinding file in the OS buffer cache
+        // so that when NSKeyBindingManager initialises on first key press the read
+        // completes in microseconds rather than milliseconds from cold storage.
+        Task.detached(priority: .userInitiated) {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            _ = try? Data(
+                contentsOf: home.appendingPathComponent("Library/KeyBindings/DefaultKeyBinding.dict"),
+                options: .mappedIfSafe
+            )
+        }
     }
 
 #if DEBUG

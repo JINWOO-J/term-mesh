@@ -447,9 +447,20 @@ final class WindowBrowserPortal: NSObject {
     }
 
     private func synchronizeAllEntriesFromExternalGeometryChange() {
+        // Defer geometry sync while a sheet is animating. NSSheetMoveHelper fires window
+        // resize notifications during its animation frames; running layoutSubtreeIfNeeded()
+        // concurrently with the sheet's constraint engine causes 2 s+ hangs (TERM-MESH-2).
+        if let window = self.window, window.attachedSheet != nil {
+#if DEBUG
+            dlog("browser.portal.sync.deferSheet reason=attachedSheetActive")
+#endif
+            scheduleExternalGeometrySynchronize()
+            return
+        }
         guard ensureInstalled() else { return }
-        installedContainerView?.layoutSubtreeIfNeeded()
-        installedReferenceView?.layoutSubtreeIfNeeded()
+        // Limit layout to the portal host subtree. Forcing layoutSubtreeIfNeeded() on
+        // installedContainerView or installedReferenceView triggers a full-window
+        // AutoLayout pass that competes with NSSheet animations (TERM-MESH-2 hang).
         hostView.superview?.layoutSubtreeIfNeeded()
         hostView.layoutSubtreeIfNeeded()
         synchronizeAllWebViews(excluding: nil, source: "externalGeometry")
@@ -460,12 +471,15 @@ final class WindowBrowserPortal: NSObject {
         guard let window else { return false }
         guard let (container, reference) = installationTarget(for: window) else { return false }
 
-        if hostView.superview !== container ||
-            installedContainerView !== container ||
-            installedReferenceView !== reference {
+        if hostView.superview !== container || installedContainerView !== container {
+            // Container changed (or host not yet installed): full re-insertion required.
             hostView.removeFromSuperview()
             container.addSubview(hostView, positioned: .above, relativeTo: reference)
             installedContainerView = container
+            installedReferenceView = reference
+        } else if installedReferenceView !== reference {
+            // Container unchanged but reference changed — update state only.
+            // synchronizeHostFrameToReference() will re-derive the frame from the new reference.
             installedReferenceView = reference
         } else if !Self.isView(hostView, above: reference, in: container) {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)

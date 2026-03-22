@@ -659,8 +659,10 @@ final class WindowTerminalPortal: NSObject {
     }
 
     private func synchronizeLayoutHierarchy() {
-        installedContainerView?.layoutSubtreeIfNeeded()
-        installedReferenceView?.layoutSubtreeIfNeeded()
+        // Limit layout to the portal host subtree only. Forcing layoutSubtreeIfNeeded()
+        // on installedContainerView (window themeFrame) or installedReferenceView
+        // (contentView) triggers a full-window AutoLayout/NSISEngine pass that can
+        // compete with NSSheet animations and cause 2 s+ main-thread hangs (TERM-MESH-2).
         hostView.superview?.layoutSubtreeIfNeeded()
         hostView.layoutSubtreeIfNeeded()
         _ = synchronizeHostFrameToReference()
@@ -696,6 +698,17 @@ final class WindowTerminalPortal: NSObject {
     }
 
     private func synchronizeAllEntriesFromExternalGeometryChange() {
+        // Defer geometry sync while a sheet is animating. NSSheetMoveHelper fires window
+        // resize notifications during its animation frames; running layoutSubtreeIfNeeded()
+        // and _setWindow: propagation concurrently with the sheet's constraint engine causes
+        // 2 s+ main-thread hangs (TERM-MESH-2, getMethodNoSuper_nolock pattern).
+        if let window = self.window, window.attachedSheet != nil {
+#if DEBUG
+            dlog("portal.sync.deferSheet reason=attachedSheetActive")
+#endif
+            scheduleExternalGeometrySynchronize()
+            return
+        }
         guard ensureInstalled() else { return }
         synchronizeLayoutHierarchy()
         synchronizeAllHostedViews(excluding: nil)
@@ -729,9 +742,9 @@ final class WindowTerminalPortal: NSObject {
         guard let window else { return false }
         guard let (container, reference) = installationTarget(for: window) else { return false }
 
-        if hostView.superview !== container ||
-            installedContainerView !== container ||
-            installedReferenceView !== reference {
+        if hostView.superview !== container || installedContainerView !== container {
+            // Container changed (or host view is not yet installed): full re-insertion.
+            // This triggers -[NSView _setWindow:] propagation, so only do it when necessary.
             NSLayoutConstraint.deactivate(installConstraints)
             installConstraints.removeAll()
 
@@ -746,6 +759,19 @@ final class WindowTerminalPortal: NSObject {
             ]
             NSLayoutConstraint.activate(installConstraints)
             installedContainerView = container
+            installedReferenceView = reference
+        } else if installedReferenceView !== reference {
+            // Container is unchanged but reference view changed (e.g. NSGlassEffectView
+            // child swap on theme change). Update constraints without removing the host view
+            // to avoid spurious _setWindow: propagation across all portal-hosted terminals.
+            NSLayoutConstraint.deactivate(installConstraints)
+            installConstraints = [
+                hostView.leadingAnchor.constraint(equalTo: reference.leadingAnchor),
+                hostView.trailingAnchor.constraint(equalTo: reference.trailingAnchor),
+                hostView.topAnchor.constraint(equalTo: reference.topAnchor),
+                hostView.bottomAnchor.constraint(equalTo: reference.bottomAnchor),
+            ]
+            NSLayoutConstraint.activate(installConstraints)
             installedReferenceView = reference
         } else if !Self.isView(hostView, above: reference, in: container) {
             container.addSubview(hostView, positioned: .above, relativeTo: reference)

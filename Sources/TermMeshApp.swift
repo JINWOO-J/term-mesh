@@ -274,7 +274,9 @@ struct TermMeshApp: App {
                     showTeamCreation = true
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .spawnCLIRequested)) { _ in
-                    showSpawnCLIDialog()
+                    Task { @MainActor in
+                        await showSpawnCLIDialog()
+                    }
                 }
                 .sheet(isPresented: $showTeamCreation) {
                     TeamCreationView { teamName, leaderMode, leaderModel, agents, worktreeMode, executionMode in
@@ -334,7 +336,9 @@ struct TermMeshApp: App {
                 .keyboardShortcut("t", modifiers: [.command, .option])
 
                 Button("Spawn CLI…") {
-                    showSpawnCLIDialog()
+                    Task { @MainActor in
+                        await showSpawnCLIDialog()
+                    }
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
 
@@ -342,16 +346,22 @@ struct TermMeshApp: App {
                 Divider()
 
                 Button("Reconnect Agent…") {
-                    showReconnectAgentDialog()
+                    Task { @MainActor in
+                        await showReconnectAgentDialog()
+                    }
                 }
                 .keyboardShortcut("a", modifiers: [.command, .option])
 
                 Button("Destroy Team…") {
-                    showDestroyTeamDialog()
+                    Task { @MainActor in
+                        await showDestroyTeamDialog()
+                    }
                 }
 
                 Button("Collect All Results") {
-                    showCollectResultsDialog()
+                    Task { @MainActor in
+                        await showCollectResultsDialog()
+                    }
                 }
 
                 // -- Worktrees --
@@ -1015,7 +1025,31 @@ struct TermMeshApp: App {
         }
     }
 
-    private func showDestroyTeamDialog() {
+    @MainActor
+    private func runAlertAsSheetIfPossible(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            var resumed = false
+            return await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: window) { response in
+                    guard !resumed else { return }
+                    resumed = true
+                    continuation.resume(returning: response)
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    guard !resumed else { return }
+                    resumed = true
+                    window.endSheet(alert.window)
+                    continuation.resume(returning: .cancel)
+                }
+            }
+        }
+
+        return alert.runModal()
+    }
+
+    @MainActor
+    private func showDestroyTeamDialog() async {
         let teamList = TeamOrchestrator.shared.listTeams()
         guard !teamList.isEmpty else {
             let alert = NSAlert()
@@ -1023,7 +1057,7 @@ struct TermMeshApp: App {
             alert.informativeText = "No active teams found."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
-            alert.runModal()
+            _ = await runAlertAsSheetIfPossible(alert)
             return
         }
 
@@ -1043,13 +1077,14 @@ struct TermMeshApp: App {
         }
         alert.accessoryView = popup
 
-        guard alert.runModal() == .alertFirstButtonReturn,
+        guard await runAlertAsSheetIfPossible(alert) == .alertFirstButtonReturn,
               let teamName = popup.selectedItem?.representedObject as? String else { return }
 
         _ = TeamOrchestrator.shared.destroyTeam(name: teamName, tabManager: activeTabManager)
     }
 
-    private func showCollectResultsDialog() {
+    @MainActor
+    private func showCollectResultsDialog() async {
         let teamList = TeamOrchestrator.shared.listTeams()
         guard !teamList.isEmpty else {
             let alert = NSAlert()
@@ -1057,7 +1092,7 @@ struct TermMeshApp: App {
             alert.informativeText = "No active teams found."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
-            alert.runModal()
+            _ = await runAlertAsSheetIfPossible(alert)
             return
         }
 
@@ -1082,7 +1117,7 @@ struct TermMeshApp: App {
             }
             alert.accessoryView = popup
 
-            guard alert.runModal() == .alertFirstButtonReturn,
+            guard await runAlertAsSheetIfPossible(alert) == .alertFirstButtonReturn,
                   let selected = popup.selectedItem?.representedObject as? String else { return }
             teamName = selected
         }
@@ -1109,7 +1144,7 @@ struct TermMeshApp: App {
         resultAlert.addButton(withTitle: "Open in Finder")
         resultAlert.addButton(withTitle: "OK")
 
-        if resultAlert.runModal() == .alertFirstButtonReturn {
+        if await runAlertAsSheetIfPossible(resultAlert) == .alertFirstButtonReturn {
             NSWorkspace.shared.open(URL(fileURLWithPath: dir, isDirectory: true))
         }
     }
@@ -1120,7 +1155,8 @@ struct TermMeshApp: App {
     private static let spawnCLILastWorktreeKey = "spawnCLILastWorktree"
     private static let spawnCLILastNewWorkspaceKey = "spawnCLILastNewWorkspace"
 
-    private func showSpawnCLIDialog() {
+    @MainActor
+    private func showSpawnCLIDialog() async {
         let alert = NSAlert()
         alert.messageText = "Spawn CLI"
         alert.informativeText = "Create multiple terminal panes in a grid layout:"
@@ -1222,7 +1258,7 @@ struct TermMeshApp: App {
         container.addSubview(loginShellCheck)
         alert.accessoryView = container
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard await runAlertAsSheetIfPossible(alert) == .alertFirstButtonReturn else { return }
         let count = stepper.integerValue
         let useWorktree = worktreeCheck.state == .on
         let useNewWorkspace = newWorkspaceCheck.state == .on
@@ -1257,7 +1293,8 @@ struct TermMeshApp: App {
         }
     }
 
-    private func showReconnectAgentDialog() {
+    @MainActor
+    private func showReconnectAgentDialog() async {
         let agents = termMeshDaemon.listAgents(includeTerminated: false)
         let detached = agents.filter { $0.status != "terminated" && $0.panelId == nil }
 
@@ -1267,7 +1304,7 @@ struct TermMeshApp: App {
             alert.informativeText = "No detached agent sessions found."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
-            alert.runModal()
+            _ = await runAlertAsSheetIfPossible(alert)
             return
         }
 
@@ -1286,7 +1323,7 @@ struct TermMeshApp: App {
         }
         alert.accessoryView = popup
 
-        guard alert.runModal() == .alertFirstButtonReturn,
+        guard await runAlertAsSheetIfPossible(alert) == .alertFirstButtonReturn,
               let selectedId = popup.selectedItem?.representedObject as? String else { return }
 
         activeTabManager.reconnectAgentSession(sessionId: selectedId)
@@ -1336,4 +1373,3 @@ struct TermMeshApp: App {
         MenuBarExtraDebugWindowController.shared.show()
     }
 }
-

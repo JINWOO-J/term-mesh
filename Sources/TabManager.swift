@@ -719,7 +719,9 @@ class TabManager: ObservableObject {
         guard let selectedId = selectedTabId,
               let tab = tabs.first(where: { $0.id == selectedId }),
               let focusedPanelId = tab.focusedPanelId else { return }
-        closePanelWithConfirmation(tab: tab, panelId: focusedPanelId)
+        Task { @MainActor in
+            await closePanelWithConfirmation(tab: tab, panelId: focusedPanelId)
+        }
     }
 
     func closeCurrentWorkspaceWithConfirmation() {
@@ -732,7 +734,9 @@ class TabManager: ObservableObject {
     }
 
     func closeWorkspaceWithConfirmation(_ workspace: Workspace) {
-        closeWorkspaceIfRunningProcess(workspace)
+        Task { @MainActor in
+            await closeWorkspaceIfRunningProcess(workspace)
+        }
     }
 
     func closeWorkspaceWithConfirmation(tabId: UUID) {
@@ -747,7 +751,7 @@ class TabManager: ObservableObject {
     // Keep selectTab as convenience alias
     func selectTab(_ tab: Workspace) { selectWorkspace(tab) }
 
-    private func confirmClose(title: String, message: String, acceptCmdD: Bool) -> Bool {
+    private func confirmClose(title: String, message: String, acceptCmdD: Bool) async -> Bool {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -766,17 +770,35 @@ class TabManager: ObservableObject {
             alert.window.defaultButtonCell = closeButton.cell as? NSButtonCell
         }
 
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            var resumed = false
+            return await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: window) { response in
+                    guard !resumed else { return }
+                    resumed = true
+                    continuation.resume(returning: response == .alertFirstButtonReturn)
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    guard !resumed else { return }
+                    resumed = true
+                    window.endSheet(alert.window)
+                    continuation.resume(returning: false)
+                }
+            }
+        }
+
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    private func closeWorkspaceIfRunningProcess(_ workspace: Workspace) {
+    private func closeWorkspaceIfRunningProcess(_ workspace: Workspace) async {
         let willCloseWindow = tabs.count <= 1
         if workspaceNeedsConfirmClose(workspace),
-           !confirmClose(
+           !(await confirmClose(
                title: "Close workspace?",
                message: "This will close the workspace and all of its panels.",
                acceptCmdD: willCloseWindow
-           ) {
+           )) {
             return
         }
         if tabs.count <= 1 {
@@ -787,7 +809,7 @@ class TabManager: ObservableObject {
         }
     }
 
-    private func closePanelWithConfirmation(tab: Workspace, panelId: UUID) {
+    private func closePanelWithConfirmation(tab: Workspace, panelId: UUID) async {
         // Cmd+W closes the focused Bonsplit tab (a "tab" in the UI). When the workspace only has
         // a single tab left, closing it should close the workspace (and possibly the window),
         // rather than creating a replacement terminal.
@@ -799,7 +821,7 @@ class TabManager: ObservableObject {
                 let message = willCloseWindow
                     ? "This will close the last tab and close the window."
                     : "This will close the last tab and close its workspace."
-                guard confirmClose(
+                guard await confirmClose(
                     title: "Close tab?",
                     message: message,
                     acceptCmdD: willCloseWindow
@@ -817,7 +839,7 @@ class TabManager: ObservableObject {
 
         if let terminalPanel = tab.terminalPanel(for: panelId),
            terminalPanel.needsConfirmClose() {
-            guard confirmClose(
+            guard await confirmClose(
                 title: "Close tab?",
                 message: "This will close the current tab.",
                 acceptCmdD: false
@@ -830,7 +852,9 @@ class TabManager: ObservableObject {
 
     func closePanelWithConfirmation(tabId: UUID, surfaceId: UUID) {
         guard let tab = tabs.first(where: { $0.id == tabId }) else { return }
-        closePanelWithConfirmation(tab: tab, panelId: surfaceId)
+        Task { @MainActor in
+            await closePanelWithConfirmation(tab: tab, panelId: surfaceId)
+        }
     }
 
     /// Runtime close requests from Ghostty should only ever target the specific surface.
@@ -839,17 +863,19 @@ class TabManager: ObservableObject {
         guard let tab = tabs.first(where: { $0.id == tabId }) else { return }
         guard tab.panels[surfaceId] != nil else { return }
 
-        if let terminalPanel = tab.terminalPanel(for: surfaceId),
-           terminalPanel.needsConfirmClose() {
-            guard confirmClose(
-                title: "Close tab?",
-                message: "This will close the current tab.",
-                acceptCmdD: false
-            ) else { return }
-        }
+        Task { @MainActor in
+            if let terminalPanel = tab.terminalPanel(for: surfaceId),
+               terminalPanel.needsConfirmClose() {
+                guard await confirmClose(
+                    title: "Close tab?",
+                    message: "This will close the current tab.",
+                    acceptCmdD: false
+                ) else { return }
+            }
 
-        _ = tab.closePanel(surfaceId, force: true)
-        notifications.clearNotifications(forTabId: tab.id, surfaceId: surfaceId)
+            _ = tab.closePanel(surfaceId, force: true)
+            notifications.clearNotifications(forTabId: tab.id, surfaceId: surfaceId)
+        }
     }
 
     /// Runtime close requests from Ghostty without confirmation (e.g. child-exit).

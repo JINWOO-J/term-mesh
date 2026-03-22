@@ -322,15 +322,19 @@ struct IMEInputBar: View {
         }
         // (slash picker is inline in VStack above)
         .onAppear {
-            slashCommands = SlashCommands.loadAll(workingDirectory: workingDirectory)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isFieldFocused = true
             }
         }
-        // Q4: async history loading
+        // Q4: async history loading + slash command scanning (both off main thread)
         .task {
             let loaded = await Task.detached { IMEHistory.loadMerged() }.value
             history = loaded
+        }
+        .task {
+            let wd = workingDirectory
+            let loaded = await Task.detached { SlashCommands.loadAll(workingDirectory: wd) }.value
+            slashCommands = loaded
         }
         // M1: reset picker selection when text changes; auto-open slash picker
         .onChange(of: text) { _ in

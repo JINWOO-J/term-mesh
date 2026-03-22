@@ -346,15 +346,17 @@ final class TerminalSurface: Identifiable, ObservableObject {
     }
     #endif
 
-    /// Match upstream Ghostty AppKit sizing: framebuffer dimensions are derived
-    /// from backing-space points and truncated (never rounded up).
+    /// Convert a backing-space pixel dimension to UInt32 for Ghostty surface sizing.
+    /// Uses round() (.toNearestOrAwayFromZero) rather than floor() to avoid off-by-one
+    /// column loss when Bonsplit split panes produce fractional backing-pixel widths
+    /// (e.g. 799.5 px floors to 799 but rounds to 800, preserving the correct column count).
     private func pixelDimension(from value: CGFloat) -> UInt32 {
         guard value.isFinite else { return 0 }
-        let floored = floor(max(0, value))
-        if floored >= CGFloat(UInt32.max) {
+        let rounded = (max(0, value)).rounded(.toNearestOrAwayFromZero)
+        if rounded >= CGFloat(UInt32.max) {
             return UInt32.max
         }
-        return UInt32(floored)
+        return UInt32(rounded)
     }
 
     private func scaleFactors(for view: GhosttyNSView) -> (x: CGFloat, y: CGFloat, layer: CGFloat) {
@@ -1552,8 +1554,8 @@ func updateOcclusionState() {
         let yScale = backingSize.height / size.height
         let layerScale = max(1.0, window.backingScaleFactor)
         let drawablePixelSize = CGSize(
-            width: floor(max(0, backingSize.width)),
-            height: floor(max(0, backingSize.height))
+            width: (max(0, backingSize.width)).rounded(.toNearestOrAwayFromZero),
+            height: (max(0, backingSize.height)).rounded(.toNearestOrAwayFromZero)
         )
 
         CATransaction.begin()

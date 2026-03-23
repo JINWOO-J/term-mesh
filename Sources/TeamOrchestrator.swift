@@ -1717,26 +1717,22 @@ final class TeamOrchestrator: ObservableObject {
             return false
         }
 
-        // Deliver text via ghostty_surface_text (bracketed paste) for efficiency,
-        // then send Return key event after a short delay to ensure the paste is
-        // fully processed by the TUI app before Enter fires.
-        // Normalize newlines to spaces — TUI apps interpret \n as Enter.
+        // Use sendIMEText for atomic text+Enter delivery.
+        // Previous approach (bracketed paste + 150ms delayed Enter) caused Enter
+        // to be silently dropped under load — the asyncAfter Enter could fire before
+        // the TUI app finished processing the paste, or get lost in GCD main queue
+        // congestion when 10+ agents receive text simultaneously.
+        // sendIMEText sends per-character PRESS+RELEASE key events followed by
+        // a synchronous Return key — no timing gap, no race condition.
         let normalized = trimmed
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
-        panel.surface.sendText(normalized)
-        // Delay the Return key to let bracketed paste complete processing.
-        // Without this delay, the Enter arrives before the paste text is committed
-        // to the TUI input buffer, causing the Enter to be silently dropped.
-        let surfaceRef = panel.surface
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            surfaceRef.sendSurfaceKeyPress(keycode: 0x24, text: "\r")
-        }
+        let sent = panel.surface.sendIMEText(normalized, withReturn: true)
         #if DEBUG
-        dlog("[team.sendTextToPanel] paste+delayedEnter panelId=\(panelId.uuidString.prefix(8)) textLen=\(normalized.count) text=\(normalized.prefix(80).debugDescription)")
+        dlog("[team.sendTextToPanel] sendIMEText panelId=\(panelId.uuidString.prefix(8)) textLen=\(normalized.count) sent=\(sent) text=\(normalized.prefix(80).debugDescription)")
         #endif
-        return true
+        return sent
     }
 
     /// Broadcast text to all agents in a team.

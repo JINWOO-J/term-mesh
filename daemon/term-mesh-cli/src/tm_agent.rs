@@ -70,15 +70,35 @@ enum Commands {
     /// Submit a result report
     Report { content: Option<String> },
     /// Send heartbeat (alias: ping)
-    Ping { summary: Option<String> },
+    Ping {
+        summary: Option<String>,
+        /// Run heartbeat automatically every N seconds until parent process exits or Ctrl+C
+        #[arg(long)]
+        auto: bool,
+        /// Interval in seconds for auto mode (default: 30)
+        #[arg(long, default_value_t = 30)]
+        interval: u64,
+    },
     /// Send heartbeat
-    Heartbeat { summary: Option<String> },
+    Heartbeat {
+        summary: Option<String>,
+        /// Run heartbeat automatically every N seconds until parent process exits or Ctrl+C
+        #[arg(long)]
+        auto: bool,
+        /// Interval in seconds for auto mode (default: 30)
+        #[arg(long, default_value_t = 30)]
+        interval: u64,
+    },
     /// Show team status
     Status,
     /// Check agent inbox
     Inbox,
-    /// Send multiple JSON-RPC payloads over a single connection
-    Batch { payloads: Vec<String> },
+    /// Execute multiple commands in a single socket roundtrip
+    Batch {
+        /// Commands separated by semicolons (e.g., "send a:msg1; send b:msg2; status")
+        #[arg(required = true)]
+        commands: String,
+    },
     /// Send raw JSON-RPC payload
     Raw { payload: String },
 
@@ -92,6 +112,9 @@ enum Commands {
     /// Shared context store
     #[command(subcommand)]
     Context(ContextCommands),
+    /// Task template operations (list, show)
+    #[command(subcommand)]
+    Template(TemplateCommands),
 
     // ── Simple RPC wrappers ────────────────────────────────────────
     /// Destroy the current team
@@ -316,9 +339,10 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum TaskCommands {
-    /// Create a task
+    /// Create a task (use --template <name> to load from a template)
     Create {
-        title: String,
+        /// Task title (optional when --template is used)
+        title: Option<String>,
         #[arg(long)]
         assign: Option<String>,
         #[arg(long)]
@@ -329,6 +353,12 @@ enum TaskCommands {
         accept: Vec<String>,
         #[arg(long, num_args = 1..)]
         deps: Vec<String>,
+        /// Load task from a template (builtin: analysis, review, implement)
+        #[arg(long)]
+        template: Option<String>,
+        /// Template variable substitution: --var key=value (repeatable)
+        #[arg(long, value_parser = parse_template_var)]
+        var: Vec<(String, String)>,
     },
     /// Mark task as in_progress
     Start { task_id: String },
@@ -398,6 +428,182 @@ enum ContextCommands {
 enum PresetCommands {
     /// List all available presets
     List,
+}
+
+#[derive(Subcommand)]
+enum TemplateCommands {
+    /// List available task templates (builtin + ~/.term-mesh/templates/)
+    List,
+    /// Show template details
+    Show { name: String },
+}
+
+// ── Task template system ─────────────────────────────────────────────
+
+/// Parse `key=value` CLI arg for `--var`.
+fn parse_template_var(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("expected key=value, got: {s}"))
+}
+
+/// A task template with optional variable placeholders (`{{var}}`).
+struct TaskTemplate {
+    name: String,
+    title: String,
+    description: Option<String>,
+    priority: Option<u32>,
+    assign: Option<String>,
+}
+
+impl TaskTemplate {
+    fn substitute(&self, vars: &[(String, String)]) -> TaskTemplate {
+        let apply = |s: &str| {
+            let mut out = s.to_string();
+            for (k, v) in vars {
+                out = out.replace(&format!("{{{{{k}}}}}"), v);
+            }
+            out
+        };
+        TaskTemplate {
+            name: self.name.clone(),
+            title: apply(&self.title),
+            description: self.description.as_deref().map(apply),
+            priority: self.priority,
+            assign: self.assign.clone(),
+        }
+    }
+}
+
+/// Built-in templates hardcoded in binary (no file needed).
+fn builtin_templates() -> Vec<TaskTemplate> {
+    vec![
+        TaskTemplate {
+            name: "analysis".into(),
+            title: "코드 분석: {{target}}".into(),
+            description: Some(
+                "{{target}}을 분석하고 다음을 보고하라:\n\
+                 - 구조 및 의존성\n\
+                 - 잠재적 이슈\n\
+                 - 개선 제안"
+                    .into(),
+            ),
+            priority: Some(2),
+            assign: Some("explorer".into()),
+        },
+        TaskTemplate {
+            name: "review".into(),
+            title: "코드 리뷰: {{target}}".into(),
+            description: Some(
+                "{{target}}을 리뷰하라:\n\
+                 - 버그 및 엣지 케이스\n\
+                 - 성능 문제\n\
+                 - 보안 취약점\n\
+                 - 가독성 및 유지보수성"
+                    .into(),
+            ),
+            priority: Some(2),
+            assign: Some("reviewer".into()),
+        },
+        TaskTemplate {
+            name: "implement".into(),
+            title: "구현: {{feature}}".into(),
+            description: Some(
+                "{{feature}}을 구현하라:\n\
+                 1. 설계 확인\n\
+                 2. 코드 구현\n\
+                 3. 테스트 작성\n\
+                 4. 결과 보고"
+                    .into(),
+            ),
+            priority: Some(2),
+            assign: Some("executor".into()),
+        },
+    ]
+}
+
+/// Parse a minimal YAML template file (key: value / multiline |).
+fn parse_template_yaml(content: &str) -> TaskTemplate {
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut current_key = String::new();
+    let mut multiline: Vec<String> = Vec::new();
+    let mut in_multiline = false;
+
+    for line in content.lines() {
+        if in_multiline {
+            if line.starts_with("  ") || line.starts_with('\t') {
+                multiline.push(line.trim_start().to_string());
+                continue;
+            } else {
+                map.insert(current_key.clone(), multiline.join("\n"));
+                multiline.clear();
+                in_multiline = false;
+            }
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            let k = k.trim().to_string();
+            let v = v.trim();
+            if v == "|" {
+                current_key = k;
+                in_multiline = true;
+            } else if !v.is_empty() {
+                let unquoted = v.trim_matches('"').trim_matches('\'').to_string();
+                map.insert(k, unquoted);
+            }
+        }
+    }
+    if in_multiline && !multiline.is_empty() {
+        map.insert(current_key, multiline.join("\n"));
+    }
+
+    TaskTemplate {
+        name: map.get("name").cloned().unwrap_or_default(),
+        title: map.get("title").cloned().unwrap_or_else(|| "{{title}}".into()),
+        description: map.get("description").cloned(),
+        priority: map.get("priority").and_then(|s| s.parse().ok()),
+        assign: map.get("assign").cloned(),
+    }
+}
+
+/// Load a template: builtin first, then ~/.term-mesh/templates/{name}.yaml.
+fn load_template(name: &str) -> Result<TaskTemplate, String> {
+    // 1. Check builtin templates
+    for t in builtin_templates() {
+        if t.name == name {
+            return Ok(t);
+        }
+    }
+    // 2. Try user templates dir
+    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let path = PathBuf::from(home)
+        .join(".term-mesh/templates")
+        .join(format!("{name}.yaml"));
+    let content = std::fs::read_to_string(&path)
+        .map_err(|_| format!("template '{}' not found (checked builtin + {path:?})", name))?;
+    Ok(parse_template_yaml(&content))
+}
+
+/// List all available templates (builtin + files in ~/.term-mesh/templates/).
+fn list_all_templates() -> Vec<(String, String)> {
+    let mut result: Vec<(String, String)> = builtin_templates()
+        .into_iter()
+        .map(|t| (t.name, "(builtin)".into()))
+        .collect();
+
+    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let dir = PathBuf::from(home).join(".term-mesh/templates");
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) == Some("yaml") {
+                let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                if !result.iter().any(|(n, _)| n == &name) {
+                    result.push((name, dir.display().to_string()));
+                }
+            }
+        }
+    }
+    result
 }
 
 // ── Socket / RPC infrastructure ──────────────────────────────────────
@@ -544,8 +750,132 @@ fn rpc_batch(sock: &PathBuf, payloads: &[String]) -> Result<Vec<Value>, String> 
     Ok(results)
 }
 
+/// Parse human-readable semicolon-separated commands into JSON-RPC payload strings
+/// for use with `rpc_batch`. Supported verbs: status, task list, send, broadcast.
+fn parse_batch_commands(commands: &str, team: &str) -> Result<Vec<String>, String> {
+    let mut payloads = Vec::new();
+    for raw in commands.split(';') {
+        let cmd = raw.trim();
+        if cmd.is_empty() {
+            continue;
+        }
+        let (verb, rest) = match cmd.find(' ') {
+            Some(pos) => (&cmd[..pos], cmd[pos + 1..].trim()),
+            None => (cmd, ""),
+        };
+        let rpc = match verb {
+            "status" => json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "team.status",
+                "params": { "team_name": team }
+            }),
+            "task" => {
+                let sub = match rest.find(' ') {
+                    Some(pos) => &rest[..pos],
+                    None => rest,
+                };
+                match sub {
+                    "list" => json!({
+                        "jsonrpc": "2.0", "id": 1,
+                        "method": "team.task.list",
+                        "params": { "team_name": team }
+                    }),
+                    _ => return Err(format!("batch: unknown task subcommand '{sub}'. Supported: list")),
+                }
+            }
+            "send" => {
+                // Accept "agent:message" or "agent message" formats
+                let (agent_name, text) = if let Some(colon) = rest.find(':') {
+                    (&rest[..colon], rest[colon + 1..].trim())
+                } else {
+                    match rest.find(' ') {
+                        Some(pos) => (&rest[..pos], rest[pos + 1..].trim()),
+                        None => return Err(
+                            "batch: send requires <agent>:<text> or <agent> <text>".to_string()
+                        ),
+                    }
+                };
+                json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "team.send",
+                    "params": {
+                        "team_name": team,
+                        "agent_name": agent_name,
+                        "text": format!("{text}\n")
+                    }
+                })
+            }
+            "broadcast" => {
+                if rest.is_empty() {
+                    return Err("batch: broadcast requires <text>".to_string());
+                }
+                json!({
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": "team.broadcast",
+                    "params": { "team_name": team, "text": format!("{rest}\n") }
+                })
+            }
+            _ => return Err(format!(
+                "batch: unsupported command '{verb}'. Supported: status, task list, send, broadcast"
+            )),
+        };
+        payloads.push(serde_json::to_string(&rpc).map_err(|e| format!("batch: serialize: {e}"))?);
+    }
+    if payloads.is_empty() {
+        return Err("batch: no commands provided".to_string());
+    }
+    Ok(payloads)
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
+}
+
+/// Run heartbeat in a loop every `interval` seconds.
+/// Stops when the parent process exits (detected via kill -0) or SIGINT/SIGTERM.
+fn run_heartbeat_auto(sock: &PathBuf, team: &str, agent: &str, interval: u64, message: Option<&str>) -> Result<Value, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static STOP: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn handle_signal(_: libc::c_int) {
+        STOP.store(true, Ordering::SeqCst);
+    }
+    unsafe {
+        libc::signal(libc::SIGINT, handle_signal as *const () as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, handle_signal as *const () as libc::sighandler_t);
+    }
+
+    let ppid = unsafe { libc::getppid() };
+    let msg = message.unwrap_or("working...");
+
+    eprintln!("auto-heartbeat started (interval={}s, ppid={}, send SIGINT/SIGTERM to stop)", interval, ppid);
+
+    loop {
+        // Send heartbeat
+        let _ = rpc_call(sock, "team.agent.heartbeat", json!({
+            "team_name": team,
+            "agent_name": agent,
+            "summary": msg,
+        }));
+
+        // Sleep in 100ms chunks to react to signals quickly
+        let ticks = interval * 10;
+        for _ in 0..ticks {
+            if STOP.load(Ordering::SeqCst) {
+                eprintln!("auto-heartbeat stopped (signal).");
+                return Ok(json!({"ok": true, "stopped": "signal"}));
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        // Check if parent process is still alive (kill -0)
+        let alive = unsafe { libc::kill(ppid, 0) == 0 };
+        if !alive {
+            eprintln!("auto-heartbeat stopped (parent exited).");
+            return Ok(json!({"ok": true, "stopped": "parent_exited"}));
+        }
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -751,12 +1081,16 @@ fn main() {
             }
             report_result
         }
-        Commands::Ping { summary } | Commands::Heartbeat { summary } => {
-            rpc_call(&sock, "team.agent.heartbeat", json!({
-                "team_name": team,
-                "agent_name": agent,
-                "summary": summary.as_deref().unwrap_or("alive"),
-            }))
+        Commands::Ping { summary, auto, interval } | Commands::Heartbeat { summary, auto, interval } => {
+            if auto {
+                run_heartbeat_auto(&sock, &team, &agent, interval, summary.as_deref())
+            } else {
+                rpc_call(&sock, "team.agent.heartbeat", json!({
+                    "team_name": team,
+                    "agent_name": agent,
+                    "summary": summary.as_deref().unwrap_or("alive"),
+                }))
+            }
         }
         Commands::Msg(sub) => {
             match sub {
@@ -800,6 +1134,41 @@ fn main() {
                 }
             }
         }
+        Commands::Template(sub) => {
+            match sub {
+                TemplateCommands::List => {
+                    let templates = list_all_templates();
+                    if templates.is_empty() {
+                        println!("No templates found.");
+                    } else {
+                        println!("{:<20} {}", "NAME", "SOURCE");
+                        println!("{}", "-".repeat(50));
+                        for (name, source) in &templates {
+                            println!("{:<20} {}", name, source);
+                        }
+                    }
+                    return;
+                }
+                TemplateCommands::Show { name } => {
+                    match load_template(&name) {
+                        Ok(t) => {
+                            println!("name:     {}", t.name);
+                            println!("title:    {}", t.title);
+                            if let Some(d) = &t.description {
+                                println!("desc:\n  {}", d.replace('\n', "\n  "));
+                            }
+                            if let Some(p) = t.priority { println!("priority: {p}"); }
+                            if let Some(a) = &t.assign { println!("assign:   {a}"); }
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("Error: {e}");
+                            process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
         Commands::Task(sub) => {
             match sub {
                 TaskCommands::Start { task_id } => {
@@ -827,11 +1196,36 @@ fn main() {
                         "blocked_reason": reason.as_deref().unwrap_or("blocked"),
                     }))
                 }
-                TaskCommands::Create { title, assign, desc, priority, accept, deps } => {
-                    let mut params = json!({ "team_name": team, "title": title });
-                    if let Some(a) = assign { params["assignee"] = json!(a); }
-                    if let Some(d) = desc { params["description"] = json!(d); }
-                    if let Some(p) = priority { params["priority"] = json!(p); }
+                TaskCommands::Create { title, assign, desc, priority, accept, deps, template, var } => {
+                    // Resolve template (if provided), CLI args take precedence over template values
+                    let (tmpl_title, tmpl_desc, tmpl_assign, tmpl_priority) =
+                        if let Some(ref tname) = template {
+                            match load_template(tname) {
+                                Ok(t) => {
+                                    let t = t.substitute(&var);
+                                    (Some(t.title), t.description, t.assign, t.priority)
+                                }
+                                Err(e) => {
+                                    eprintln!("Error loading template '{tname}': {e}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            (None, None, None, None)
+                        };
+
+                    let final_title = title.or(tmpl_title).unwrap_or_else(|| {
+                        eprintln!("Error: title required (provide as positional arg or via --template)");
+                        std::process::exit(1);
+                    });
+                    let final_desc = desc.or(tmpl_desc);
+                    let final_assign = assign.or(tmpl_assign);
+                    let final_priority = priority.or(tmpl_priority);
+
+                    let mut params = json!({ "team_name": team, "title": final_title });
+                    if let Some(a) = final_assign { params["assignee"] = json!(a); }
+                    if let Some(d) = final_desc { params["description"] = json!(d); }
+                    if let Some(p) = final_priority { params["priority"] = json!(p); }
                     if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
                     if !deps.is_empty() { params["depends_on"] = json!(deps); }
                     rpc_call(&sock, "team.task.create", params)
@@ -948,7 +1342,11 @@ fn main() {
                 "team_name": team, "agent_name": agent,
             }))
         }
-        Commands::Batch { payloads } => {
+        Commands::Batch { commands } => {
+            let payloads = match parse_batch_commands(&commands, &team) {
+                Ok(p) => p,
+                Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
+            };
             match rpc_batch(&sock, &payloads) {
                 Ok(results) => {
                     for r in &results {

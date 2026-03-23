@@ -1836,12 +1836,22 @@ class TerminalController {
         // (written inside Task, read after semaphore.wait)
         nonisolated(unsafe) var response = ""
 
-        Task {
+        let task = Task {
             defer { semaphore.signal() }
             response = await self.processTeamUICommandAsync(method: method, params: params, id: id)
         }
 
         if semaphore.wait(timeout: .now() + 5) == .timedOut {
+            // Cancel the still-running Task so delayed retries inside
+            // asyncTeamSend/asyncTeamDelegate don't fire after we've already
+            // returned a timeout error to the caller.  Without cancellation the
+            // Task's progressive-backoff retries (150ms / 400ms) can succeed
+            // long after the socket caller has given up, causing a stale Enter
+            // delivery to land in the wrong agent pane or doubling up a send.
+            task.cancel()
+            #if DEBUG
+            dlog("[dispatchTeamCommandAsync] TIMEOUT: cancelling stale task method=\(method)")
+            #endif
             return "{\"ok\":false,\"error\":{\"code\":\"timeout\",\"message\":\"team command timed out\"}}"
         }
         return response
@@ -2111,6 +2121,14 @@ class TerminalController {
         }
         guard let text = params["text"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing text")
+        }
+        // Stagger: enforce ≥100ms gap between consecutive team.send MainActor dispatches to
+        // prevent GCD main-queue saturation when the CLI sends to 10+ agents in rapid succession.
+        // asyncTeamBroadcast uses the same 100ms stagger between agents; this mirrors that
+        // behavior for individual team.send calls that arrive back-to-back.
+        let staggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        if staggerNs > 0 {
+            try? await Task.sleep(nanoseconds: staggerNs)
         }
         // Resolve the correct tabManager from the team's workspace, not self.tabManager
         var success = await MainActor.run {
@@ -2648,6 +2666,13 @@ class TerminalController {
         let context = params["context"] as? String
         let store = TeamDataStore.shared
 
+        // Stagger: same 100ms minimum gap as asyncTeamSend / asyncTeamBroadcast to prevent
+        // main-queue saturation when many team.delegate commands arrive in rapid succession.
+        let delegateStaggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        if delegateStaggerNs > 0 {
+            try? await Task.sleep(nanoseconds: delegateStaggerNs)
+        }
+
         // Create task + send instruction on MainActor (sendToAgent requires main thread).
         // Resolve the correct tabManager from the team's actual workspace first — self.tabManager
         // may point to a different window (e.g., after window switch or adopted leader mode).
@@ -2682,7 +2707,7 @@ class TerminalController {
                 guard let tabManager else { return false }
                 return TeamOrchestrator.shared.sendToAgent(
                     teamName: teamName, agentName: agentName,
-                    text: delegateResult.instruction + "\n", tabManager: tabManager
+                    text: delegateResult.instruction, tabManager: tabManager
                 )
             }
         }
@@ -2696,7 +2721,7 @@ class TerminalController {
                 guard let tabManager else { return false }
                 return TeamOrchestrator.shared.sendToAgent(
                     teamName: teamName, agentName: agentName,
-                    text: delegateResult.instruction + "\n", tabManager: tabManager
+                    text: delegateResult.instruction, tabManager: tabManager
                 )
             }
             #if DEBUG
@@ -2709,6 +2734,30 @@ class TerminalController {
             "sent": true,
             "text_delivered": textDelivered,
         ])
+    }
+
+    // MARK: - Team Send Stagger
+
+    /// Minimum gap (nanoseconds) between consecutive team.send/team.delegate MainActor dispatches.
+    /// Mirrors the 100ms stagger used in asyncTeamBroadcast to prevent GCD main-queue
+    /// saturation when the CLI targets many agents in rapid succession.
+    private static let kTeamSendStaggerNs: UInt64 = 100_000_000 // 100ms
+
+    /// Monotonic dispatch clock for stagger bookkeeping. Protected by @MainActor.
+    /// Each team.send/team.delegate call atomically reads and advances this value so
+    /// concurrent callers spread their main-thread work across 100ms windows.
+    @MainActor private static var teamSendLastDispatchNs: UInt64 = 0
+
+    /// Computes how long to sleep before the next team.send/team.delegate dispatch so
+    /// that successive sends are staggered by at least `kTeamSendStaggerNs`.
+    /// Must be called on the MainActor; atomically reserves the next dispatch slot.
+    @MainActor private static func reserveTeamSendSlot() -> UInt64 {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let elapsed = teamSendLastDispatchNs > 0 ? now &- teamSendLastDispatchNs : kTeamSendStaggerNs
+        let delay = elapsed < kTeamSendStaggerNs ? kTeamSendStaggerNs - elapsed : 0
+        // Reserve the slot: advance the expected-next-dispatch cursor atomically
+        teamSendLastDispatchNs = now + delay
+        return delay
     }
 
     // MARK: - V2 Team Data Dispatch (Approach C: Dual Queue)

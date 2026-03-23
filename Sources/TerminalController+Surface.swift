@@ -3,6 +3,11 @@ import Foundation
 import Bonsplit
 import WebKit
 
+/// Timeout for v2MainExec calls in surface.send_text.
+/// Raised from 2.0 s to 5.0 s so that 10+ simultaneous agent sends don't time out
+/// while waiting for the GCD main queue to drain.
+private let kSendTextMainExecTimeout: TimeInterval = 5.0
+
 extension TerminalController {
     // MARK: - V2 Surface Methods
 
@@ -632,7 +637,7 @@ extension TerminalController {
         }
 
         var result: V2CallResult = .err(code: "internal_error", message: "Failed to send text", data: nil)
-        let completed = v2MainExec {
+        let completed = v2MainExec(timeout: kSendTextMainExecTimeout) {
             guard let ws = self.v2ResolveWorkspace(params: params, tabManager: tabManager) else {
                 result = .err(code: "not_found", message: "Workspace not found", data: nil)
                 return
@@ -680,6 +685,9 @@ extension TerminalController {
             ])
         }
         if !completed {
+            #if DEBUG
+            dlog("[v2SurfaceSendText] TIMEOUT: main queue saturated, text+Enter dropped (timeout=\(kSendTextMainExecTimeout)s text=\(text.prefix(60).debugDescription))")
+            #endif
             return .err(code: "timeout", message: "Main thread busy (IME or modal UI active)", data: nil)
         }
         return result

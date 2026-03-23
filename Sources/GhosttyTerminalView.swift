@@ -1800,7 +1800,11 @@ func pushTargetSurfaceSize(_ size: CGSize) {
 #endif
 
     /// Send a Return key press+release to the given surface.
-    private func sendReturnKey(to surface: ghostty_surface_t) {
+    @discardableResult
+    private func sendReturnKey(to surface: ghostty_surface_t) -> Bool {
+        #if DEBUG
+        dlog("[sendReturnKey] sending Return to surface \(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+        #endif
         var keyEvent = ghostty_input_key_s()
         keyEvent.action = GHOSTTY_ACTION_PRESS
         keyEvent.keycode = 36
@@ -1808,14 +1812,25 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         keyEvent.consumed_mods = GHOSTTY_MODS_NONE
         keyEvent.unshifted_codepoint = 0
         keyEvent.composing = false
+        var pressHandled = false
         "\r".withCString { ptr in
             keyEvent.text = ptr
-            _ = ghostty_surface_key(surface, keyEvent)
+            pressHandled = ghostty_surface_key(surface, keyEvent)
         }
+        #if DEBUG
+        if !pressHandled {
+            dlog("[sendReturnKey] WARN: Return key PRESS not handled by ghostty surface=\(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+        }
+        #endif
         keyEvent.action = GHOSTTY_ACTION_RELEASE
         keyEvent.text = nil
         _ = ghostty_surface_key(surface, keyEvent)
+        return pressHandled
     }
+
+    /// Exponential backoff delays (ms) for surface-nil retry in sendIMEText.
+    /// 4 attempts: 50 → 150 → 400 → 800 ms (total ~1.4 s before final failure).
+    private static let sendIMETextRetryDelaysMs: [Double] = [50, 150, 400, 800]
 
     /// Send text from the IME Input Bar to the terminal surface as key input.
     ///
@@ -1825,12 +1840,25 @@ func pushTargetSurfaceSize(_ size: CGSize) {
     /// Single-line: use key events so TUI apps (Claude Code) receive proper press/release pairs.
     ///
     /// Returns true if text was delivered successfully, false if the surface was unavailable.
+    /// If the surface is transiently nil (pane re-creation), retries up to 4 times with
+    /// exponential backoff (50 → 150 → 400 → 800 ms) before giving up.
     @discardableResult
-    func sendIMEText(_ text: String, withReturn: Bool = true) -> Bool {
+    func sendIMEText(_ text: String, withReturn: Bool = true, attempt: Int = 0) -> Bool {
         guard let surface = surface else {
+            let delays = Self.sendIMETextRetryDelaysMs
+            guard attempt < delays.count else {
 #if DEBUG
-            dlog("ime.send.fail reason=surface_nil surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+                dlog("[sendIMEText] FAIL: surface nil after 4 retries, text+Enter dropped: \(text.prefix(50))")
 #endif
+                return false
+            }
+            let delayMs = delays[attempt]
+#if DEBUG
+            dlog("[sendIMEText] surface nil, retry \(attempt + 1)/\(delays.count) after \(Int(delayMs))ms surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+#endif
+            DispatchQueue.main.asyncAfter(deadline: .now() + delayMs / 1000.0) { [weak self] in
+                _ = self?.sendIMEText(text, withReturn: withReturn, attempt: attempt + 1)
+            }
             return false
         }
 
@@ -1887,7 +1915,12 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         }
         // Send Enter to execute
         if withReturn {
-            sendReturnKey(to: surface)
+            let returnDelivered = sendReturnKey(to: surface)
+            #if DEBUG
+            if !returnDelivered {
+                dlog("[sendIMEText] Return key delivery failed surface=\(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+            }
+            #endif
         }
         return true
     }

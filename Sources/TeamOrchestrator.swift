@@ -1556,7 +1556,9 @@ final class TeamOrchestrator: ObservableObject {
             priority: priority ?? 2
         ) else { return nil }
         let instruction = formatDelegateInstruction(task: task, text: text, context: context)
-        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction + "\n", tabManager: tabManager)
+        // sendTextToPanel trims trailing newlines and appends Return via sendIMEText(withReturn:true).
+        // Passing "\n" would be normalized to a trailing space — omit it for consistency with retries.
+        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction, tabManager: tabManager)
         return DelegateResult(task: task, textDelivered: delivered, instruction: instruction)
     }
 
@@ -1662,6 +1664,10 @@ final class TeamOrchestrator: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    /// Exponential backoff delays (ms) for surface-nil retry in sendTextToPanel.
+    /// 4 attempts: 50 → 150 → 400 → 800 ms (total ~1.4 s before final failure).
+    private static let sendTextRetryDelaysMs: [Double] = [50, 150, 400, 800]
+
     private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, retryCount: Int = 0) -> Bool {
         // Try the provided tabManager first, then fall back to global surface lookup
         // for cross-window scenarios (e.g. broadcast when agents are in a different window).
@@ -1696,18 +1702,33 @@ final class TeamOrchestrator: ObservableObject {
             return false
         }
         let trimmed = text.replacingOccurrences(of: "[\\r\\n]+$", with: "", options: .regularExpression)
-        guard !trimmed.isEmpty else { return true }
+        if trimmed.isEmpty {
+            // Text was pure whitespace/newlines — still send Return so the agent receives the
+            // Enter keystroke that the caller intended (e.g. bare newline commands).
+#if DEBUG
+            dlog("[team.sendTextToPanel] text empty after trim, sending Return key only panelId=\(panelId.uuidString.prefix(8))")
+#endif
+            return panel.surface.sendIMEText("", withReturn: true)
+        }
 
         // Surface readiness check — if the underlying ghostty surface is nil,
         // sendIMEText will silently drop the text+Enter. Detect this early and
-        // let the caller's retry logic handle it.
+        // retry with exponential backoff (50 → 150 → 400 → 800 ms, 4 attempts).
+        // Note: TerminalSurface.sendIMEText has no async retry of its own; retries
+        // are managed exclusively here to prevent duplicate delivery.
         guard panel.surface.surface != nil else {
+            let delays = Self.sendTextRetryDelaysMs
             #if DEBUG
-            dlog("[team.sendTextToPanel] surface nil for panelId=\(panelId.uuidString.prefix(8)), returning false for retry")
+            if retryCount < delays.count {
+                dlog("[team.sendTextToPanel] surface nil, retry \(retryCount + 1)/\(delays.count) after \(Int(delays[retryCount]))ms panelId=\(panelId.uuidString.prefix(5))")
+            } else {
+                dlog("[team.sendTextToPanel] FAIL: surface nil after \(delays.count) retries, text+Enter dropped: \(text.prefix(50))")
+            }
             #endif
             Logger.team.warning("[sendTextToPanel] surface nil for panel \(panelId.uuidString.prefix(8), privacy: .public) (attempt \(retryCount + 1))")
-            if retryCount < 1 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            if retryCount < delays.count {
+                let delayMs = delays[retryCount]
+                DispatchQueue.main.asyncAfter(deadline: .now() + delayMs / 1000.0) { [weak self] in
                     _ = self?.sendTextToPanel(
                         workspaceId: workspaceId, panelId: panelId, text: text,
                         tabManager: tabManager, retryCount: retryCount + 1

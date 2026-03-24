@@ -1975,6 +1975,7 @@ class TerminalController {
         let leaderSessionId = params["leader_session_id"] as? String ?? UUID().uuidString
         let leaderMode = params["leader_mode"] as? String ?? "repl"
         let leaderModel = params["leader_model"] as? String ?? "sonnet"
+        let resumeSessionId = params["resume_session_id"] as? String
         // Adopted mode: caller's terminal IS the leader; surface_id identifies it.
         let adoptedLeaderSurfaceId: UUID? = leaderMode == "adopted"
             ? (params["surface_id"] as? String).flatMap(UUID.init(uuidString:))
@@ -2078,6 +2079,7 @@ class TerminalController {
                 leaderSessionId: leaderSessionId,
                 leaderMode: leaderMode,
                 leaderModel: leaderModel,
+                resumeSessionId: resumeSessionId,
                 adoptedLeaderSurfaceId: adoptedLeaderSurfaceId,
                 tabManager: tabManager
             ) {
@@ -3197,6 +3199,7 @@ class TerminalController {
 
         let leaderMode = params["leader_mode"] as? String ?? "repl"
         let leaderModel = params["leader_model"] as? String ?? "sonnet"
+        let resumeSessionId = params["resume_session_id"] as? String
         let adoptedLeaderSurfaceId: UUID? = leaderMode == "adopted"
             ? (params["surface_id"] as? String).flatMap(UUID.init(uuidString:))
             : nil
@@ -3213,6 +3216,7 @@ class TerminalController {
                 leaderSessionId: leaderSessionId,
                 leaderMode: leaderMode,
                 leaderModel: leaderModel,
+                resumeSessionId: resumeSessionId,
                 adoptedLeaderSurfaceId: adoptedLeaderSurfaceId,
                 tabManager: tabManager
             ) {

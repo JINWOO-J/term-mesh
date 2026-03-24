@@ -279,7 +279,7 @@ struct TermMeshApp: App {
                     }
                 }
                 .sheet(isPresented: $showTeamCreation) {
-                    TeamCreationView { teamName, leaderMode, leaderModel, agents, worktreeMode, executionMode in
+                    TeamCreationView { teamName, leaderMode, leaderModel, agents, worktreeMode, executionMode, resumeSessionId in
                         let agentTuples = agents.map { row in
                             (
                                 name: row.preset.name,
@@ -304,6 +304,7 @@ struct TermMeshApp: App {
                             leaderSessionId: UUID().uuidString,
                             leaderMode: leaderMode,
                             leaderModel: leaderModel,
+                            resumeSessionId: resumeSessionId,
                             worktreeMode: worktreeMode,
                             executionMode: executionMode,
                             tabManager: activeTabManager

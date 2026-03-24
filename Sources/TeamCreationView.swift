@@ -1,5 +1,149 @@
 import SwiftUI
 
+// MARK: - Claude Session Discovery
+
+/// A discovered Claude Code session for resume.
+struct ClaudeSession: Identifiable, Hashable {
+    let id: String       // UUID string
+    let modified: Date
+    let firstMessage: String
+    let lastMessage: String  // last assistant response snippet
+
+    var relativeTime: String {
+        let elapsed = Date().timeIntervalSince(modified)
+        if elapsed < 60 { return "just now" }
+        if elapsed < 3600 { return "\(Int(elapsed / 60))m ago" }
+        if elapsed < 86400 { return "\(Int(elapsed / 3600))h ago" }
+        return "\(Int(elapsed / 86400))d ago"
+    }
+
+    /// Short display label for the picker row.
+    var displayLabel: String {
+        if firstMessage.isEmpty { return id.prefix(8).description }
+        return firstMessage
+    }
+
+    /// Scan the Claude Code sessions directory for the given project path.
+    /// `workingDirectory` must be provided by the caller (resolved on MainActor).
+    static func listRecent(workingDirectory: String, limit: Int = 15) -> [ClaudeSession] {
+        let rawEncoded = workingDirectory.replacingOccurrences(of: "/", with: "-")
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let dir = "\(home)/.claude/projects/\(rawEncoded)"
+
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir),
+              let items = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+
+        var sessions: [ClaudeSession] = []
+        for item in items {
+            guard item.hasSuffix(".jsonl") else { continue }
+            let sid = String(item.dropLast(6)) // remove .jsonl
+            guard sid.count == 36, sid.filter({ $0 == "-" }).count == 4 else { continue }
+
+            let fullPath = "\(dir)/\(item)"
+            guard let attrs = try? fm.attributesOfItem(atPath: fullPath),
+                  let modified = attrs[.modificationDate] as? Date else { continue }
+
+            let (firstMsg, lastMsg) = extractMessages(path: fullPath)
+            sessions.append(ClaudeSession(id: sid, modified: modified, firstMessage: firstMsg, lastMessage: lastMsg))
+        }
+
+        sessions.sort { $0.modified > $1.modified }
+        return Array(sessions.prefix(limit))
+    }
+
+    /// Extract text content from a session JSONL message object.
+    /// User messages: `message.content` is a string or `[{"type":"text","text":"..."}]`.
+    /// Assistant messages: `message.content` is `[{"type":"text","text":"..."}]`.
+    private static func extractText(from obj: [String: Any]) -> String {
+        // Try message.content first (current format)
+        if let message = obj["message"] as? [String: Any] {
+            let content = message["content"]
+            if let str = content as? String { return str }
+            if let blocks = content as? [[String: Any]] {
+                return blocks.compactMap { block -> String? in
+                    guard block["type"] as? String == "text" else { return nil }
+                    return block["text"] as? String
+                }.joined(separator: " ")
+            }
+        }
+        // Fallback: top-level content
+        return obj["content"] as? String ?? ""
+    }
+
+    /// Read first N lines from a file (reads only enough bytes, not the whole file).
+    private static func readLines(path: String, maxLines: Int = 50) -> [String] {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return [] }
+        defer { fh.closeFile() }
+        // Read first ~64KB which is enough for 50 lines of typical JSONL
+        let data = fh.readData(ofLength: 65536)
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        return Array(text.components(separatedBy: "\n").prefix(maxLines))
+    }
+
+    /// Read last N bytes of a file and return lines.
+    private static func readTailLines(path: String, bytes: Int = 32768) -> [String] {
+        guard let fh = FileHandle(forReadingAtPath: path) else { return [] }
+        defer { fh.closeFile() }
+        let fileSize = fh.seekToEndOfFile()
+        let offset = fileSize > UInt64(bytes) ? fileSize - UInt64(bytes) : 0
+        fh.seek(toFileOffset: offset)
+        let data = fh.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        return text.components(separatedBy: "\n")
+    }
+
+    /// Check if a text looks like a real user message (not system/hook/command).
+    private static func isRealUserMessage(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return false }
+        if t.contains("<system-reminder>") || t.contains("<command-name>")
+            || t.contains("<local-command") { return false }
+        return true
+    }
+
+    /// Extract the first user message and last assistant message from a session JSONL.
+    private static func extractMessages(path: String) -> (first: String, last: String) {
+        // First user message: scan first 50 lines
+        var firstMsg = ""
+        let headLines = readLines(path: path, maxLines: 50)
+        for line in headLines {
+            guard !line.isEmpty,
+                  let jsonData = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let msgType = obj["type"] as? String,
+                  msgType == "user" else { continue }
+            let text = extractText(from: obj)
+            guard isRealUserMessage(text) else { continue }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // For commit generator sessions, show a cleaner label
+            if trimmed.hasPrefix("You are a commit message generator") {
+                firstMsg = "[commit message]"
+                break
+            }
+            firstMsg = String(trimmed.prefix(80)) + (trimmed.count > 80 ? "..." : "")
+            break
+        }
+
+        // Last assistant message: scan tail
+        var lastMsg = ""
+        let tailLines = readTailLines(path: path)
+        for line in tailLines.reversed() {
+            guard !line.isEmpty,
+                  let jsonData = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  obj["type"] as? String == "assistant" else { continue }
+            let text = extractText(from: obj)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            lastMsg = String(trimmed.prefix(80)) + (trimmed.count > 80 ? "..." : "")
+            break
+        }
+
+        return (firstMsg, lastMsg)
+    }
+}
+
 /// A row representing one agent slot in the team creation form.
 struct TeamAgentRow: Identifiable {
     let id = UUID()
@@ -21,7 +165,7 @@ struct TeamCreationView: View {
     @ObservedObject var templateManager = TeamTemplateManager.shared
     @ObservedObject var providerDetector = ProviderDetector.shared
 
-    var onCreate: ((_ teamName: String, _ leaderMode: String, _ leaderModel: String, _ agents: [TeamAgentRow], _ worktreeMode: String, _ executionMode: String) -> Void)?
+    var onCreate: ((_ teamName: String, _ leaderMode: String, _ leaderModel: String, _ agents: [TeamAgentRow], _ worktreeMode: String, _ executionMode: String, _ resumeSessionId: String?) -> Void)?
 
     @AppStorage("teamDefaultLeaderMode") private var defaultLeaderMode = "claude"
     @AppStorage("teamDefaultModel") private var defaultModel = "sonnet"
@@ -41,6 +185,10 @@ struct TeamCreationView: View {
     @State private var worktreeMode = "off"  // "off", "shared", "isolated"
     @State private var executionMode = "pane"  // "pane" or "headless"
     @State private var showDaemonWarning = false
+    @State private var resumeSession = false
+    @State private var recentSessions: [ClaudeSession] = []
+    @State private var selectedSessionId: String?
+    @State private var manualSessionId = ""
 
     /// A team name is only truly duplicate if the entry exists AND its workspace
     /// tab is still open.  When the user closes a workspace tab manually the team
@@ -223,6 +371,105 @@ struct TeamCreationView: View {
                         }
                     }
                     .fixedSize()
+                }
+            }
+
+            // Resume session toggle (only for Claude leader)
+            if leaderMode == "claude" {
+                HStack {
+                    Text("Resume Session")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Toggle("", isOn: $resumeSession)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                .onChange(of: resumeSession) { enabled in
+                    if enabled && recentSessions.isEmpty {
+                        let dir = resolveWorkingDirectory()
+                        recentSessions = ClaudeSession.listRecent(workingDirectory: dir)
+                    }
+                    if !enabled {
+                        selectedSessionId = nil
+                        manualSessionId = ""
+                    }
+                }
+
+                if resumeSession {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if recentSessions.isEmpty {
+                            Text("No recent sessions found")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            // Session list
+                            Picker("", selection: Binding(
+                                get: { selectedSessionId ?? "" },
+                                set: {
+                                    selectedSessionId = $0.isEmpty ? nil : $0
+                                    if !$0.isEmpty { manualSessionId = "" }
+                                }
+                            )) {
+                                Text("Select a session...").tag("")
+                                ForEach(recentSessions) { session in
+                                    Text("\(session.relativeTime)  \(session.displayLabel)")
+                                        .tag(session.id)
+                                }
+                            }
+                            .labelsHidden()
+
+                            // Detail view for selected session
+                            if let sid = selectedSessionId,
+                               let session = recentSessions.first(where: { $0.id == sid }) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if !session.firstMessage.isEmpty {
+                                        HStack(alignment: .top, spacing: 4) {
+                                            Text("Q:")
+                                                .font(.caption.bold())
+                                                .foregroundStyle(.blue)
+                                            Text(session.firstMessage)
+                                                .font(.caption)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                    if !session.lastMessage.isEmpty {
+                                        HStack(alignment: .top, spacing: 4) {
+                                            Text("A:")
+                                                .font(.caption.bold())
+                                                .foregroundStyle(.green)
+                                            Text(session.lastMessage)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                    Text(sid)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                        .textSelection(.enabled)
+                                }
+                                .padding(8)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .cornerRadius(6)
+                            }
+                        }
+
+                        // Manual session ID input
+                        Divider()
+                        HStack(spacing: 6) {
+                            Text("or")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Paste session ID...", text: $manualSessionId)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption)
+                                .onChange(of: manualSessionId) { val in
+                                    if !val.isEmpty { selectedSessionId = nil }
+                                }
+                        }
+                    }
+                    .padding(.leading, 4)
                 }
             }
 
@@ -942,9 +1189,30 @@ struct TeamCreationView: View {
         bulkModel = modelCounts.max(by: { $0.value < $1.value })?.key ?? bulkModel
     }
 
+    /// Resolve the current project's working directory from the key window's active tab.
+    private func resolveWorkingDirectory() -> String {
+        if let kw = NSApp.keyWindow,
+           let ctx = AppDelegate.shared?.contextForMainWindow(kw),
+           let dir = ctx.tabManager.selectedTab?.currentDirectory {
+            return dir
+        }
+        if let ctx = AppDelegate.shared?.mainWindowContexts.values.first,
+           let dir = ctx.tabManager.selectedTab?.currentDirectory {
+            return dir
+        }
+        return FileManager.default.currentDirectoryPath
+    }
+
     private func createTeam() {
         defaultLeaderModel = leaderModel
-        onCreate?(teamName, leaderMode, leaderModel, agents, worktreeMode, executionMode)
+        let sid: String? = if resumeSession {
+            !manualSessionId.trimmingCharacters(in: .whitespaces).isEmpty
+                ? manualSessionId.trimmingCharacters(in: .whitespaces)
+                : selectedSessionId
+        } else {
+            nil
+        }
+        onCreate?(teamName, leaderMode, leaderModel, agents, worktreeMode, executionMode, sid)
         dismiss()
     }
 

@@ -169,6 +169,11 @@ enum Commands {
         /// Spawn headless agents (no GUI panes, daemon-managed subprocesses)
         #[arg(long)]
         headless: bool,
+        /// Resume a previous Claude Code session for the leader.
+        /// Without a value: shows interactive session picker.
+        /// With a session ID: resumes that specific session.
+        #[arg(long)]
+        resume_session: Option<Option<String>>,
     },
     /// Add an agent to an existing team
     Add {
@@ -1474,11 +1479,11 @@ fn main() {
             rpc_call(&sock, "team.result.collect", json!({ "team_name": team }))
         }
         // ── Orchestration commands ──────────────────────────────
-        Commands::Create { count, claude_leader, model, leader_model, kiro, codex, gemini, adopt, preset, roles, headless } => {
+        Commands::Create { count, claude_leader, model, leader_model, kiro, codex, gemini, adopt, preset, roles, headless, resume_session } => {
             if headless {
                 run_create_headless(&sock, &team, count.unwrap_or(2), &model, roles.as_deref());
             } else {
-                run_create(&sock, &team, count.unwrap_or(2), claude_leader, &model, leader_model.as_deref(), &kiro, &codex, &gemini, adopt, preset.as_deref(), roles.as_deref());
+                run_create(&sock, &team, count.unwrap_or(2), claude_leader, &model, leader_model.as_deref(), &kiro, &codex, &gemini, adopt, preset.as_deref(), roles.as_deref(), resume_session);
             }
             return;
         }
@@ -1662,12 +1667,235 @@ fn print_result(result: Result<Value, String>) {
     }
 }
 
+// ── Session picker ──────────────────────────────────────────────────
+
+/// A Claude Code session entry parsed from the project session directory.
+struct SessionEntry {
+    id: String,
+    modified: std::time::SystemTime,
+    first_message: String,
+    last_message: String,
+}
+
+/// Discover the Claude Code sessions directory for the current working directory.
+fn claude_sessions_dir() -> Option<PathBuf> {
+    let home = env::var("HOME").ok()?;
+    let cwd = env::current_dir().ok()?;
+    // Claude Code encodes the project path as dash-separated: /Users/foo/bar → -Users-foo-bar
+    let encoded = cwd.to_string_lossy().replace('/', "-");
+    let dir = PathBuf::from(format!("{home}/.claude/projects/{encoded}"));
+    if dir.is_dir() { Some(dir) } else { None }
+}
+
+/// List recent sessions from the Claude Code sessions directory.
+fn list_recent_sessions(limit: usize) -> Vec<SessionEntry> {
+    let dir = match claude_sessions_dir() {
+        Some(d) => d,
+        None => return vec![],
+    };
+
+    let mut entries: Vec<SessionEntry> = vec![];
+    if let Ok(read_dir) = std::fs::read_dir(&dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            // Only .jsonl session files with UUID names
+            if !name.ends_with(".jsonl") { continue; }
+            let id = name.trim_end_matches(".jsonl");
+            // Quick UUID format check (8-4-4-4-12)
+            if id.len() != 36 || id.chars().filter(|c| *c == '-').count() != 4 { continue; }
+
+            let modified = match entry.metadata().and_then(|m| m.modified()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            // Extract first user message and last assistant message
+            let (first_message, last_message) = extract_messages(&path);
+
+            entries.push(SessionEntry {
+                id: id.to_string(),
+                modified,
+                first_message,
+                last_message,
+            });
+        }
+    }
+
+    // Sort by modification time, newest first
+    entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+    entries.truncate(limit);
+    entries
+}
+
+/// Extract text content from a session JSONL entry.
+/// User messages: `message.content` is a string.
+/// Assistant messages: `message.content` is `[{"type":"text","text":"..."}]`.
+fn extract_text_from_entry(val: &Value) -> String {
+    // Try message.content first (current format)
+    let msg = &val["message"]["content"];
+    if let Some(s) = msg.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = msg.as_array() {
+        let texts: Vec<&str> = arr.iter()
+            .filter(|b| b["type"].as_str() == Some("text"))
+            .filter_map(|b| b["text"].as_str())
+            .collect();
+        if !texts.is_empty() {
+            return texts.join(" ");
+        }
+    }
+    // Fallback: top-level content (older format)
+    val["content"].as_str().unwrap_or("").to_string()
+}
+
+/// Extract the first user message and last assistant message from a session JSONL file.
+fn extract_messages(path: &PathBuf) -> (String, String) {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return (String::new(), String::new()),
+    };
+
+    // First message: read first ~16KB
+    let mut head_buf = vec![0u8; 16384];
+    let head_n = file.read(&mut head_buf).unwrap_or(0);
+    head_buf.truncate(head_n);
+    let head_text = String::from_utf8_lossy(&head_buf);
+
+    let mut first_message = String::new();
+    for line in head_text.lines().take(50) {
+        if let Ok(val) = serde_json::from_str::<Value>(line) {
+            if val["type"].as_str() != Some("user") { continue; }
+            let text = extract_text_from_entry(&val);
+            if text.contains("<system-reminder>") || text.contains("<command-name>")
+                || text.contains("<local-command") {
+                continue;
+            }
+            let trimmed = text.trim();
+            if trimmed.is_empty() { continue; }
+            // Label commit generator sessions clearly
+            if trimmed.starts_with("You are a commit message generator") {
+                first_message = "[commit message]".to_string();
+                break;
+            }
+            let display: String = trimmed.chars().take(80).collect();
+            first_message = if trimmed.chars().count() > 80 {
+                format!("{display}...")
+            } else {
+                display
+            };
+            break;
+        }
+    }
+
+    // Last message: read last ~32KB
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let tail_offset = if file_len > 32768 { file_len - 32768 } else { 0 };
+    let _ = file.seek(SeekFrom::Start(tail_offset));
+    let mut tail_buf = Vec::new();
+    let _ = file.read_to_end(&mut tail_buf);
+    let tail_text = String::from_utf8_lossy(&tail_buf);
+
+    let mut last_message = String::new();
+    for line in tail_text.lines().rev() {
+        if let Ok(val) = serde_json::from_str::<Value>(line) {
+            if val["type"].as_str() != Some("assistant") { continue; }
+            let text = extract_text_from_entry(&val);
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                let display: String = trimmed.chars().take(80).collect();
+                last_message = if trimmed.chars().count() > 80 {
+                    format!("{display}...")
+                } else {
+                    display
+                };
+                break;
+            }
+        }
+    }
+
+    (first_message, last_message)
+}
+
+/// Format a SystemTime as a relative time string (e.g. "2h ago", "3d ago").
+fn format_relative_time(time: std::time::SystemTime) -> String {
+    let elapsed = time.elapsed().unwrap_or_default();
+    let secs = elapsed.as_secs();
+    if secs < 60 { return "just now".to_string(); }
+    if secs < 3600 { return format!("{}m ago", secs / 60); }
+    if secs < 86400 { return format!("{}h ago", secs / 3600); }
+    format!("{}d ago", secs / 86400)
+}
+
+/// Interactive session picker. Returns a session ID or exits.
+fn pick_session() -> String {
+    let sessions = list_recent_sessions(15);
+    if sessions.is_empty() {
+        eprintln!("No recent sessions found for this project.");
+        eprintln!("Hint: enter a session ID directly with --resume-session=<uuid>");
+        process::exit(1);
+    }
+
+    eprintln!("\n  Recent sessions:\n");
+    for (i, s) in sessions.iter().enumerate() {
+        let time_str = format_relative_time(s.modified);
+        let preview = if s.first_message.is_empty() {
+            s.id[..8].to_string()
+        } else {
+            s.first_message.clone()
+        };
+        eprintln!("  {:>2}) {:<10} Q: {}", i + 1, time_str, preview);
+        if !s.last_message.is_empty() {
+            eprintln!("      {:<10} A: {}", "", s.last_message);
+        }
+    }
+    eprintln!();
+    eprint!("  Select [1-{}] or paste session ID: ", sessions.len());
+    std::io::stderr().flush().ok();
+
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_err() || input.trim().is_empty() {
+        eprintln!("No selection made.");
+        process::exit(1);
+    }
+    let input = input.trim();
+
+    // Try as number first
+    if let Ok(num) = input.parse::<usize>() {
+        if num >= 1 && num <= sessions.len() {
+            return sessions[num - 1].id.clone();
+        }
+        eprintln!("Invalid selection: {num}");
+        process::exit(1);
+    }
+
+    // Otherwise treat as session ID
+    input.to_string()
+}
+
+/// Resolve --resume-session: None means not requested, Some(None) means interactive picker,
+/// Some(Some(id)) means specific session ID.
+fn resolve_resume_session(flag: Option<Option<String>>) -> Option<String> {
+    match flag {
+        None => None,
+        Some(None) => Some(pick_session()),
+        Some(Some(id)) if id.is_empty() => Some(pick_session()),
+        Some(Some(id)) => Some(id),
+    }
+}
+
 // ── Orchestration implementations ────────────────────────────────────
 
 fn run_create(
     sock: &PathBuf, team: &str, count: u32, claude_leader: bool,
     model: &str, leader_model: Option<&str>, kiro: &Option<String>, codex: &Option<String>, gemini: &Option<String>,
     adopt: bool, preset: Option<&str>, roles: Option<&str>,
+    resume_session: Option<Option<String>>,
 ) {
     // Guard: --adopt and --claude-leader are mutually exclusive
     if adopt && claude_leader {
@@ -1678,10 +1906,18 @@ fn run_create(
     if roles.is_some() && count != 2 {
         eprintln!("Warning: --roles is specified; --count ({count}) will be ignored.");
     }
+    // Resolve resume session before team creation (may show interactive picker)
+    let resume_session_id = resolve_resume_session(resume_session);
+    if resume_session_id.is_some() && adopt {
+        eprintln!("Error: --resume-session and --adopt cannot be used together.");
+        process::exit(1);
+    }
+
     cleanup_old_results(team);
+    // --resume-session implies claude leader mode (need Claude CLI to pass --resume)
     let leader_mode = if adopt {
         "adopted"
-    } else if claude_leader {
+    } else if claude_leader || resume_session_id.is_some() {
         "claude"
     } else {
         "repl"
@@ -1785,7 +2021,11 @@ fn run_create(
         .unwrap_or_else(|_| ".".to_string());
 
     let agent_count = agents.len();
-    eprintln!("Creating team '{team}' with {agent_count} agent(s) [leader: {leader_mode}]...");
+    if let Some(ref sid) = resume_session_id {
+        eprintln!("Creating team '{team}' with {agent_count} agent(s) [leader: {leader_mode}, resume: {}]...", &sid[..8.min(sid.len())]);
+    } else {
+        eprintln!("Creating team '{team}' with {agent_count} agent(s) [leader: {leader_mode}]...");
+    }
     eprintln!("Socket: {}", sock.display());
 
     // Pass caller's panel ID so the app can route team creation to the correct window
@@ -1797,6 +2037,9 @@ fn run_create(
         "leader_model": leader_model,
         "agents": agents,
     });
+    if let Some(ref sid) = resume_session_id {
+        create_params["resume_session_id"] = json!(sid);
+    }
     if let Ok(panel_id) = env::var("TERMMESH_PANEL_ID") {
         create_params["surface_id"] = json!(panel_id);
     }

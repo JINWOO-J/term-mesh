@@ -340,6 +340,7 @@ final class TeamOrchestrator: ObservableObject {
         leaderSessionId: String,
         leaderMode: String = "repl",
         leaderModel: String = "sonnet",
+        resumeSessionId: String? = nil,
         worktreeMode: String = "off",
         executionMode: String = "pane",
         adoptedLeaderSurfaceId: UUID? = nil,
@@ -555,6 +556,9 @@ final class TeamOrchestrator: ObservableObject {
                     var claudeLeaderParts = ["\(quotedPath)", "--system-prompt '\(escaped)'", "--dangerously-skip-permissions"]
                     if !leaderModel.isEmpty && leaderModel != "sonnet" {
                         claudeLeaderParts.append("--model \(leaderModel)")
+                    }
+                    if let sid = resumeSessionId, !sid.isEmpty {
+                        claudeLeaderParts.append("--resume \(sid)")
                     }
                     leaderCommand = claudeLeaderParts.joined(separator: " ")
                 } else {

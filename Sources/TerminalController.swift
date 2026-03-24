@@ -2150,6 +2150,12 @@ class TerminalController {
         guard let text = params["text"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing text")
         }
+        // Stagger: same 100ms minimum gap as asyncTeamSend to prevent GCD main-queue
+        // saturation when the CLI sends to leader back-to-back with other sends.
+        let staggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        if staggerNs > 0 {
+            try? await Task.sleep(nanoseconds: staggerNs)
+        }
         let success = await MainActor.run {
             let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
             guard let tabManager else { return false }

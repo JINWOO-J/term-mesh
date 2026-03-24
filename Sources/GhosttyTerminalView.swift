@@ -1016,70 +1016,74 @@ final class TerminalSurface: Identifiable, ObservableObject {
         }
 
         if !normalized.isEmpty {
-            // Chunk long text at UTF-8 safe boundaries
-            let maxBytes = 4096
-            var chunks: [String] = []
-            if normalized.utf8.count <= maxBytes {
-                chunks = [normalized]
-            } else {
-                var current = ""
-                var currentBytes = 0
-                for char in normalized {
-                    let charBytes = char.utf8.count
-                    if currentBytes + charBytes > maxBytes {
-                        chunks.append(current)
-                        current = String(char)
-                        currentBytes = charBytes
-                    } else {
-                        current.append(char)
-                        currentBytes += charBytes
-                    }
-                }
-                if !current.isEmpty { chunks.append(current) }
-            }
-
-            for chunk in chunks {
-                // PRESS with text
-                chunk.withCString { ptr in
-                    var keyEvent = ghostty_input_key_s()
-                    keyEvent.action = GHOSTTY_ACTION_PRESS
-                    keyEvent.keycode = 0
-                    keyEvent.mods = GHOSTTY_MODS_NONE
-                    keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-                    keyEvent.unshifted_codepoint = 0
-                    keyEvent.text = ptr
-                    keyEvent.composing = false
-                    _ = ghostty_surface_key(surface, keyEvent)
-                }
-                // Matching RELEASE — TUI apps track key state
-                var releaseEvent = ghostty_input_key_s()
-                releaseEvent.action = GHOSTTY_ACTION_RELEASE
-                releaseEvent.keycode = 0
-                releaseEvent.mods = GHOSTTY_MODS_NONE
-                releaseEvent.consumed_mods = GHOSTTY_MODS_NONE
-                releaseEvent.unshifted_codepoint = 0
-                releaseEvent.text = nil
-                releaseEvent.composing = false
-                _ = ghostty_surface_key(surface, releaseEvent)
+            // Use ghostty_surface_text for text delivery — it properly wraps
+            // content in bracketed paste markers (\e[200~...\e[201~) when the
+            // terminal has bracketed paste mode enabled. This ensures TUI apps
+            // like Claude Code handle the text as an official paste event rather
+            // than inferring paste from rapid keystroke arrival (which can cause
+            // the subsequent Return key to be silently dropped).
+            let data = normalized.utf8
+            let len = UInt(data.count)
+            data.withContiguousStorageIfAvailable { buf in
+                ghostty_surface_text(surface, buf.baseAddress, len)
+            } ?? normalized.withCString { cstr in
+                ghostty_surface_text(surface, cstr, len)
             }
         }
 
-        // Send Return key (PRESS+RELEASE)
+        // When text was delivered and Return is requested, brief pause to let
+        // the IO thread flush the paste to the PTY. Note: for team text delivery,
+        // sendTextToPanel splits text and Return into separate MainActor turns,
+        // so this delay is mainly for direct sendIMEText callers.
+        if withReturn && !normalized.isEmpty {
+            usleep(5_000) // 5ms — enough for IO thread to flush paste to PTY
+        }
+
+        // Send Return key (PRESS+RELEASE) with retry on failure
         if withReturn {
-            var keyEvent = ghostty_input_key_s()
-            keyEvent.action = GHOSTTY_ACTION_PRESS
-            keyEvent.keycode = 36 // kVK_Return
-            keyEvent.mods = GHOSTTY_MODS_NONE
-            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-            keyEvent.unshifted_codepoint = 0
-            keyEvent.composing = false
-            "\r".withCString { ptr in
-                keyEvent.text = ptr
+            let maxRetries = 3
+            let retryDelayUs: [useconds_t] = [10_000, 30_000, 150_000] // 10ms, 30ms, 150ms
+            var returnDelivered = false
+
+            for attempt in 0..<maxRetries {
+                var keyEvent = ghostty_input_key_s()
+                keyEvent.action = GHOSTTY_ACTION_PRESS
+                keyEvent.keycode = 36 // kVK_Return
+                keyEvent.mods = GHOSTTY_MODS_NONE
+                keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+                keyEvent.unshifted_codepoint = 13 // CR codepoint for proper logical key mapping
+                keyEvent.composing = false
+                var pressHandled = false
+                "\r".withCString { ptr in
+                    keyEvent.text = ptr
+                    pressHandled = ghostty_surface_key(surface, keyEvent)
+                }
+                keyEvent.action = GHOSTTY_ACTION_RELEASE
+                keyEvent.text = nil
                 _ = ghostty_surface_key(surface, keyEvent)
+
+                if pressHandled {
+                    returnDelivered = true
+                    break
+                }
+
+                #if DEBUG
+                dlog("[sendIMEText.Return] PRESS not handled, retry \(attempt + 1)/\(maxRetries) surface=\(id.uuidString.prefix(8))")
+                #endif
+
+                if attempt < maxRetries - 1 {
+                    // Use usleep to block MainActor — prevents other sendIMEText
+                    // calls from interleaving (pasting into same prompt).
+                    usleep(retryDelayUs[attempt])
+                }
             }
-            keyEvent.action = GHOSTTY_ACTION_RELEASE
-            keyEvent.text = nil
-            _ = ghostty_surface_key(surface, keyEvent)
+
+            if !returnDelivered {
+                #if DEBUG
+                dlog("[sendIMEText.Return] FAIL: Return not delivered after \(maxRetries) retries surface=\(id.uuidString.prefix(8))")
+                #endif
+                return false
+            }
         }
         return true
     }
@@ -1915,12 +1919,25 @@ func pushTargetSurfaceSize(_ size: CGSize) {
         }
         // Send Enter to execute
         if withReturn {
-            let returnDelivered = sendReturnKey(to: surface)
-            #if DEBUG
+            var returnDelivered = sendReturnKey(to: surface)
             if !returnDelivered {
-                dlog("[sendIMEText] Return key delivery failed surface=\(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+                // Retry Return key delivery with small delays
+                let retryDelaysUs: [useconds_t] = [10_000, 30_000, 150_000]
+                for (i, delayUs) in retryDelaysUs.enumerated() {
+                    usleep(delayUs)
+                    returnDelivered = sendReturnKey(to: surface)
+                    #if DEBUG
+                    dlog("[sendIMEText] Return retry \(i + 1)/\(retryDelaysUs.count) handled=\(returnDelivered) surface=\(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+                    #endif
+                    if returnDelivered { break }
+                }
+                if !returnDelivered {
+                    #if DEBUG
+                    dlog("[sendIMEText] FAIL: Return not delivered after all retries surface=\(terminalSurface?.id.uuidString.prefix(8) ?? "nil")")
+                    #endif
+                    return false
+                }
             }
-            #endif
         }
         return true
     }

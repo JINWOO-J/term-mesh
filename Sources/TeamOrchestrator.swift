@@ -1447,10 +1447,10 @@ final class TeamOrchestrator: ObservableObject {
     }
 
     /// Send text to a specific agent in a team.
-    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager) -> Bool {
+    func sendToAgent(teamName: String, agentName: String, text: String, tabManager: TabManager, withReturn: Bool = true) -> Bool {
         guard let team = teams[teamName] else { return false }
         guard let agent = team.agents.first(where: { $0.name == agentName }) else { return false }
-        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager)
+        return sendTextToPanel(workspaceId: agent.workspaceId, panelId: agent.panelId, text: text, tabManager: tabManager, withReturn: withReturn)
     }
 
     /// Send text to an agent without requiring a tabManager.
@@ -1556,9 +1556,9 @@ final class TeamOrchestrator: ObservableObject {
             priority: priority ?? 2
         ) else { return nil }
         let instruction = formatDelegateInstruction(task: task, text: text, context: context)
-        // sendTextToPanel trims trailing newlines and appends Return via sendIMEText(withReturn:true).
-        // Passing "\n" would be normalized to a trailing space — omit it for consistency with retries.
-        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction, tabManager: tabManager)
+        // Send text WITHOUT Return — the caller (asyncTeamDelegate) sends Return
+        // in a separate MainActor turn to avoid ghostty paste state interference.
+        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction, tabManager: tabManager, withReturn: false)
         return DelegateResult(task: task, textDelivered: delivered, instruction: instruction)
     }
 
@@ -1668,7 +1668,7 @@ final class TeamOrchestrator: ObservableObject {
     /// 4 attempts: 50 → 150 → 400 → 800 ms (total ~1.4 s before final failure).
     private static let sendTextRetryDelaysMs: [Double] = [50, 150, 400, 800]
 
-    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, retryCount: Int = 0) -> Bool {
+    private func sendTextToPanel(workspaceId: UUID, panelId: UUID, text: String, tabManager: TabManager, withReturn: Bool = true, retryCount: Int = 0) -> Bool {
         // Try the provided tabManager first, then fall back to global surface lookup
         // for cross-window scenarios (e.g. broadcast when agents are in a different window).
         let panel: TerminalPanel
@@ -1695,7 +1695,7 @@ final class TeamOrchestrator: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     _ = self?.sendTextToPanel(
                         workspaceId: workspaceId, panelId: panelId, text: text,
-                        tabManager: tabManager, retryCount: retryCount + 1
+                        tabManager: tabManager, withReturn: withReturn, retryCount: retryCount + 1
                     )
                 }
             }
@@ -1731,27 +1731,23 @@ final class TeamOrchestrator: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delayMs / 1000.0) { [weak self] in
                     _ = self?.sendTextToPanel(
                         workspaceId: workspaceId, panelId: panelId, text: text,
-                        tabManager: tabManager, retryCount: retryCount + 1
+                        tabManager: tabManager, withReturn: withReturn, retryCount: retryCount + 1
                     )
                 }
             }
             return false
         }
 
-        // Use sendIMEText for atomic text+Enter delivery.
-        // Previous approach (bracketed paste + 150ms delayed Enter) caused Enter
-        // to be silently dropped under load — the asyncAfter Enter could fire before
-        // the TUI app finished processing the paste, or get lost in GCD main queue
-        // congestion when 10+ agents receive text simultaneously.
-        // sendIMEText sends per-character PRESS+RELEASE key events followed by
-        // a synchronous Return key — no timing gap, no race condition.
+        // Normalize and send text+Return via sendIMEText.
+        // Note: when callers pass withReturn=false, only text is delivered (no Enter key).
+        // The caller is responsible for sending Return separately if needed.
         let normalized = trimmed
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
-        let sent = panel.surface.sendIMEText(normalized, withReturn: true)
+        let sent = panel.surface.sendIMEText(normalized, withReturn: withReturn)
         #if DEBUG
-        dlog("[team.sendTextToPanel] sendIMEText panelId=\(panelId.uuidString.prefix(8)) textLen=\(normalized.count) sent=\(sent) text=\(normalized.prefix(80).debugDescription)")
+        dlog("[team.sendTextToPanel] sendIMEText panelId=\(panelId.uuidString.prefix(8)) textLen=\(normalized.count) withReturn=\(withReturn) sent=\(sent) text=\(normalized.prefix(80).debugDescription)")
         #endif
         return sent
     }

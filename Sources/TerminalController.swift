@@ -2131,33 +2131,12 @@ class TerminalController {
             try? await Task.sleep(nanoseconds: staggerNs)
         }
         // Resolve the correct tabManager from the team's workspace, not self.tabManager
-        var success = await MainActor.run {
+        let success = await MainActor.run {
             let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
             guard let tabManager else { return false }
             return TeamOrchestrator.shared.sendToAgent(
                 teamName: teamName, agentName: agentName, text: text, tabManager: tabManager
             )
-        }
-        // Progressive retry: 150ms then 400ms
-        if !success {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            success = await MainActor.run {
-                let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
-                guard let tabManager else { return false }
-                return TeamOrchestrator.shared.sendToAgent(
-                    teamName: teamName, agentName: agentName, text: text, tabManager: tabManager
-                )
-            }
-        }
-        if !success {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            success = await MainActor.run {
-                let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
-                guard let tabManager else { return false }
-                return TeamOrchestrator.shared.sendToAgent(
-                    teamName: teamName, agentName: agentName, text: text, tabManager: tabManager
-                )
-            }
         }
         return success
             ? v2Ok(id: id, result: ["sent": true, "text_delivered": true, "team_name": teamName, "agent_name": agentName])
@@ -2694,45 +2673,13 @@ class TerminalController {
             return v2Error(id: id, code: "internal_error", message: "Task creation failed for agent '\(agentName)'")
         }
 
-        // Retry text delivery if initial send failed (panel routing race).
-        // Use progressive backoff: 150ms first (catches fast panel init races), 400ms second.
-        var textDelivered = delegateResult.textDelivered
-        if !textDelivered {
-            #if DEBUG
-            dlog("[asyncTeamDelegate] initial send failed for \(agentName), retrying in 150ms")
-            #endif
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            textDelivered = await MainActor.run {
-                let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
-                guard let tabManager else { return false }
-                return TeamOrchestrator.shared.sendToAgent(
-                    teamName: teamName, agentName: agentName,
-                    text: delegateResult.instruction, tabManager: tabManager
-                )
-            }
-        }
-        if !textDelivered {
-            #if DEBUG
-            dlog("[asyncTeamDelegate] 1st retry failed for \(agentName), retrying in 400ms")
-            #endif
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            textDelivered = await MainActor.run {
-                let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
-                guard let tabManager else { return false }
-                return TeamOrchestrator.shared.sendToAgent(
-                    teamName: teamName, agentName: agentName,
-                    text: delegateResult.instruction, tabManager: tabManager
-                )
-            }
-            #if DEBUG
-            dlog("[asyncTeamDelegate] 2nd retry result for \(agentName): \(textDelivered)")
-            #endif
-        }
-
+        // Note: delegateToAgent sends text WITHOUT Return (withReturn: false).
+        // The daemon sends Return separately via team.send after a delay to ensure
+        // the TUI app (Claude Code) processes the paste before receiving Enter.
         return v2Ok(id: id, result: [
             "task": store.taskDictionary(delegateResult.task),
             "sent": true,
-            "text_delivered": textDelivered,
+            "text_delivered": delegateResult.textDelivered,
         ])
     }
 

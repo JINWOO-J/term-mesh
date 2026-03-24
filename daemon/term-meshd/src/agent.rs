@@ -158,6 +158,9 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
     pub deps: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix_budget: Option<i32>,
+    pub fix_count: i32,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
 }
@@ -183,6 +186,17 @@ pub struct TaskCreateParams {
     pub created_by: Option<String>,
     #[serde(default)]
     pub deps: Option<Vec<String>>,
+    #[serde(default)]
+    pub fix_budget: Option<i32>,
+}
+
+/// Result of a fix attempt: whether it was accepted or the task was auto-blocked.
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskFixAttemptResult {
+    pub task_id: String,
+    pub fix_count: i32,
+    pub fix_budget: Option<i32>,
+    pub blocked: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,6 +373,19 @@ impl AgentSessionManager {
         if !has_priority {
             let _ = db.execute_batch(
                 "ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
+            );
+        }
+
+        // Migration: add fix_budget and fix_count columns if missing
+        let has_fix_budget: bool = db
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='fix_budget'")
+            .and_then(|mut s| s.query_row([], |r| r.get::<_, i64>(0)))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_fix_budget {
+            let _ = db.execute_batch(
+                "ALTER TABLE tasks ADD COLUMN fix_budget INTEGER DEFAULT NULL;
+                 ALTER TABLE tasks ADD COLUMN fix_count INTEGER NOT NULL DEFAULT 0"
             );
         }
 
@@ -756,10 +783,11 @@ impl AgentSessionManager {
             }
         }
 
+        let fix_budget = params.fix_budget;
         inner.db.execute(
-            "INSERT INTO tasks (id, title, description, status, priority, assignee, created_by, created_at_ms, updated_at_ms)
-             VALUES (?1, ?2, ?3, 'pending', ?4, NULL, ?5, ?6, ?7)",
-            params![id, params.title, params.description, priority, params.created_by, ts, ts],
+            "INSERT INTO tasks (id, title, description, status, priority, assignee, created_by, fix_budget, fix_count, created_at_ms, updated_at_ms)
+             VALUES (?1, ?2, ?3, 'pending', ?4, NULL, ?5, ?6, 0, ?7, ?8)",
+            params![id, params.title, params.description, priority, params.created_by, fix_budget, ts, ts],
         ).map_err(|e| format!("DB insert failed: {e}"))?;
 
         for dep in &deps {
@@ -784,6 +812,8 @@ impl AgentSessionManager {
             assignee: None,
             created_by: params.created_by,
             deps,
+            fix_budget,
+            fix_count: 0,
             created_at_ms: ts,
             updated_at_ms: ts,
         })
@@ -796,7 +826,8 @@ impl AgentSessionManager {
             // Safe: task IDs are hex UUIDs, never contain '|'
             "SELECT t.id, t.title, t.description, t.status, t.priority, t.assignee,
                     t.created_by, t.created_at_ms, t.updated_at_ms,
-                    GROUP_CONCAT(td.depends_on, '|') as dep_ids
+                    GROUP_CONCAT(td.depends_on, '|') as dep_ids,
+                    t.fix_budget, t.fix_count
              FROM tasks t
              LEFT JOIN task_deps td ON td.task_id = t.id
              WHERE t.id = ?1
@@ -816,6 +847,8 @@ impl AgentSessionManager {
                     assignee: row.get(5)?,
                     created_by: row.get(6)?,
                     deps,
+                    fix_budget: row.get(10)?,
+                    fix_count: row.get::<_, i32>(11).unwrap_or(0),
                     created_at_ms: row.get(7)?,
                     updated_at_ms: row.get(8)?,
                 })
@@ -831,7 +864,8 @@ impl AgentSessionManager {
             // Safe: task IDs are hex UUIDs, never contain '|'
             "SELECT t.id, t.title, t.description, t.status, t.priority, t.assignee,
                     t.created_by, t.created_at_ms, t.updated_at_ms,
-                    GROUP_CONCAT(td.depends_on, '|') as dep_ids
+                    GROUP_CONCAT(td.depends_on, '|') as dep_ids,
+                    t.fix_budget, t.fix_count
              FROM tasks t
              LEFT JOIN task_deps td ON td.task_id = t.id
              WHERE 1=1"
@@ -868,6 +902,8 @@ impl AgentSessionManager {
                 assignee: row.get(5)?,
                 created_by: row.get(6)?,
                 deps,
+                fix_budget: row.get(10)?,
+                fix_count: row.get::<_, i32>(11).unwrap_or(0),
                 created_at_ms: row.get(7)?,
                 updated_at_ms: row.get(8)?,
             })
@@ -1047,6 +1083,88 @@ impl AgentSessionManager {
         };
 
         rows.flatten().collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Auto-Fix Budget (Phase 3)
+    // -----------------------------------------------------------------------
+
+    /// Record a fix attempt for a task. Increments fix_count and auto-blocks
+    /// the task if the budget is exhausted. Returns the updated state.
+    ///
+    /// Security invariants:
+    /// - fix_count is server-side only; agents cannot reset it
+    /// - block→unblock does NOT reset fix_count (enforced in task_update)
+    /// - reassign does NOT reset fix_count (task-scoped, not agent-scoped)
+    pub fn task_fix_attempt(&self, task_id: &str, agent_name: &str) -> Result<TaskFixAttemptResult, String> {
+        let inner = self.inner.lock().unwrap();
+
+        // Load current task state
+        let (status_str, fix_budget, fix_count): (String, Option<i32>, i32) = inner.db.query_row(
+            "SELECT status, fix_budget, fix_count FROM tasks WHERE id = ?1",
+            params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2).unwrap_or(0))),
+        ).map_err(|_| format!("task not found: {task_id}"))?;
+
+        let status = TaskStatus::from_str(&status_str)
+            .ok_or_else(|| format!("invalid status: {status_str}"))?;
+
+        // Only allow fix attempts on in_progress tasks
+        if status != TaskStatus::InProgress {
+            return Err(format!(
+                "fix_attempt only allowed on in_progress tasks, got: {}",
+                status.as_str()
+            ));
+        }
+
+        let new_count = fix_count + 1;
+        let ts = now_ms();
+
+        // Check if budget is exhausted after this attempt
+        let budget_exhausted = fix_budget.map_or(false, |b| new_count >= b);
+
+        if budget_exhausted {
+            // Auto-block: increment count AND set status to blocked in one transaction
+            inner.db.execute(
+                "UPDATE tasks SET fix_count = ?1, status = 'blocked',
+                        updated_at_ms = ?2
+                 WHERE id = ?3",
+                params![new_count, ts, task_id],
+            ).map_err(|e| format!("update failed: {e}"))?;
+
+            // Log the auto-block
+            let msg = format!(
+                "auto-blocked: fix budget exhausted ({}/{}) by {}",
+                new_count, fix_budget.unwrap_or(0), agent_name
+            );
+            let _ = inner.db.execute(
+                "INSERT INTO task_log (task_id, agent_id, message, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![task_id, agent_name, msg, ts],
+            );
+
+            tracing::warn!("task {task_id} auto-blocked: fix budget exhausted ({new_count}/{})", fix_budget.unwrap_or(0));
+        } else {
+            // Just increment the count
+            inner.db.execute(
+                "UPDATE tasks SET fix_count = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![new_count, ts, task_id],
+            ).map_err(|e| format!("update failed: {e}"))?;
+
+            // Log the attempt
+            let budget_str = fix_budget.map_or("unlimited".to_string(), |b| format!("{new_count}/{b}"));
+            let msg = format!("fix attempt #{new_count} ({budget_str}) by {agent_name}");
+            let _ = inner.db.execute(
+                "INSERT INTO task_log (task_id, agent_id, message, created_at_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![task_id, agent_name, msg, ts],
+            );
+        }
+
+        Ok(TaskFixAttemptResult {
+            task_id: task_id.to_string(),
+            fix_count: new_count,
+            fix_budget,
+            blocked: budget_exhausted,
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -1469,6 +1587,7 @@ mod tests {
             priority: Some(5),
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         assert_eq!(task.title, "Test task");
@@ -1491,6 +1610,7 @@ mod tests {
             priority: Some(10),
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
         let _t2 = mgr.task_create(TaskCreateParams {
             title: "Low priority".into(),
@@ -1498,6 +1618,7 @@ mod tests {
             priority: Some(1),
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         // List all — should be ordered by priority DESC
@@ -1536,6 +1657,7 @@ mod tests {
             priority: None,
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         // Invalid: pending -> in_progress (must go through assigned)
@@ -1567,6 +1689,7 @@ mod tests {
             priority: None,
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         // pending -> assigned (via task_assign)
@@ -1610,6 +1733,7 @@ mod tests {
             priority: None,
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         // Create task with dep
@@ -1619,6 +1743,7 @@ mod tests {
             priority: None,
             created_by: None,
             deps: Some(vec![dep.id.clone()]),
+            fix_budget: None,
         }).unwrap();
 
         // Should fail — dep not completed
@@ -1669,6 +1794,7 @@ mod tests {
             priority: None,
             created_by: None,
             deps: None,
+            fix_budget: None,
         }).unwrap();
 
         mgr.task_update(TaskUpdateParams {

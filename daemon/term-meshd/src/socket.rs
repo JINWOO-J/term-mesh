@@ -583,6 +583,17 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             }
         }
 
+        // --- Auto-Fix Budget ---
+        "task.fix_attempt" => {
+            #[derive(Deserialize)]
+            struct P { task_id: String, agent_name: String }
+            match serde_json::from_value::<P>(req.params.clone()) {
+                Ok(p) => ctx.agent_manager.task_fix_attempt(&p.task_id, &p.agent_name)
+                    .map(|r| serde_json::to_value(r).unwrap()),
+                Err(e) => Err(format!("invalid params: {e}")),
+            }
+        }
+
         // --- Messages (F-06 Phase 2) ---
         "message.send" => {
             match serde_json::from_value::<crate::agent::MessageSendParams>(req.params.clone()) {

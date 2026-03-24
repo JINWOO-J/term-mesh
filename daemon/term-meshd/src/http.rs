@@ -849,6 +849,7 @@ async fn tasks_create_handler(
         priority: req.priority,
         created_by: req.created_by,
         deps: req.deps,
+        fix_budget: None,
     };
     match state.agent_manager.task_create(params) {
         Ok(task) => (StatusCode::CREATED, Json(serde_json::to_value(task).unwrap())).into_response(),

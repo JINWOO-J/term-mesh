@@ -193,6 +193,7 @@ tm-agent task start <task_id>
 tm-agent task done <task_id> '<result>'
 tm-agent task block <task_id> '<reason>'
 tm-agent task review <task_id> '<summary>'
+tm-agent task fix-attempt <task_id>   # Record a fix attempt (auto-blocks when budget exhausted)
 tm-agent heartbeat '<progress summary>'
 tm-agent report '<result summary>'
 tm-agent reply '<one-paragraph summary>'
@@ -230,6 +231,15 @@ cat ~/.term-mesh/results/my-team/architect-reply.md
 ```
 
 When `tm-agent collect` or `msg list` returns truncated content (ends with `...`), read the corresponding file from `~/.term-mesh/results/` for the full text. Files are auto-cleaned after 24 hours.
+
+### Auto-Fix Budget protocol
+
+When a task has a fix budget (set via `--auto-fix-budget N` on delegate):
+- **Before each fix attempt** (build fix, test fix, error correction), run:
+  `tm-agent task fix-attempt <task_id>`
+- The daemon tracks attempts. When budget is exhausted, the task is auto-blocked.
+- Auto-blocked tasks require leader intervention to unblock.
+- If no fix budget is set, fix-attempt is optional (count is still tracked).
 
 ## E2E mac UI tests
 

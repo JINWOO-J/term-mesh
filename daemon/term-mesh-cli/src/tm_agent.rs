@@ -219,6 +219,9 @@ enum Commands {
         /// Prior context (e.g. previous attempts, errors) to inject into agent instruction
         #[arg(long)]
         context: Option<String>,
+        /// Auto-fix budget: max number of fix attempts before auto-blocking
+        #[arg(long)]
+        auto_fix_budget: Option<u8>,
     },
     /// Stop (interrupt) agents by sending Ctrl+C to their terminals
     Stop {
@@ -257,6 +260,9 @@ enum Commands {
         /// Prior context (e.g. previous attempts, errors) to inject into agent instruction
         #[arg(long)]
         context: Option<String>,
+        /// Auto-fix budget: max number of fix attempts before auto-blocking
+        #[arg(long)]
+        auto_fix_budget: Option<u8>,
     },
     /// Get concise agent status (status + task + messages + terminal)
     Brief {
@@ -389,6 +395,9 @@ enum TaskCommands {
         #[arg(long)]
         assign: Option<String>,
     },
+    /// Record a fix attempt (increments fix counter, auto-blocks when budget exhausted)
+    #[command(name = "fix-attempt")]
+    FixAttempt { task_id: String },
     /// Clear all tasks
     Clear,
 }
@@ -696,9 +705,20 @@ fn rpc_call_timeout(sock: &PathBuf, method: &str, params: Value, timeout_secs: u
     serde_json::from_str(&response).map_err(|e| format!("parse: {e}"))
 }
 
-/// Send a single JSON-RPC call on an already-connected UnixStream.
-/// Allows sequential dependent calls to reuse one connection.
-fn rpc_call_on_stream(stream: &UnixStream, method: &str, params: Value) -> Result<Value, String> {
+/// Send a JSON-RPC call using a caller-provided BufReader.
+///
+/// Use this when making sequential calls on the same connection so that one
+/// shared BufReader is reused across both reads.  A fresh BufReader per call
+/// (as in `rpc_call_on_stream`) can over-buffer: the internal 8 KB read-ahead
+/// may pull bytes from the *next* response out of the OS socket buffer and then
+/// lose them when the BufReader is dropped, causing the next read to see garbage
+/// or EOF.  Sharing one BufReader eliminates that race.
+fn rpc_call_with_reader(
+    mut stream: &UnixStream,
+    reader: &mut BufReader<&UnixStream>,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
     let request = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -708,11 +728,8 @@ fn rpc_call_on_stream(stream: &UnixStream, method: &str, params: Value) -> Resul
     let mut line = serde_json::to_string(&request).map_err(|e| format!("serialize: {e}"))?;
     line.push('\n');
 
-    let mut writer = stream.try_clone().map_err(|e| format!("clone: {e}"))?;
-    writer.write_all(line.as_bytes()).map_err(|e| format!("write: {e}"))?;
-    writer.flush().map_err(|e| format!("flush: {e}"))?;
+    stream.write_all(line.as_bytes()).map_err(|e| format!("write: {e}"))?;
 
-    let mut reader = BufReader::new(stream);
     let mut response = String::new();
     reader.read_line(&mut response).map_err(|e| format!("read: {e}"))?;
 
@@ -903,7 +920,7 @@ fn task_title_from_text(text: &str) -> String {
 fn format_task_instruction(
     sock: &PathBuf, team: &str,
     task: &Value, instruction: &str, no_report: bool,
-    context: Option<&str>,
+    context: Option<&str>, fix_budget: Option<u8>,
 ) -> String {
     let mut lines = vec![
         format!("[TASK_ID] {}", task["id"].as_str().unwrap_or("")),
@@ -975,6 +992,16 @@ do not paraphrase, summarize, or restructure the format.".to_string());
     lines.push(format!("- tm-agent task block {task_id} '<reason>'"));
     lines.push(format!("- tm-agent task review {task_id} '<summary>'"));
     lines.push(format!("- tm-agent task done {task_id} '<result>'"));
+
+    // Inject Auto-Fix Budget rules when budget is set
+    if let Some(budget) = fix_budget {
+        lines.push(String::new());
+        lines.push(format!("## Auto-Fix Budget: {budget} attempts"));
+        lines.push(format!("BEFORE each build/test/error fix attempt, run:"));
+        lines.push(format!("  tm-agent task fix-attempt {task_id}"));
+        lines.push(format!("If it prints BUDGET_EXHAUSTED, stop immediately — you are auto-blocked."));
+        lines.push(format!("Architecture decisions (new deps, API/schema changes) require immediate block regardless of budget."));
+    }
 
     let body = lines.join("\n");
     append_report_suffix(body.trim(), no_report)
@@ -1261,6 +1288,29 @@ fn main() {
                         "team_name": team, "task_id": id,
                     }))
                 }
+                TaskCommands::FixAttempt { task_id } => {
+                    match rpc_call(&sock, "team.task.fix_attempt", json!({
+                        "team_name": team, "task_id": task_id,
+                    })) {
+                        Ok(ref v) => {
+                            let result = &v["result"];
+                            let count = result["fix_count"].as_u64().unwrap_or(0);
+                            let budget = result["fix_budget"].as_u64().unwrap_or(0);
+                            let blocked = result["blocked"].as_bool().unwrap_or(false);
+                            if blocked {
+                                eprintln!("⚠️  Fix budget exhausted ({}/{}). Task auto-blocked.", count, budget);
+                            } else {
+                                eprintln!("Fix attempt {}/{} recorded.", count, budget);
+                            }
+                            Ok(v.clone())
+                        }
+                        Err(e) => {
+                            // If server doesn't support fix_attempt yet, warn but don't fail
+                            eprintln!("Warning: fix_attempt RPC not available ({}). Continuing without budget tracking.", e);
+                            Ok(json!({"ok": true, "result": {"fix_count": 0, "fix_budget": 0, "blocked": false}}))
+                        }
+                    }
+                }
                 TaskCommands::Split { id, title, assign } => {
                     let mut params = json!({
                         "team_name": team, "task_id": id, "title": title,
@@ -1519,17 +1569,17 @@ fn main() {
             })));
             return;
         }
-        Commands::Delegate { agent: ref target, text, title, priority, accept, deps, desc, no_report, context } => {
+        Commands::Delegate { agent: ref target, text, title, priority, accept, deps, desc, no_report, context, auto_fix_budget } => {
             // Auto-detect comma-separated agents and route to parallel fan-out
             if target.contains(',') {
-                run_fan_out(&sock, &team, &text, title, priority, no_report, &Some(target.to_string()), context.as_deref());
+                run_fan_out(&sock, &team, &text, title, priority, no_report, &Some(target.to_string()), context.as_deref(), auto_fix_budget);
             } else {
-                run_delegate(&sock, &team, target, &text, title, priority, &accept, &deps, desc, no_report, context.as_deref());
+                run_delegate(&sock, &team, target, &text, title, priority, &accept, &deps, desc, no_report, context.as_deref(), auto_fix_budget);
             }
             return;
         }
-        Commands::FanOut { text, title, priority, no_report, agents, context } => {
-            run_fan_out(&sock, &team, &text, title, priority, no_report, &agents, context.as_deref());
+        Commands::FanOut { text, title, priority, no_report, agents, context, auto_fix_budget } => {
+            run_fan_out(&sock, &team, &text, title, priority, no_report, &agents, context.as_deref(), auto_fix_budget);
             return;
         }
         Commands::Wait { timeout, interval, mode, task, agents } => {
@@ -2025,7 +2075,7 @@ fn run_delegate_result(
     sock: &PathBuf, team: &str, target: &str, text: &str,
     title: Option<String>, priority: Option<u32>,
     accept: &[String], deps: &[String], desc: Option<String>, no_report: bool,
-    context: Option<&str>,
+    context: Option<&str>, fix_budget: Option<u8>,
 ) -> Result<Value, String> {
     let resolved_title = title.unwrap_or_else(|| task_title_from_text(text));
     let resolved_priority = priority.unwrap_or(2);
@@ -2041,13 +2091,16 @@ fn run_delegate_result(
     if let Some(ctx) = context {
         delegate_params["context"] = json!(ctx);
     }
+    if let Some(fb) = fix_budget {
+        delegate_params["fix_budget"] = json!(fb);
+    }
     if let Ok(v) = rpc_call(sock, "team.delegate", delegate_params) {
         if v["ok"].as_bool().unwrap_or(false) {
             // Check if text was actually delivered to the agent's terminal
             let text_delivered = v["result"]["text_delivered"].as_bool().unwrap_or(true);
             if !text_delivered {
                 let task_ref = &v["result"]["task"];
-                let instruction = format_task_instruction(sock, team, task_ref, text, no_report, context);
+                let instruction = format_task_instruction(sock, team, task_ref, text, no_report, context, fix_budget);
 
                 // Headless agent path: route via daemon socket if available
                 if let Some(daemon_sock) = detect_daemon_socket() {
@@ -2087,6 +2140,21 @@ fn run_delegate_result(
                     }
                 }
             }
+
+            // Send Return key separately after a delay.
+            // The Swift app sends text WITHOUT Return via ghostty_surface_text (paste).
+            // A Return key sent in the same MainActor turn as the paste is silently
+            // dropped by ghostty. Sending Return via a separate team.send RPC (which
+            // creates a fresh MainActor.run invocation) reliably delivers Enter.
+            // 1 second delay gives TUI apps (Claude Code) time to process the paste.
+            if text_delivered {
+                std::thread::sleep(Duration::from_secs(1));
+                let _ = rpc_call(sock, "team.send", json!({
+                    "team_name": team, "agent_name": target,
+                    "text": "\n",
+                }));
+            }
+
             return Ok(v);
         }
     }
@@ -2104,13 +2172,20 @@ fn run_delegate_result(
     if let Some(d) = desc { params["description"] = json!(d); }
     if !accept.is_empty() { params["acceptance_criteria"] = json!(accept); }
     if !deps.is_empty() { params["depends_on"] = json!(deps); }
+    if let Some(fb) = fix_budget { params["fix_budget"] = json!(fb); }
 
     // Open one connection for both task.create and team.send.
     let fallback_stream = UnixStream::connect(sock).map_err(|e| format!("connect: {e}"))?;
     fallback_stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
     fallback_stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
 
-    let created = rpc_call_on_stream(&fallback_stream, "team.task.create", params)
+    // Use one shared BufReader for both sequential RPC calls so its internal
+    // read-ahead buffer is preserved between calls.  Creating a new BufReader
+    // per call (as rpc_call_on_stream does) risks losing bytes that the first
+    // BufReader pre-fetched from the OS socket buffer when it is dropped.
+    let mut fallback_reader = BufReader::new(&fallback_stream);
+
+    let created = rpc_call_with_reader(&fallback_stream, &mut fallback_reader, "team.task.create", params)
         .map_err(|e| format!("task.create: {e}"))?;
 
     let task = &created["result"];
@@ -2119,7 +2194,7 @@ fn run_delegate_result(
         return Err(format!("task.create failed: {}", pretty(&created)));
     }
 
-    let instruction = format_task_instruction(sock, team, task, text, no_report, context);
+    let instruction = format_task_instruction(sock, team, task, text, no_report, context, fix_budget);
     let send_text = format!("{instruction}\n");
 
     // Headless agent path: route via daemon socket for 2-RPC fallback too
@@ -2139,8 +2214,8 @@ fn run_delegate_result(
         }
     }
 
-    // In-app panel path: reuse the same connection for team.send.
-    let sent = rpc_call_on_stream(&fallback_stream, "team.send", json!({
+    // In-app panel path: reuse the same connection and BufReader for team.send.
+    let sent = rpc_call_with_reader(&fallback_stream, &mut fallback_reader, "team.send", json!({
         "team_name": team, "agent_name": target,
         "text": &send_text,
     })).map_err(|e| format!("team.send: {e}"))?;
@@ -2170,9 +2245,9 @@ fn run_delegate(
     sock: &PathBuf, team: &str, target: &str, text: &str,
     title: Option<String>, priority: Option<u32>,
     accept: &[String], deps: &[String], desc: Option<String>, no_report: bool,
-    context: Option<&str>,
+    context: Option<&str>, fix_budget: Option<u8>,
 ) {
-    match run_delegate_result(sock, team, target, text, title, priority, accept, deps, desc, no_report, context) {
+    match run_delegate_result(sock, team, target, text, title, priority, accept, deps, desc, no_report, context, fix_budget) {
         Ok(v) => println!("{}", pretty(&v)),
         Err(e) => { eprintln!("Error: {e}"); process::exit(1); }
     }
@@ -2181,7 +2256,7 @@ fn run_delegate(
 fn run_fan_out(
     sock: &PathBuf, team: &str, text: &str,
     title: Option<String>, priority: Option<u32>, no_report: bool,
-    agents_flag: &Option<String>, context: Option<&str>,
+    agents_flag: &Option<String>, context: Option<&str>, fix_budget: Option<u8>,
 ) {
     // Get all agent names from team status
     let all_agents: Vec<String> = match rpc_call(sock, "team.status", json!({ "team_name": team })) {
@@ -2218,7 +2293,7 @@ fn run_fan_out(
             let t = base_title.clone();
             s.spawn(move || {
                 let result = run_delegate_result(
-                    sock, team, target, text, Some(t), priority, &[], &[], None, no_report, context,
+                    sock, team, target, text, Some(t), priority, &[], &[], None, no_report, context, fix_budget,
                 );
                 (*target, result)
             })
@@ -2594,7 +2669,7 @@ fn run_warmup(sock: &PathBuf, team: &str, target: Option<&str>, timeout: u32) {
         let start = Instant::now();
         let result = run_delegate_result(
             sock, team, name, "Reply with exactly one word: pong",
-            Some("warmup-ping".to_string()), Some(3), &[], &[], None, true, None,
+            Some("warmup-ping".to_string()), Some(3), &[], &[], None, true, None, None,
         );
         match result {
             Ok(v) => {

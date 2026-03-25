@@ -2189,17 +2189,11 @@ func pushTargetSurfaceSize(_ size: CGSize) {
             keyEvent.composing = false
             keyEvent.unshifted_codepoint = unshiftedCodepointFromEvent(event)
 
-            let text = (event.charactersIgnoringModifiers ?? event.characters ?? "")
-            let handled: Bool
-            if text.isEmpty {
-                keyEvent.text = nil
-                handled = ghostty_surface_key(surface, keyEvent)
-            } else {
-                handled = text.withCString { ptr in
-                    keyEvent.text = ptr
-                    return ghostty_surface_key(surface, keyEvent)
-                }
-            }
+            // Don't send text for Ctrl key combos — the keycode + mods + unshifted_codepoint
+            // are sufficient for Ghostty's KeyEncoder. Sending text causes double-encoding
+            // that leaks raw CSI u sequences (e.g. "9;5u") as visible text.
+            keyEvent.text = nil
+            let handled = ghostty_surface_key(surface, keyEvent)
 #if DEBUG
             dlog(
                 "key.ctrl path=ghostty surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") " +

@@ -290,6 +290,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 ClaudeCommandInstaller.installIfNeeded()
             }
         }
+
+        // Pre-warm SF Symbol cache to avoid CoreUI disk I/O on first sidebar render (TERM-MESH-5)
+        if !isRunningUnderXCTest {
+            DispatchQueue.global(qos: .utility).async {
+                let symbols = ["xmark", "pin.fill", "arrow.triangle.swap", "arrow.triangle.branch",
+                               "circle.fill", "person.3.fill", "checkmark.circle.fill"]
+                for name in symbols {
+                    _ = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+                }
+            }
+        }
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
         if (env["TERMMESH_UI_TEST_MODE"] ?? env["CMUX_UI_TEST_MODE"]) == "1" {

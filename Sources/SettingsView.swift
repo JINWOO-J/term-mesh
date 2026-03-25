@@ -2223,6 +2223,48 @@ struct SettingsView: View {
             }
         }
 
+        // IME Text Rendering
+        lines.append("")
+        lines.append("IME Text Rendering:")
+        if let appDelegate = AppDelegate.shared,
+           let window = appDelegate.mainWindowContexts.values.first?.window {
+            // Walk the view hierarchy to find IMETextView
+            func findIMETextView(in view: NSView) -> NSTextView? {
+                if let tv = view as? IMETextView { return tv }
+                for sub in view.subviews {
+                    if let found = findIMETextView(in: sub) { return found }
+                }
+                return nil
+            }
+            if let tv = findIMETextView(in: window.contentView ?? NSView()) {
+                let hasLM = tv.layoutManager != nil
+                let hasTM = tv.textContentStorage != nil
+                lines.append("  TextKit: \(hasLM ? "1 (layoutManager)" : "2 (textContentStorage)")")
+                lines.append("  textColor: \(tv.textColor?.description ?? "nil")")
+                lines.append("  insertionPointColor: \(tv.insertionPointColor.description)")
+                lines.append("  drawsBackground: \(tv.drawsBackground)")
+                lines.append("  isRichText: \(tv.isRichText)")
+                lines.append("  font: \(tv.font?.displayName ?? "nil") \(tv.font?.pointSize ?? 0)pt")
+                lines.append("  frame: \(Int(tv.frame.width))x\(Int(tv.frame.height))")
+                if let storage = tv.textStorage {
+                    lines.append("  textStorage.length: \(storage.length)")
+                    if storage.length > 0 {
+                        let attrs = storage.attributes(at: 0, effectiveRange: nil)
+                        let fgDesc = (attrs[.foregroundColor] as? NSColor)?.description ?? "nil"
+                        lines.append("  textStorage[0].foregroundColor: \(fgDesc)")
+                    }
+                }
+                let typingFg = (tv.typingAttributes[.foregroundColor] as? NSColor)?.description ?? "nil"
+                lines.append("  typingAttributes.foregroundColor: \(typingFg)")
+                lines.append("  isHidden: \(tv.isHidden), alphaValue: \(tv.alphaValue)")
+                lines.append("  wantsLayer: \(tv.wantsLayer), layer: \(tv.layer != nil ? "yes" : "nil")")
+            } else {
+                lines.append("  (IME text view not found — input bar may not be open)")
+            }
+        } else {
+            lines.append("  (no main window)")
+        }
+
         let text = lines.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

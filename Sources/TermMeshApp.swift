@@ -1305,8 +1305,9 @@ struct TermMeshApp: App {
     @MainActor
     private func showReconnectAgentDialog() async {
         // listAgents() does a blocking socket RPC; run it off the main thread.
+        let daemon = self.termMeshDaemon
         let agents = await Task.detached(priority: .userInitiated) {
-            self.termMeshDaemon.listAgents(includeTerminated: false)
+            daemon.listAgents(includeTerminated: false)
         }.value
         let detached = agents.filter { $0.status != "terminated" && $0.panelId == nil }
 

@@ -1866,11 +1866,7 @@ class TabManager: ObservableObject {
                     alert.informativeText = "Agent session not found."
                     alert.alertStyle = .warning
                     alert.addButton(withTitle: "OK")
-                    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                        alert.beginSheetModal(for: window)
-                    } else {
-                        alert.runModal()
-                    }
+                    alert.presentAsSheet()
                 }
                 return
             }

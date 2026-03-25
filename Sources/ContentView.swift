@@ -789,11 +789,7 @@ struct ContentView: View {
                     alert.informativeText = "Current directory (\(dir)) is not inside a git repository."
                     alert.alertStyle = .warning
                     alert.addButton(withTitle: "OK")
-                    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                        alert.beginSheetModal(for: window)
-                    } else {
-                        alert.runModal()
-                    }
+                    alert.presentAsSheet()
                 }
                 return
             }
@@ -3389,11 +3385,7 @@ struct ContentView: View {
                         alert.informativeText = "No stale worktrees to clean up."
                     }
                     alert.addButton(withTitle: "OK")
-                    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                        alert.beginSheetModal(for: window)
-                    } else {
-                        alert.runModal()
-                    }
+                    alert.presentAsSheet()
                 }
             }
         }

@@ -445,13 +445,21 @@ final class TermMeshWebView: WKWebView {
                         savePanel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
                         savePanel.begin { result in
                             guard result == .OK, let destURL = savePanel.url else { return }
-                            try? data.write(to: destURL, options: .atomic)
+                            // Write file data off the main thread (save panel callback runs on main).
+                            DispatchQueue.global(qos: .userInitiated).async {
+                                try? data.write(to: destURL, options: .atomic)
+                            }
                         }
                     }
                 } catch {
                     await MainActor.run {
-                        self?.notifyContextMenuDownloadState(false)
-                        self?.runContextMenuFallback(action: fallbackAction, target: fallbackTarget, sender: sender)
+                        // Always clear download indicator, even if self is deallocated
+                        // the guard-else below handles the nil case.
+                        guard let self else {
+                            return
+                        }
+                        self.notifyContextMenuDownloadState(false)
+                        self.runContextMenuFallback(action: fallbackAction, target: fallbackTarget, sender: sender)
                     }
                 }
             }

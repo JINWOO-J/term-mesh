@@ -128,6 +128,10 @@ struct AboutPanelView: View {
             proc.standardOutput = pipe
             proc.standardError = Pipe()
             try? proc.run()
+            // Terminate git after 5 seconds to avoid blocking the thread indefinitely.
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5.0) {
+                if proc.isRunning { proc.terminate() }
+            }
             proc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let hash = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

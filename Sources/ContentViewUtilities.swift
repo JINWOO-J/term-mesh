@@ -158,8 +158,12 @@ final class DraggableFolderNSView: NSView, NSDraggingSource {
     private var hasActiveDragSession = false
     private var didArmWindowDragSuppression = false
 
-    private static let iconCache = NSCache<NSString, NSImage>()
-    private static let iconQueue = DispatchQueue(label: "com.termmesh.icon-loader", qos: .userInitiated)
+    private static let iconCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 200
+        return cache
+    }()
+    private static let iconQueue = DispatchQueue(label: "com.termmesh.icon-loader", qos: .utility)
 
     private static func loadIcon(forPath path: String, size: NSSize, completion: @escaping (NSImage) -> Void) {
         let key = "\(path)@\(Int(size.width))" as NSString
@@ -516,11 +520,7 @@ final class WorktreeCreationHandler: NSObject {
                     }
                     alert.alertStyle = .warning
                     alert.addButton(withTitle: "OK")
-                    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                        alert.beginSheetModal(for: window) { _ in }
-                    } else {
-                        alert.runModal()
-                    }
+                    alert.presentAsSheet()
                 }
             }
         }
@@ -700,10 +700,10 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
         confirm.presentAsSheet { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             guard let self else { return }
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
+            Task.detached(priority: .userInitiated) { [weak self] in
                 // Use force remove since user explicitly confirmed (even if dirty)
-                let success = self.daemon.removeWorktree(repoPath: repoPath, name: name, force: true)
-                DispatchQueue.main.async { [weak self] in
+                let success = self?.daemon.removeWorktree(repoPath: repoPath, name: name, force: true) ?? false
+                await MainActor.run {
                     guard let self else { return }
                     if success {
                         if let idx = self.worktrees.firstIndex(where: { $0.name == name }) {
@@ -717,11 +717,7 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
                         errAlert.informativeText = "Could not remove \"\(name)\". It may be in use."
                         errAlert.alertStyle = .warning
                         errAlert.addButton(withTitle: "OK")
-                        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                            errAlert.beginSheetModal(for: window) { _ in }
-                        } else {
-                            errAlert.runModal()
-                        }
+                        errAlert.presentAsSheet()
                     }
                 }
             }
@@ -761,11 +757,7 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
                     resultAlert.informativeText = "No stale worktrees found."
                 }
                 resultAlert.addButton(withTitle: "OK")
-                if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                    resultAlert.beginSheetModal(for: window) { _ in }
-                } else {
-                    resultAlert.runModal()
-                }
+                resultAlert.presentAsSheet()
             }
         }
     }

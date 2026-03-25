@@ -431,24 +431,28 @@ final class TermMeshWebView: WKWebView {
         notifyContextMenuDownloadState(true)
 
         if scheme == "file" {
-            DispatchQueue.main.async {
+            // Read file data off the main thread to avoid blocking UI.
+            Task.detached(priority: .userInitiated) { [weak self] in
                 do {
                     let data = try Data(contentsOf: url)
                     let filename = suggestedFilename?.trimmingCharacters(in: .whitespacesAndNewlines)
                     let saveName = (filename?.isEmpty == false ? filename! : url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent)
-                    let savePanel = NSSavePanel()
-                    savePanel.nameFieldStringValue = saveName
-                    savePanel.canCreateDirectories = true
-                    savePanel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-                    // Download is already complete; we're now waiting for user save choice.
-                    self.notifyContextMenuDownloadState(false)
-                    savePanel.begin { result in
-                        guard result == .OK, let destURL = savePanel.url else { return }
-                        try? data.write(to: destURL, options: .atomic)
+                    await MainActor.run {
+                        self?.notifyContextMenuDownloadState(false)
+                        let savePanel = NSSavePanel()
+                        savePanel.nameFieldStringValue = saveName
+                        savePanel.canCreateDirectories = true
+                        savePanel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                        savePanel.begin { result in
+                            guard result == .OK, let destURL = savePanel.url else { return }
+                            try? data.write(to: destURL, options: .atomic)
+                        }
                     }
                 } catch {
-                    self.notifyContextMenuDownloadState(false)
-                    self.runContextMenuFallback(action: fallbackAction, target: fallbackTarget, sender: sender)
+                    await MainActor.run {
+                        self?.notifyContextMenuDownloadState(false)
+                        self?.runContextMenuFallback(action: fallbackAction, target: fallbackTarget, sender: sender)
+                    }
                 }
             }
             return

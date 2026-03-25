@@ -496,15 +496,18 @@ final class BrowserHistoryStore: ObservableObject {
         guard !didLoad else { return }
         didLoad = true
         guard let fileURL else { return }
-        migrateLegacyTaggedHistoryFileIfNeeded(to: fileURL)
 
         // Load asynchronously on a background task to avoid blocking the main thread.
         // `entries` will be populated shortly after; callers that need entries immediately
         // (e.g. first omnibar query) will see an empty array until load completes, which
         // is acceptable — the omnibar re-queries on each keystroke so history appears
         // within the same interaction.
+        let legacyURL = Self.legacyTaggedHistoryFileURL()
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
+
+            // Migrate legacy file before reading — runs off-main to avoid blocking.
+            Self.migrateLegacyFileIfNeeded(from: legacyURL, to: fileURL)
 
             let data: Data
             do {
@@ -734,10 +737,12 @@ final class BrowserHistoryStore: ObservableObject {
         }
     }
 
-    private func migrateLegacyTaggedHistoryFileIfNeeded(to targetURL: URL) {
+    /// Migrate legacy tagged history file to the new location.
+    /// This is `nonisolated` + `static` so it can run off the main actor inside `Task.detached`.
+    private nonisolated static func migrateLegacyFileIfNeeded(from legacyURL: URL?, to targetURL: URL) {
         let fm = FileManager.default
         guard !fm.fileExists(atPath: targetURL.path) else { return }
-        guard let legacyURL = Self.legacyTaggedHistoryFileURL(),
+        guard let legacyURL,
               legacyURL != targetURL,
               fm.fileExists(atPath: legacyURL.path) else {
             return

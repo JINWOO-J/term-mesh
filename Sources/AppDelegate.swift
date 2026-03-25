@@ -83,6 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     var splitButtonTooltipRefreshScheduled = false
     var ghosttyConfigObserver: NSObjectProtocol?
     private var systemAppearanceObserver: NSObjectProtocol?
+    private var screenChangeObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var displayReconfigSuppressionWorkItem: DispatchWorkItem?
+    private var isDisplayReconfigSuppressed = false
     var ghosttyGotoSplitLeftShortcut: StoredShortcut?
     var ghosttyGotoSplitRightShortcut: StoredShortcut?
     var ghosttyGotoSplitUpShortcut: StoredShortcut?
@@ -301,6 +305,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
             }
         }
+
+        // Suppress SwiftUI layout during display reconfiguration to avoid CVDisplayLink blocking (TERM-MESH-2).
+        // Monitor connect/disconnect and wake-from-sleep both trigger didChangeScreenParameters, which causes
+        // NSHostingView.layout → CVDisplayLinkCreateWithCGDisplays to block the main thread for 2+ seconds
+        // while WindowServer is busy. Hiding contentViews breaks the layout trigger for 0.5 s.
+        if !isRunningUnderXCTest {
+            screenChangeObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.suppressLayoutDuringDisplayReconfiguration()
+            }
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.suppressLayoutDuringDisplayReconfiguration()
+            }
+        }
 #if DEBUG
         UpdateTestSupport.applyIfNeeded(to: updateController.viewModel)
         if (env["TERMMESH_UI_TEST_MODE"] ?? env["CMUX_UI_TEST_MODE"]) == "1" {
@@ -435,6 +460,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         notificationStore.markRead(forTabId: tabId, surfaceId: surfaceId)
     }
 
+    // MARK: - Display Reconfiguration Layout Suppression (TERM-MESH-2)
+
+    /// Briefly hides all window content views during display reconfiguration (monitor connect/disconnect,
+    /// wake from sleep) to prevent NSHostingView layout from triggering CVDisplayLinkCreateWithCGDisplays
+    /// while WindowServer is busy, which can block the main thread for 2+ seconds.
+    private func suppressLayoutDuringDisplayReconfiguration() {
+        // Cancel any pending restore
+        displayReconfigSuppressionWorkItem?.cancel()
+
+        // Only hide if not already suppressed (debounce for rapid consecutive notifications)
+        if !isDisplayReconfigSuppressed {
+            isDisplayReconfigSuppressed = true
+            NSApp.windows.forEach { $0.contentView?.isHidden = true }
+        }
+
+        // Restore after 0.5s
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.isDisplayReconfigSuppressed = false
+            NSApp.windows.forEach { $0.contentView?.isHidden = false }
+        }
+        displayReconfigSuppressionWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
     // MARK: - System Appearance Observer
 
     private func observeSystemAppearanceChanges() {
@@ -456,6 +506,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let observer = systemAppearanceObserver {
             DistributedNotificationCenter.default.removeObserver(observer)
         }
+        if let observer = screenChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        displayReconfigSuppressionWorkItem?.cancel()
         tabManager?.saveSessionState()
         TerminalController.shared.stop()
         // Worktree auto-cleanup disabled — worktrees are managed explicitly via Worktree Manager

@@ -48,7 +48,8 @@ class TabManager: ObservableObject {
 #endif
             selectionSideEffectsGeneration &+= 1
             let generation = selectionSideEffectsGeneration
-            DispatchQueue.main.async { [weak self] in
+            selectionSideEffectWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
                 guard let self, self.selectionSideEffectsGeneration == generation else { return }
                 self.focusSelectedTabPanel(previousTabId: previousTabId)
                 self.updateWindowTitleForSelectedTab()
@@ -65,6 +66,8 @@ class TabManager: ObservableObject {
                 )
 #endif
             }
+            selectionSideEffectWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
         }
     }
     private var observers: [NSObjectProtocol] = []
@@ -84,6 +87,7 @@ class TabManager: ObservableObject {
     private var isNavigatingHistory = false
     private let maxHistorySize = 50
     private var selectionSideEffectsGeneration: UInt64 = 0
+    private var selectionSideEffectWorkItem: DispatchWorkItem?
     private var workspaceCycleGeneration: UInt64 = 0
     private var workspaceCycleCooldownTask: Task<Void, Never>?
     private var pendingWorkspaceUnfocusTarget: (tabId: UUID, panelId: UUID)?
@@ -171,6 +175,7 @@ class TabManager: ObservableObject {
     }
 
     deinit {
+        selectionSideEffectWorkItem?.cancel()
         workspaceCycleCooldownTask?.cancel()
         observers.forEach { NotificationCenter.default.removeObserver($0) }
     }

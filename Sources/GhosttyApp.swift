@@ -129,15 +129,17 @@ final class GhosttySurfaceCallbackContext {
     weak var surfaceView: GhosttyNSView?
     weak var terminalSurface: TerminalSurface?
     let surfaceId: UUID
+    let cachedTabId: UUID?
 
     init(surfaceView: GhosttyNSView, terminalSurface: TerminalSurface) {
         self.surfaceView = surfaceView
         self.terminalSurface = terminalSurface
         self.surfaceId = terminalSurface.id
+        self.cachedTabId = terminalSurface.tabId
     }
 
     var tabId: UUID? {
-        terminalSurface?.tabId ?? surfaceView?.tabId
+        cachedTabId
     }
 
     var runtimeSurface: ghostty_surface_t? {

@@ -59,6 +59,12 @@ final class IMETextView: NSTextView {
 
     // MARK: - Q2: Ghost suggestion
 
+    /// Explicit text color set by IMETextEditor based on the SwiftUI colorScheme.
+    /// Avoids relying on NSColor.textColor which can resolve incorrectly when the
+    /// NSTextView's effectiveAppearance is out of sync with the SwiftUI environment
+    /// (common in NSViewRepresentable inside NSHostingView on fresh installs).
+    var resolvedTextColor: NSColor = .white
+
     /// Suffix to display after the current text as a ghost/autocomplete hint.
     var ghostSuggestion: String = "" {
         didSet { if ghostSuggestion != oldValue { needsDisplay = true } }
@@ -606,18 +612,19 @@ final class IMETextView: NSTextView {
         // Reset foreground color to default outside the marked (composing) range.
         // Clamp markedRange bounds against len to guard against stale IME state
         // (e.g. text replaced externally while composition was active).
+        let fgColor = resolvedTextColor
         if markedRange.location == NSNotFound || markedRange.length == 0 {
-            storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+            storage.addAttribute(.foregroundColor, value: fgColor,
                                  range: NSRange(location: 0, length: len))
         } else {
             let clampedMarkedStart = min(markedRange.location, len)
             if clampedMarkedStart > 0 {
-                storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+                storage.addAttribute(.foregroundColor, value: fgColor,
                                      range: NSRange(location: 0, length: clampedMarkedStart))
             }
             let afterLoc = min(markedRange.location + markedRange.length, len)
             if afterLoc < len {
-                storage.addAttribute(.foregroundColor, value: NSColor.textColor,
+                storage.addAttribute(.foregroundColor, value: fgColor,
                                      range: NSRange(location: afterLoc, length: len - afterLoc))
             }
         }

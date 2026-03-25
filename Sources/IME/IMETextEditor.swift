@@ -37,6 +37,13 @@ struct IMETextEditor: NSViewRepresentable {
         Coordinator(self)
     }
 
+    /// Resolve an explicit text color from the SwiftUI colorScheme.
+    /// Using a concrete NSColor instead of NSColor.textColor avoids appearance-
+    /// propagation mismatches between the NSHostingView and the embedded NSTextView.
+    private var explicitTextColor: NSColor {
+        colorScheme == .dark ? .white : .black
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -45,13 +52,15 @@ struct IMETextEditor: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
 
+        let fg = explicitTextColor
         let textView = IMETextView()
         textView.delegate = context.coordinator
         textView.font = NSFont.monospacedSystemFont(ofSize: IMEInputBarSettings.fontSize, weight: .regular)
-        textView.textColor = NSColor.textColor
+        textView.resolvedTextColor = fg
+        textView.textColor = fg
         textView.backgroundColor = .clear
         textView.drawsBackground = true
-        textView.insertionPointColor = NSColor.textColor
+        textView.insertionPointColor = fg
         textView.isRichText = true
         textView.allowsUndo = true
         textView.isVerticallyResizable = true
@@ -62,9 +71,9 @@ struct IMETextEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
 
-        // Explicit marked text (IME composing) attributes for dark mode visibility
+        // Explicit marked text (IME composing) attributes — use concrete color
         textView.markedTextAttributes = [
-            .foregroundColor: NSColor.textColor,
+            .foregroundColor: fg,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .underlineColor: NSColor.cyan.withAlphaComponent(0.6),
         ]
@@ -125,12 +134,16 @@ struct IMETextEditor: NSViewRepresentable {
             textView.string = text
             textView.setSelectedRange(NSRange(location: textView.string.count, length: 0))
         }
-        // Update colors when appearance changes (must run BEFORE applyRainbowKeywords)
-        textView.textColor = NSColor.textColor
+        // Update colors when appearance changes (must run BEFORE applyRainbowKeywords).
+        // Use explicit color derived from SwiftUI colorScheme to avoid NSColor.textColor
+        // resolving against the wrong effectiveAppearance in NSViewRepresentable contexts.
+        let fg = explicitTextColor
+        textView.resolvedTextColor = fg
+        textView.textColor = fg
         textView.backgroundColor = .clear
-        textView.insertionPointColor = NSColor.textColor
+        textView.insertionPointColor = fg
         textView.markedTextAttributes = [
-            .foregroundColor: NSColor.textColor,
+            .foregroundColor: fg,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .underlineColor: NSColor.cyan.withAlphaComponent(0.6),
         ]

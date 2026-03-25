@@ -1090,22 +1090,24 @@ fn main() {
                 "agent_name": agent,
                 "content": report_content,
             }));
-            // Auto-complete the active task (same logic as `reply`)
+            // Auto-complete the active task using team.task.list (data command,
+            // no MainActor) instead of team.status (UI command) to avoid timeout.
             if report_result.is_ok() {
-                if let Ok(status_resp) = rpc_call(&sock, "team.status", json!({"team_name": &team})) {
-                    if let Some(agents) = status_resp["result"]["agents"].as_array() {
-                        for a in agents {
-                            if a["name"].as_str() == Some(agent.as_str()) {
-                                if let Some(tid) = a["active_task_id"].as_str() {
-                                    if !matches!(a["active_task_status"].as_str(), Some("completed") | Some("failed") | Some("abandoned")) {
-                                        let summary = truncate_summary(report_content, 1500);
-                                        let _ = rpc_call(&sock, "team.task.update", json!({
-                                            "team_name": &team, "task_id": tid,
-                                            "status": "completed", "result": summary,
-                                        }));
-                                    }
-                                }
-                                break;
+                if let Ok(task_resp) = rpc_call(&sock, "team.task.list", json!({
+                    "team_name": &team, "assignee": &agent
+                })) {
+                    if let Some(tasks) = task_resp["result"]["tasks"].as_array() {
+                        let summary = truncate_summary(report_content, 1500);
+                        // Complete only the first non-terminal task (most recently assigned)
+                        if let Some(t) = tasks.iter().find(|t| {
+                            let st = t["status"].as_str().unwrap_or("");
+                            st != "completed" && st != "failed" && st != "abandoned"
+                        }) {
+                            if let Some(tid) = t["id"].as_str() {
+                                let _ = rpc_call(&sock, "team.task.update", json!({
+                                    "team_name": &team, "task_id": tid,
+                                    "status": "completed", "result": summary,
+                                }));
                             }
                         }
                     }
@@ -1640,19 +1642,21 @@ fn main() {
                 "team_name": &team, "assignee": &sender
             })) {
                 if let Some(tasks) = task_resp["result"]["tasks"].as_array() {
-                    for t in tasks {
-                        let status = t["status"].as_str().unwrap_or("");
-                        if status != "completed" && status != "failed" && status != "abandoned" {
-                            if let Some(tid) = t["id"].as_str() {
-                                let mut update = json!({
-                                    "team_name": &team, "task_id": tid,
-                                    "status": "completed", "result": &summary,
-                                });
-                                if let Some(ref path) = result_path {
-                                    update["result_path"] = json!(path.to_string_lossy());
-                                }
-                                let _ = rpc_call(&sock, "team.task.update", update);
+                    // Complete only the first non-terminal task to avoid accidentally
+                    // marking unrelated queued/blocked tasks as completed.
+                    if let Some(t) = tasks.iter().find(|t| {
+                        let st = t["status"].as_str().unwrap_or("");
+                        st != "completed" && st != "failed" && st != "abandoned"
+                    }) {
+                        if let Some(tid) = t["id"].as_str() {
+                            let mut update = json!({
+                                "team_name": &team, "task_id": tid,
+                                "status": "completed", "result": &summary,
+                            });
+                            if let Some(ref path) = result_path {
+                                update["result_path"] = json!(path.to_string_lossy());
                             }
+                            let _ = rpc_call(&sock, "team.task.update", update);
                         }
                     }
                 }

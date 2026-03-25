@@ -1046,13 +1046,14 @@ struct TabItemView: View {
             input.selectText(nil)
         }
 
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        guard let normalized = WorkspaceTabColorSettings.addCustomColor(input.stringValue) else {
-            showInvalidColorAlert(input.stringValue)
-            return
+        alert.presentAsSheet { response in
+            guard response == .alertFirstButtonReturn else { return }
+            guard let normalized = WorkspaceTabColorSettings.addCustomColor(input.stringValue) else {
+                self.showInvalidColorAlert(input.stringValue)
+                return
+            }
+            self.applyTabColor(normalized, targetIds: targetIds)
         }
-        applyTabColor(normalized, targetIds: targetIds)
     }
 
     private func showInvalidColorAlert(_ value: String) {
@@ -1089,9 +1090,10 @@ struct TabItemView: View {
             alertWindow.makeFirstResponder(input)
             input.selectText(nil)
         }
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        tabManager.setCustomTitle(tabId: tab.id, title: input.stringValue)
+        alert.presentAsSheet { response in
+            guard response == .alertFirstButtonReturn else { return }
+            self.tabManager.setCustomTitle(tabId: self.tab.id, title: input.stringValue)
+        }
     }
 }
 

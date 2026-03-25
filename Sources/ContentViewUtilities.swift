@@ -601,19 +601,21 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
         alert.accessoryView = nameField
         alert.window.initialFirstResponder = nameField
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let newName = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !newName.isEmpty else { return }
+        alert.presentAsSheet { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let newName = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newName.isEmpty else { return }
 
-        // Update the display name in any open workspace tab that uses this worktree
-        if let tabManager = AppDelegate.shared?.preferredMainWindowContextForServiceWorkspace()?.tabManager {
-            for ws in tabManager.tabs where ws.worktreeName == wt.name {
-                tabManager.setCustomTitle(tabId: ws.id, title: newName)
+            // Update the display name in any open workspace tab that uses this worktree
+            if let tabManager = AppDelegate.shared?.preferredMainWindowContextForServiceWorkspace()?.tabManager {
+                for ws in tabManager.tabs where ws.worktreeName == wt.name {
+                    tabManager.setCustomTitle(tabId: ws.id, title: newName)
+                }
             }
-        }
 
-        // Refresh table (display name is stored in the workspace tab title, not in WorktreeInfo)
-        tableView?.reloadData()
+            // Refresh table (display name is stored in the workspace tab title, not in WorktreeInfo)
+            self?.tableView?.reloadData()
+        }
     }
 
     @objc func copyPath(_ sender: NSButton) {
@@ -659,29 +661,31 @@ final class WorktreeTableDataSource: NSObject, NSTableViewDataSource, NSTableVie
             confirm.addButton(withTitle: "Delete")
         }
         confirm.addButton(withTitle: "Cancel")
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Use force remove since user explicitly confirmed (even if dirty)
-            let success = self.daemon.removeWorktree(repoPath: repoPath, name: name, force: true)
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if success {
-                    if let idx = self.worktrees.firstIndex(where: { $0.name == name }) {
-                        self.worktrees.remove(at: idx)
-                    }
-                    self.tableView?.reloadData()
-                    self.panel?.title = "Worktrees (\(self.worktrees.count))"
-                } else {
-                    let errAlert = NSAlert()
-                    errAlert.messageText = "Failed to remove worktree"
-                    errAlert.informativeText = "Could not remove \"\(name)\". It may be in use."
-                    errAlert.alertStyle = .warning
-                    errAlert.addButton(withTitle: "OK")
-                    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
-                        errAlert.beginSheetModal(for: window) { _ in }
+        confirm.presentAsSheet { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            guard let self else { return }
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                // Use force remove since user explicitly confirmed (even if dirty)
+                let success = self.daemon.removeWorktree(repoPath: repoPath, name: name, force: true)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if success {
+                        if let idx = self.worktrees.firstIndex(where: { $0.name == name }) {
+                            self.worktrees.remove(at: idx)
+                        }
+                        self.tableView?.reloadData()
+                        self.panel?.title = "Worktrees (\(self.worktrees.count))"
                     } else {
-                        errAlert.runModal()
+                        let errAlert = NSAlert()
+                        errAlert.messageText = "Failed to remove worktree"
+                        errAlert.informativeText = "Could not remove \"\(name)\". It may be in use."
+                        errAlert.alertStyle = .warning
+                        errAlert.addButton(withTitle: "OK")
+                        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+                            errAlert.beginSheetModal(for: window) { _ in }
+                        } else {
+                            errAlert.runModal()
+                        }
                     }
                 }
             }

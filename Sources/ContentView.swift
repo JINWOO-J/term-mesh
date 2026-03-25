@@ -763,12 +763,13 @@ struct ContentView: View {
             alertWindow.makeFirstResponder(input)
             input.selectText(nil)
         }
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            target.tag = value.isEmpty ? nil : value
-        } else if response == .alertThirdButtonReturn {
-            target.tag = nil
+        alert.presentAsSheet { response in
+            if response == .alertFirstButtonReturn {
+                let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                target.tag = value.isEmpty ? nil : value
+            } else if response == .alertThirdButtonReturn {
+                target.tag = nil
+            }
         }
     }
 

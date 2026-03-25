@@ -2152,9 +2152,10 @@ final class Workspace: Identifiable, ObservableObject {
             alertWindow.makeFirstResponder(input)
             input.selectText(nil)
         }
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        setPanelCustomTitle(panelId: panelId, title: input.stringValue)
+        alert.presentAsSheet { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.setPanelCustomTitle(panelId: panelId, title: input.stringValue)
+        }
     }
 
 }

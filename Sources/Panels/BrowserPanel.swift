@@ -1789,26 +1789,28 @@ final class BrowserPanel: Panel, ObservableObject {
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Always allow this host in Term-Mesh"
 
-        let response = alert.runModal()
-        if browserShouldPersistInsecureHTTPAllowlistSelection(
-            response: response,
-            suppressionEnabled: alert.suppressionButton?.state == .on
-        ) {
-            BrowserInsecureHTTPSettings.addAllowedHost(host)
-        }
-        switch response {
-        case .alertFirstButtonReturn:
-            NSWorkspace.shared.open(url)
-        case .alertSecondButtonReturn:
-            switch intent {
-            case .currentTab:
-                insecureHTTPBypassHostOnce = host
-                navigateWithoutInsecureHTTPPrompt(request: request, recordTypedNavigation: recordTypedNavigation)
-            case .newTab:
-                openLinkInNewTab(url: url, bypassInsecureHTTPHostOnce: host)
+        alert.presentAsSheet { [weak self] response in
+            guard let self else { return }
+            if browserShouldPersistInsecureHTTPAllowlistSelection(
+                response: response,
+                suppressionEnabled: alert.suppressionButton?.state == .on
+            ) {
+                BrowserInsecureHTTPSettings.addAllowedHost(host)
             }
-        default:
-            return
+            switch response {
+            case .alertFirstButtonReturn:
+                NSWorkspace.shared.open(url)
+            case .alertSecondButtonReturn:
+                switch intent {
+                case .currentTab:
+                    self.insecureHTTPBypassHostOnce = host
+                    self.navigateWithoutInsecureHTTPPrompt(request: request, recordTypedNavigation: recordTypedNavigation)
+                case .newTab:
+                    self.openLinkInNewTab(url: url, bypassInsecureHTTPHostOnce: host)
+                }
+            default:
+                return
+            }
         }
     }
 

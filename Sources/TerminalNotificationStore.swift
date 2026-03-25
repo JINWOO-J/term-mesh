@@ -350,10 +350,11 @@ final class TerminalNotificationStore: ObservableObject {
             alert.informativeText = "Notifications are disabled for term-mesh. Enable them in System Settings to see alerts."
             alert.addButton(withTitle: "Open Settings")
             alert.addButton(withTitle: "Not Now")
-            let response = alert.runModal()
-            guard response == .alertFirstButtonReturn else { return }
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
-                NSWorkspace.shared.open(url)
+            alert.presentAsSheet { response in
+                guard response == .alertFirstButtonReturn else { return }
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                    NSWorkspace.shared.open(url)
+                }
             }
         }
     }

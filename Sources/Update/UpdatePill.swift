@@ -6,6 +6,7 @@ import SwiftUI
 struct UpdatePill: View {
     @ObservedObject var model: UpdateViewModel
     @State private var showPopover = false
+    @State private var cachedTextWidth: CGFloat? = nil
 
     private let textFont = NSFont.systemFont(ofSize: 11, weight: .medium)
 
@@ -21,6 +22,8 @@ struct UpdatePill: View {
                     UpdatePopoverView(model: model)
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .onAppear { cachedTextWidth = computeTextWidth() }
+                .onChange(of: model.maxWidthText) { _ in cachedTextWidth = computeTextWidth() }
         }
     }
 
@@ -42,7 +45,7 @@ struct UpdatePill: View {
                     .font(Font(textFont))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: textWidth, alignment: .leading)
+                    .frame(maxWidth: cachedTextWidth, alignment: .leading)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -59,10 +62,9 @@ struct UpdatePill: View {
         .accessibilityIdentifier("UpdatePill")
     }
 
-    private var textWidth: CGFloat? {
+    private func computeTextWidth() -> CGFloat? {
         let attributes: [NSAttributedString.Key: Any] = [.font: textFont]
-        let size = (model.maxWidthText as NSString).size(withAttributes: attributes)
-        return size.width
+        return (model.maxWidthText as NSString).size(withAttributes: attributes).width
     }
 }
 

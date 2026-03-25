@@ -71,6 +71,7 @@ struct TabItemView: View {
     @Binding var dropIndicator: SidebarDropIndicator?
     @State private var isHovering = false
     @State private var rowHeight: CGFloat = 1
+    @State private var cachedSlotWidth: CGFloat = 28
     @AppStorage(ShortcutHintDebugSettings.sidebarHintXKey) private var sidebarShortcutHintXOffset = ShortcutHintDebugSettings.defaultSidebarHintX
     @AppStorage(ShortcutHintDebugSettings.sidebarHintYKey) private var sidebarShortcutHintYOffset = ShortcutHintDebugSettings.defaultSidebarHintY
     @AppStorage(ShortcutHintDebugSettings.alwaysShowHintsKey) private var alwaysShowShortcutHints = ShortcutHintDebugSettings.defaultAlwaysShowHints
@@ -172,10 +173,13 @@ struct TabItemView: View {
         (showsCommandShortcutHints || alwaysShowShortcutHints) && workspaceShortcutLabel != nil
     }
 
-    private var workspaceHintSlotWidth: CGFloat {
-        guard let label = workspaceShortcutLabel else { return 28 }
+    private func updateCachedSlotWidth() {
+        guard let label = workspaceShortcutLabel else {
+            cachedSlotWidth = 28
+            return
+        }
         let positiveDebugInset = max(0, CGFloat(ShortcutHintDebugSettings.clamped(sidebarShortcutHintXOffset))) + 2
-        return max(28, workspaceHintWidth(for: label) + positiveDebugInset)
+        cachedSlotWidth = max(28, workspaceHintWidth(for: label) + positiveDebugInset)
     }
 
     private func workspaceHintWidth(for label: String) -> CGFloat {
@@ -221,21 +225,27 @@ struct TabItemView: View {
                 Spacer()
 
                 ZStack(alignment: .trailing) {
-                    Button(action: {
-                        #if DEBUG
-                        dlog("sidebar.close workspace=\(tab.id.uuidString.prefix(5)) method=button")
-                        #endif
-                        tabManager.closeWorkspaceWithConfirmation(tab)
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(activeSecondaryColor(0.7))
+                    // Conditionally include the xmark button to avoid resolving the SF Symbol
+                    // on every tab row regardless of hover state (TERM-MESH-5).
+                    if showCloseButton && !showsWorkspaceShortcutHint {
+                        Button(action: {
+                            #if DEBUG
+                            dlog("sidebar.close workspace=\(tab.id.uuidString.prefix(5)) method=button")
+                            #endif
+                            tabManager.closeWorkspaceWithConfirmation(tab)
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(activeSecondaryColor(0.7))
+                        }
+                        .buttonStyle(.plain)
+                        .help(KeyboardShortcutSettings.Action.closeWorkspace.tooltip("Close Workspace"))
+                        .frame(width: 16, height: 16, alignment: .center)
+                        .transition(.opacity)
+                    } else {
+                        Color.clear
+                            .frame(width: 16, height: 16)
                     }
-                    .buttonStyle(.plain)
-                    .help(KeyboardShortcutSettings.Action.closeWorkspace.tooltip("Close Workspace"))
-                    .frame(width: 16, height: 16, alignment: .center)
-                    .opacity(showCloseButton && !showsWorkspaceShortcutHint ? 1 : 0)
-                    .allowsHitTesting(showCloseButton && !showsWorkspaceShortcutHint)
 
                     if showsWorkspaceShortcutHint, let workspaceShortcutLabel {
                         Text(workspaceShortcutLabel)
@@ -255,7 +265,7 @@ struct TabItemView: View {
                     }
                 }
                 .animation(.easeInOut(duration: 0.14), value: showsCommandShortcutHints || alwaysShowShortcutHints)
-                .frame(width: workspaceHintSlotWidth, height: 16, alignment: .trailing)
+                .frame(width: cachedSlotWidth, height: 16, alignment: .trailing)
             }
 
             if let subtitle = latestNotificationText {
@@ -609,6 +619,9 @@ struct TabItemView: View {
             }
             .disabled(!hasReadNotifications(in: targetIds))
         }
+        .onAppear { updateCachedSlotWidth() }
+        .onChange(of: workspaceShortcutLabel) { _ in updateCachedSlotWidth() }
+        .onChange(of: sidebarShortcutHintXOffset) { _ in updateCachedSlotWidth() }
     }
 
     private var backgroundColor: Color {

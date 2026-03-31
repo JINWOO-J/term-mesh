@@ -2613,6 +2613,10 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
     let min_interval: u64 = 1;
     let max_interval: u64 = interval as u64;
     let mut prev_progress_count: usize = 0;
+    // For report mode: snapshot task IDs on first poll so we can track them
+    // even after agents drop active_task_id on completion.
+    let mut tracked_task_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut tracked_initialized = false;
     while elapsed < timeout {
         if current_interval > 0 {
             thread::sleep(Duration::from_secs(current_interval));
@@ -2624,70 +2628,54 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
         let mut msg_progress = "0/0".to_string();
 
         if mode == "report" || mode == "any" {
-            // Primary: check task completion status (immune to stale reports)
-            // Batch team.status + team.result.status into a single socket connection
-            let p_status = serde_json::to_string(&json!({
-                "jsonrpc": "2.0", "id": 1,
-                "method": "team.status", "params": { "team_name": team }
-            })).unwrap_or_default();
-            let p_result_status = serde_json::to_string(&json!({
-                "jsonrpc": "2.0", "id": 2,
-                "method": "team.result.status", "params": { "team_name": team }
-            })).unwrap_or_default();
-            let (status_r, result_status_r) = match rpc_batch(sock, &[p_status, p_result_status]) {
-                Ok(mut results) if results.len() >= 2 => {
-                    let rs = results.remove(1);
-                    let r = results.remove(0);
-                    (Ok(r), Ok(rs))
-                }
-                Ok(_) | Err(_) => (
-                    rpc_call(sock, "team.status", json!({ "team_name": team })),
-                    rpc_call(sock, "team.result.status", json!({ "team_name": team })),
-                ),
-            };
-            match status_r {
-                Ok(r) => {
+            // On first poll, snapshot the task IDs we want to track.
+            // This is immune to agents dropping active_task_id on completion.
+            if !tracked_initialized {
+                if let Ok(r) = rpc_call(sock, "team.status", json!({ "team_name": team })) {
                     if let Some(agents) = r["result"]["agents"].as_array() {
-                        let filtered: Vec<&Value> = agents.iter()
-                            .filter(|a| {
-                                let name = a["name"].as_str().unwrap_or("");
-                                agent_filter.is_empty() || agent_filter.contains(name)
-                            })
-                            .collect();
-                        // Only count agents that have an active task (assigned by leader)
-                        let with_tasks: Vec<&&Value> = filtered.iter()
-                            .filter(|a| a["active_task_id"].as_str().is_some())
-                            .collect();
-                        if with_tasks.is_empty() {
-                            // Fallback: no tasks assigned, use legacy result.status
-                            if let Ok(rs) = result_status_r {
-                                let done = rs["result"]["completed"].as_u64().unwrap_or(0);
-                                let total = rs["result"]["total"].as_u64().unwrap_or(0);
-                                report_done = rs["result"]["all_done"].as_bool().unwrap_or(false);
-                                report_progress = format!("{done}/{total}");
+                        for a in agents {
+                            let name = a["name"].as_str().unwrap_or("");
+                            if !agent_filter.is_empty() && !agent_filter.contains(name) { continue; }
+                            if let Some(tid) = a["active_task_id"].as_str() {
+                                let status = a["active_task_status"].as_str().unwrap_or("");
+                                // Only track tasks that are currently active (not already done)
+                                if !matches!(status, "completed" | "failed" | "abandoned") {
+                                    tracked_task_ids.insert(tid.to_string());
+                                }
                             }
-                        } else {
-                            let total = with_tasks.len() as u64;
-                            let done = with_tasks.iter()
-                                .filter(|a| matches!(
-                                    a["active_task_status"].as_str(),
-                                    Some("completed") | Some("review_ready")
-                                ))
-                                .count() as u64;
-                            report_done = total > 0 && done >= total;
-                            report_progress = format!("{done}/{total}");
+                        }
+                        if !tracked_task_ids.is_empty() {
+                            tracked_initialized = true;
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("  Warning: team.status RPC failed: {e}");
-                    // Fallback to result.status when team.status (UI command) times out
-                    if let Ok(rs) = result_status_r {
-                        let done = rs["result"]["completed"].as_u64().unwrap_or(0);
-                        let total = rs["result"]["total"].as_u64().unwrap_or(0);
-                        report_done = rs["result"]["all_done"].as_bool().unwrap_or(false);
+            }
+
+            if tracked_initialized && !tracked_task_ids.is_empty() {
+                // Track by task IDs — immune to agents dropping active_task_id on completion
+                if let Ok(r) = rpc_call(sock, "team.task.list", json!({ "team_name": team })) {
+                    if let Some(tasks) = r["result"]["tasks"].as_array() {
+                        let total = tracked_task_ids.len() as u64;
+                        let done = tasks.iter()
+                            .filter(|t| {
+                                let tid = t["id"].as_str().unwrap_or("");
+                                tracked_task_ids.contains(tid) && matches!(
+                                    t["status"].as_str(),
+                                    Some("completed") | Some("review_ready")
+                                )
+                            })
+                            .count() as u64;
+                        report_done = total > 0 && done >= total;
                         report_progress = format!("{done}/{total}");
                     }
+                }
+            } else {
+                // Fallback: legacy result.status (no tasks assigned yet)
+                if let Ok(rs) = rpc_call(sock, "team.result.status", json!({ "team_name": team })) {
+                    let done = rs["result"]["completed"].as_u64().unwrap_or(0);
+                    let total = rs["result"]["total"].as_u64().unwrap_or(0);
+                    report_done = rs["result"]["all_done"].as_bool().unwrap_or(false);
+                    report_progress = format!("{done}/{total}");
                 }
             }
         }

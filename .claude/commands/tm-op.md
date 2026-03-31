@@ -31,7 +31,7 @@ Parse `$ARGUMENTS`의 첫 단어로 전략을 결정한다:
 - `--target <file|dir>` — review 대상 파일
 - `--pr <number>` — review 대상 PR
 - `--judge <agent>` — tournament 심판 에이전트
-- `--timeout N` — 라운드별 타임아웃 초 (기본 120)
+- `--timeout N` — base_timeout 초 (기본 120). 실제 wait 타임아웃은 Shared Setup의 Timeout Floor 규칙에 따라 자동 조정됨
 - `--pro "agent,agent"` — debate 찬성팀 수동 지정
 - `--con "agent,agent"` — debate 반대팀 수동 지정
 - `--attackers "agent,agent"` — red-team 공격팀 수동 지정
@@ -63,6 +63,18 @@ tm-agent status
    tournament에서 에이전트가 1명뿐이면 "경쟁 불가 — chain 전략을 권장합니다" 안내.
 
 4. 참여할 에이전트 이름 목록을 기억한다 (이후 모든 라운드에서 사용).
+
+5. **Timeout Floor** — `--timeout` (또는 preset의 timeout)을 `base_timeout`이라 한다. 실제 `wait` 타임아웃은 아래 규칙에 따라 자동 조정한다:
+
+   | 상황 | 실제 timeout |
+   |------|-------------|
+   | fan-out / delegate (기본) | `base_timeout` |
+   | broadcast → wait (전원 응답 필요) | `max(base_timeout * 1.5, 90)` |
+   | red-team attack / defend | `max(base_timeout, 90)` (코드 분석 필요) |
+   | council cross-examine | `max(base_timeout, 90)` (다른 에이전트 입장 읽기 필요) |
+   | chain 전체 | `단계수 * base_timeout` (단계별은 `base_timeout`) |
+
+   예: `--preset quick` (base_timeout=60) → red-team attack wait = 90초, broadcast wait = 90초.
 
 ## Context Injection
 
@@ -409,16 +421,20 @@ tm-agent delegate {agent} '## Chain Step {n}/{total}: {step_task}
 tm-agent wait --timeout {timeout} --mode report
 ```
 
-결과를 읽는다:
+delegate 반환 JSON에서 task_id를 기억하고, 결과를 읽는다:
 ```bash
-cat ~/.term-mesh/results/$(tm-agent status 2>/dev/null | grep -o '"team_name":"[^"]*"' | head -1 | cut -d'"' -f4)/{agent}-reply.md
+# delegate 응답의 JSON에서 task_id 추출 (예: "id": "417a1043")
+# 우선순위 1: task_id 파일 (이전 전략에 오염되지 않음)
+cat ~/.term-mesh/results/my-team/{task_id}.md
+# 우선순위 2: agent reply 파일 (task_id 파일이 비어있을 때)
+cat ~/.term-mesh/results/my-team/{agent}-reply.md
 ```
 
 이 결과를 다음 단계의 "이전 단계 결과"로 전달한다.
 
 에이전트가 실패(timeout/error)하면:
-- 사용자에게 알리고 계속 진행할지 확인
-- 계속하면 실패한 단계를 건너뛰고 이전 결과를 다음에 전달
+- **첫 단계 실패**: 이전 결과가 없으므로 "이전 결과 없음"이 후속 단계를 오염시킨다. 전략을 중단하고 사용자에게 보고한다.
+- **중간 단계 실패**: 사용자에게 알리고 계속 진행할지 확인. 계속하면 **직전 성공 단계의 결과**를 다음 단계에 전달한다 (실패 단계 결과가 아닌 그 전 단계 결과).
 
 ### Chain 최종 출력
 
@@ -599,7 +615,10 @@ tm-agent delegate {con_agent} '## Debate: CON 반박 (Round {n})
 tm-agent wait --timeout {timeout} --mode report
 ```
 
-라운드 2 이상이면 이전 반박 결과를 포함하여 반복한다.
+라운드 2 이상이면 이전 반박 결과를 포함하여 반복한다:
+- PRO 에이전트에게: CON의 최신 반박 결과 + 이전 라운드 PRO 반박 결과를 함께 전달
+- CON 에이전트에게: PRO의 최신 반박 결과 + 이전 라운드 CON 반박 결과를 함께 전달
+- 라운드 간 결과는 `cat ~/.term-mesh/results/my-team/{task_id}.md` 로 정확히 수집 (이전 라운드 reply 파일이 새 라운드에서 덮어쓰여지므로 task_id 기반 수집 필수)
 
 ### Phase 4: VERDICT (판정)
 
@@ -748,7 +767,10 @@ tm-agent delegate {agent} '## Council: 교차 질의
 
 ```bash
 tm-agent wait --timeout {timeout} --mode report
+tm-agent collect --lines 200
 ```
+
+잘린 결과가 있으면 개별 reply 파일을 읽는다.
 
 결과를 수집하고 리더(Claude)가 분석한다:
 1. **합의 수렴 감지**: 복수 에이전트가 특정 포지션에 동의를 표명했는지 확인
@@ -947,6 +969,11 @@ tm-agent wait --timeout {timeout} --mode report
 ```
 
 리더가 공격 결과를 수집하고 중복을 제거한다.
+
+**빈 공격 가드**: 중복 제거 후 공격 목록이 비어있으면 (전원 타임아웃 또는 무효 결과):
+- "⚠️ 유효한 공격이 발견되지 않았습니다. 공격팀 전원이 타임아웃되었거나 유효 공격 없음." 을 사용자에게 보고한다.
+- Phase 4(DEFEND)로 진행하지 않고 전략을 종료한다. 빈 공격을 방어팀에게 전달하면 연쇄 공백 전파가 발생한다.
+- 일부 공격팀만 타임아웃된 경우: 수집된 공격 수를 명시하고 ("📋 {N}/{M}명 응답, {K}개 공격 발견") 계속 진행한다.
 
 ### Phase 4: DEFEND (방어)
 
@@ -1163,9 +1190,17 @@ tm-agent collect --lines 100
 
 사용자가 거부하면 AskUserQuestion으로 수정 사항을 받는다.
 
-서브태스크 수 > 에이전트 수인 경우:
-- 한 에이전트에 복수 서브태스크를 순차 할당하거나
-- 사용자에게 범위 축소를 제안한다
+서브태스크 수 > idle 에이전트 수인 경우 **순차 할당 알고리즘**을 적용한다:
+
+1. **첫 배치**: idle 에이전트 수만큼 서브태스크를 동시 dispatch한다.
+2. **대기 큐**: 나머지 서브태스크를 큐에 넣는다.
+3. **완료 감지**: `tm-agent wait --timeout {timeout} --mode report` 후 `tm-agent status`로 완료된 에이전트를 파악한다.
+4. **재할당**: 완료된 에이전트에게 큐의 다음 서브태스크를 즉시 `tm-agent delegate`한다.
+5. **한도**: 에이전트당 최대 2개 서브태스크까지 (컨텍스트 오염 방지). 3번째부터는 다른 에이전트가 완료될 때까지 대기한다.
+6. **반복**: 큐가 빌 때까지 3-5를 반복한다.
+
+예: 2명 idle, 4개 서브태스크 → 첫 배치(2개) → 완료 후 나머지(2개) 순차 할당.
+모든 에이전트가 한도에 도달하고 큐가 남으면 사용자에게 범위 축소를 제안한다.
 
 ### Phase 2: CONFLICT CHECK (충돌 검사)
 

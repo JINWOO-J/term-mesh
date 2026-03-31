@@ -2639,9 +2639,12 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
                             if let Some(tid) = a["active_task_id"].as_str() {
                                 let status = a["active_task_status"].as_str().unwrap_or("");
                                 // Only track tasks that are currently active (not already done)
-                                if !matches!(status, "completed" | "failed" | "abandoned") {
-                                    tracked_task_ids.insert(tid.to_string());
-                                }
+                                if matches!(status, "completed" | "failed" | "abandoned") { continue; }
+                                // Skip stale tasks from previous sessions — they'll never
+                                // complete and would cause wait to hang forever.
+                                let is_stale = a["active_task_is_stale"].as_bool().unwrap_or(false);
+                                if is_stale { continue; }
+                                tracked_task_ids.insert(tid.to_string());
                             }
                         }
                         if !tracked_task_ids.is_empty() {

@@ -246,6 +246,9 @@ enum Commands {
         mode: String,
         #[arg(long)]
         task: Option<String>,
+        /// Comma-separated list of task IDs to wait for (overrides agent-based tracking)
+        #[arg(long)]
+        tasks: Option<String>,
         /// Comma-separated list of agent names to wait for (default: all agents)
         #[arg(long)]
         agents: Option<String>,
@@ -681,7 +684,11 @@ fn is_socket_alive(path: &PathBuf) -> bool {
 }
 
 fn rpc_call(sock: &PathBuf, method: &str, params: Value) -> Result<Value, String> {
-    rpc_call_timeout(sock, method, params, 2)
+    let timeout = env::var("TERMMESH_RPC_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(6);
+    rpc_call_timeout(sock, method, params, timeout)
 }
 
 fn rpc_call_timeout(sock: &PathBuf, method: &str, params: Value, timeout_secs: u64) -> Result<Value, String> {
@@ -749,8 +756,13 @@ fn rpc_batch(sock: &PathBuf, payloads: &[String]) -> Result<Vec<Value>, String> 
             .map_err(|e| format!("invalid JSON in payload {i}: {e}"))?;
     }
 
+    let batch_timeout = env::var("TERMMESH_RPC_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(6);
     let stream = UnixStream::connect(sock).map_err(|e| format!("connect: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    stream.set_read_timeout(Some(Duration::from_secs(batch_timeout))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(3))).ok();
 
     let mut writer = stream.try_clone().map_err(|e| format!("clone: {e}"))?;
     for payload in payloads {
@@ -763,9 +775,24 @@ fn rpc_batch(sock: &PathBuf, payloads: &[String]) -> Result<Vec<Value>, String> 
     let mut results = Vec::new();
     for _ in payloads {
         let mut line = String::new();
-        if reader.read_line(&mut line).is_ok() && !line.is_empty() {
-            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                results.push(v);
+        match reader.read_line(&mut line) {
+            Ok(0) => break, // EOF
+            Ok(_) if !line.trim().is_empty() => {
+                match serde_json::from_str::<Value>(&line) {
+                    Ok(v) => results.push(v),
+                    Err(e) => {
+                        eprintln!("  Warning: rpc_batch parse error: {e}");
+                        results.push(json!({"error": format!("parse: {e}")}));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("  Warning: rpc_batch read error: {e}");
+                results.push(json!({"error": format!("read: {e}")}));
+                break;
+            }
+            _ => {
+                results.push(json!({"error": "empty response"}));
             }
         }
     }
@@ -1033,6 +1060,12 @@ fn results_dir(team: &str) -> PathBuf {
 }
 
 fn write_result_file(team: &str, filename: &str, content: &str) -> Result<PathBuf, String> {
+    // Sanitize filename to prevent path traversal
+    let safe_filename: String = filename.chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+        .collect();
+    let safe_filename = if safe_filename.is_empty() { "unknown.md".to_string() } else { safe_filename };
+    let filename = safe_filename.as_str();
     let dir = results_dir(team);
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
     let path = dir.join(filename);
@@ -1085,11 +1118,17 @@ fn main() {
         // ── Agent-side commands ──────────────────────────────────
         Commands::Report { content } => {
             let report_content = content.as_deref().unwrap_or("done");
-            let report_result = rpc_call(&sock, "team.report", json!({
+            let report_params = json!({
                 "team_name": team,
                 "agent_name": agent,
                 "content": report_content,
-            }));
+            });
+            // team.report — retry once on failure (wait hangs permanently if this is lost)
+            let report_result = rpc_call(&sock, "team.report", report_params.clone());
+            if let Err(ref e) = report_result {
+                eprintln!("  Warning: team.report failed: {e}, retrying...");
+                let _ = rpc_call(&sock, "team.report", report_params);
+            }
             // Auto-complete the active task using team.task.list (data command,
             // no MainActor) instead of team.status (UI command) to avoid timeout.
             if report_result.is_ok() {
@@ -1098,16 +1137,27 @@ fn main() {
                 })) {
                     if let Some(tasks) = task_resp["result"]["tasks"].as_array() {
                         let summary = truncate_summary(report_content, 1500);
-                        // Complete only the first non-terminal task (most recently assigned)
-                        if let Some(t) = tasks.iter().find(|t| {
-                            let st = t["status"].as_str().unwrap_or("");
-                            st != "completed" && st != "failed" && st != "abandoned"
-                        }) {
+                        // Prefer in_progress task (the one actively being worked on),
+                        // then fall back to any non-terminal task. This prevents
+                        // completing a queued/blocked task when multiple tasks exist.
+                        let target_task = tasks.iter()
+                            .find(|t| t["status"].as_str() == Some("in_progress"))
+                            .or_else(|| tasks.iter().find(|t| {
+                                let st = t["status"].as_str().unwrap_or("");
+                                st != "completed" && st != "failed" && st != "abandoned"
+                            }));
+                        if let Some(t) = target_task {
                             if let Some(tid) = t["id"].as_str() {
-                                let _ = rpc_call(&sock, "team.task.update", json!({
+                                let update = json!({
                                     "team_name": &team, "task_id": tid,
                                     "status": "completed", "result": summary,
-                                }));
+                                });
+                                // task.update — retry once on failure (task stays in_progress forever if lost)
+                                let update_result = rpc_call(&sock, "team.task.update", update.clone());
+                                if let Err(ref e) = update_result {
+                                    eprintln!("  Warning: task.update failed: {e}, retrying...");
+                                    let _ = rpc_call(&sock, "team.task.update", update);
+                                }
                             }
                         }
                     }
@@ -1589,9 +1639,12 @@ fn main() {
             run_fan_out(&sock, &team, &text, title, priority, no_report, &agents, context.as_deref(), auto_fix_budget);
             return;
         }
-        Commands::Wait { timeout, interval, mode, task, agents } => {
+        Commands::Wait { timeout, interval, mode, task, tasks, agents } => {
             let filter = parse_cli_flag(&agents);
-            run_wait(&sock, &team, timeout, interval, &mode, task.as_deref(), &filter);
+            let task_ids: Option<std::collections::HashSet<String>> = tasks.map(|t| {
+                t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            });
+            run_wait(&sock, &team, timeout, interval, &mode, task.as_deref(), &filter, task_ids.as_ref());
             return;
         }
         Commands::Claim => {
@@ -1632,7 +1685,12 @@ fn main() {
             if let Some(ref path) = result_path {
                 report_params["result_path"] = json!(path.to_string_lossy());
             }
-            let _ = rpc_call(&sock, "team.report", report_params);
+            // team.report — retry once on failure (wait hangs permanently if this is lost)
+            let report_result = rpc_call(&sock, "team.report", report_params.clone());
+            if let Err(ref e) = report_result {
+                eprintln!("  Warning: team.report failed: {e}, retrying...");
+                let _ = rpc_call(&sock, "team.report", report_params);
+            }
             // Auto-complete the active task for this agent.
             // Use team.task.list (data command, no MainActor) instead of team.status
             // (UI command, MainActor) to avoid timeout when main thread is busy —
@@ -1642,12 +1700,16 @@ fn main() {
                 "team_name": &team, "assignee": &sender
             })) {
                 if let Some(tasks) = task_resp["result"]["tasks"].as_array() {
-                    // Complete only the first non-terminal task to avoid accidentally
-                    // marking unrelated queued/blocked tasks as completed.
-                    if let Some(t) = tasks.iter().find(|t| {
-                        let st = t["status"].as_str().unwrap_or("");
-                        st != "completed" && st != "failed" && st != "abandoned"
-                    }) {
+                    // Prefer in_progress task (the one actively being worked on),
+                    // then fall back to any non-terminal task. This prevents
+                    // completing a queued/blocked task when multiple tasks exist.
+                    let target_task = tasks.iter()
+                        .find(|t| t["status"].as_str() == Some("in_progress"))
+                        .or_else(|| tasks.iter().find(|t| {
+                            let st = t["status"].as_str().unwrap_or("");
+                            st != "completed" && st != "failed" && st != "abandoned"
+                        }));
+                    if let Some(t) = target_task {
                         if let Some(tid) = t["id"].as_str() {
                             let mut update = json!({
                                 "team_name": &team, "task_id": tid,
@@ -1656,7 +1718,12 @@ fn main() {
                             if let Some(ref path) = result_path {
                                 update["result_path"] = json!(path.to_string_lossy());
                             }
-                            let _ = rpc_call(&sock, "team.task.update", update);
+                            // task.update — retry once on failure (task stays in_progress forever if lost)
+                            let update_result = rpc_call(&sock, "team.task.update", update.clone());
+                            if let Err(ref e) = update_result {
+                                eprintln!("  Warning: task.update failed: {e}, retrying...");
+                                let _ = rpc_call(&sock, "team.task.update", update);
+                            }
                         }
                     }
                 }
@@ -2586,7 +2653,7 @@ fn run_fan_out(
     }
 }
 
-fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str, task_id: Option<&str>, agent_filter: &std::collections::HashSet<String>) {
+fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str, task_id: Option<&str>, agent_filter: &std::collections::HashSet<String>, explicit_task_ids: Option<&std::collections::HashSet<String>>) {
     // Prevent infinite loop: clamp interval to at least 1 second
     let interval = interval.max(1);
     let filter_label = if agent_filter.is_empty() {
@@ -2615,8 +2682,11 @@ fn run_wait(sock: &PathBuf, team: &str, timeout: u32, interval: u32, mode: &str,
     let mut prev_progress_count: usize = 0;
     // For report mode: snapshot task IDs on first poll so we can track them
     // even after agents drop active_task_id on completion.
-    let mut tracked_task_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut tracked_initialized = false;
+    // If explicit --tasks are provided, use those directly (no auto-discovery).
+    let mut tracked_task_ids: std::collections::HashSet<String> = explicit_task_ids
+        .cloned()
+        .unwrap_or_default();
+    let mut tracked_initialized = explicit_task_ids.is_some() && !tracked_task_ids.is_empty();
     while elapsed < timeout {
         if current_interval > 0 {
             thread::sleep(Duration::from_secs(current_interval));

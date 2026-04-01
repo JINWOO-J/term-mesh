@@ -2485,19 +2485,8 @@ fn run_delegate_result(
                 }
             }
 
-            // Send Return key separately after a delay.
-            // The Swift app sends text WITHOUT Return via ghostty_surface_text (paste).
-            // A Return key sent in the same MainActor turn as the paste is silently
-            // dropped by ghostty. Sending Return via a separate team.send RPC (which
-            // creates a fresh MainActor.run invocation) reliably delivers Enter.
-            // 1 second delay gives TUI apps (Claude Code) time to process the paste.
-            if text_delivered {
-                std::thread::sleep(Duration::from_secs(1));
-                let _ = rpc_call(sock, "team.send", json!({
-                    "team_name": team, "agent_name": target,
-                    "text": "\n",
-                }));
-            }
+            // Return key is now delivered atomically by the Swift app (withReturn: true
+            // in delegateToAgent → sendIMEText). No separate sleep + team.send needed.
 
             return Ok(v);
         }

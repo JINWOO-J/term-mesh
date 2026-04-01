@@ -1040,22 +1040,36 @@ final class TerminalSurface: Identifiable, ObservableObject {
             usleep(5_000) // 5ms — enough for IO thread to flush paste to PTY
         }
 
-        // Send Return key (PRESS+RELEASE) with retry on failure
+        // Send Return key (PRESS+RELEASE) with minimal retry.
+        // Reduced from 3 retries (10+30+150ms = 190ms MainThread block) to 1 retry (10ms).
+        // SPSC mailbox guarantees Return is queued even if pressHandled is false, so
+        // aggressive retry is unnecessary and causes MainThread starvation in fan-out.
         if withReturn {
-            let maxRetries = 3
-            let retryDelayUs: [useconds_t] = [10_000, 30_000, 150_000] // 10ms, 30ms, 150ms
-            var returnDelivered = false
+            var keyEvent = ghostty_input_key_s()
+            keyEvent.action = GHOSTTY_ACTION_PRESS
+            keyEvent.keycode = 36 // kVK_Return
+            keyEvent.mods = GHOSTTY_MODS_NONE
+            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+            keyEvent.unshifted_codepoint = 13 // CR codepoint for proper logical key mapping
+            keyEvent.composing = false
+            var pressHandled = false
+            "\r".withCString { ptr in
+                keyEvent.text = ptr
+                pressHandled = ghostty_surface_key(surface, keyEvent)
+            }
+            keyEvent.action = GHOSTTY_ACTION_RELEASE
+            keyEvent.text = nil
+            _ = ghostty_surface_key(surface, keyEvent)
 
-            for attempt in 0..<maxRetries {
-                var keyEvent = ghostty_input_key_s()
-                keyEvent.action = GHOSTTY_ACTION_PRESS
-                keyEvent.keycode = 36 // kVK_Return
-                keyEvent.mods = GHOSTTY_MODS_NONE
-                keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-                keyEvent.unshifted_codepoint = 13 // CR codepoint for proper logical key mapping
-                keyEvent.composing = false
-                var pressHandled = false
+            if !pressHandled {
+                #if DEBUG
+                dlog("[sendIMEText.Return] PRESS not handled, retry 1/1 surface=\(id.uuidString.prefix(8))")
+                #endif
+                // Single 10ms retry — enough for IO thread flush without starving MainThread
+                usleep(10_000)
+                pressHandled = false
                 "\r".withCString { ptr in
+                    keyEvent.action = GHOSTTY_ACTION_PRESS
                     keyEvent.text = ptr
                     pressHandled = ghostty_surface_key(surface, keyEvent)
                 }
@@ -1063,27 +1077,12 @@ final class TerminalSurface: Identifiable, ObservableObject {
                 keyEvent.text = nil
                 _ = ghostty_surface_key(surface, keyEvent)
 
-                if pressHandled {
-                    returnDelivered = true
-                    break
+                if !pressHandled {
+                    #if DEBUG
+                    dlog("[sendIMEText.Return] FAIL: Return not delivered after 1 retry surface=\(id.uuidString.prefix(8))")
+                    #endif
+                    return false
                 }
-
-                #if DEBUG
-                dlog("[sendIMEText.Return] PRESS not handled, retry \(attempt + 1)/\(maxRetries) surface=\(id.uuidString.prefix(8))")
-                #endif
-
-                if attempt < maxRetries - 1 {
-                    // Use usleep to block MainActor — prevents other sendIMEText
-                    // calls from interleaving (pasting into same prompt).
-                    usleep(retryDelayUs[attempt])
-                }
-            }
-
-            if !returnDelivered {
-                #if DEBUG
-                dlog("[sendIMEText.Return] FAIL: Return not delivered after \(maxRetries) retries surface=\(id.uuidString.prefix(8))")
-                #endif
-                return false
             }
         }
         return true

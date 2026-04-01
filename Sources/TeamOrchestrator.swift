@@ -1571,9 +1571,10 @@ final class TeamOrchestrator: ObservableObject {
             priority: priority ?? 2
         ) else { return nil }
         let instruction = formatDelegateInstruction(task: task, text: text, context: context)
-        // Send text WITHOUT Return — the caller (asyncTeamDelegate) sends Return
-        // in a separate MainActor turn to avoid ghostty paste state interference.
-        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction, tabManager: tabManager, withReturn: false)
+        // Send text WITH Return atomically — sendIMEText delivers text via
+        // ghostty_surface_text then Return key in the same MainActor turn.
+        // SPSC mailbox guarantees ordering; no separate RPC needed.
+        let delivered = sendToAgent(teamName: teamName, agentName: agentName, text: instruction, tabManager: tabManager, withReturn: true)
         return DelegateResult(task: task, textDelivered: delivered, instruction: instruction)
     }
 

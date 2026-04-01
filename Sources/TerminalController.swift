@@ -1841,7 +1841,12 @@ class TerminalController {
             response = await self.processTeamUICommandAsync(method: method, params: params, id: id)
         }
 
-        if semaphore.wait(timeout: .now() + 5) == .timedOut {
+        // Dynamic timeout: scale with team size for fan-out scenarios.
+        // Base 5s + 0.5s per agent beyond 1, so 10 agents → 9.5s timeout.
+        let teamName = (params["team"] ?? params["team_name"]) as? String
+        let agentCount = teamName.flatMap { TeamOrchestrator.shared.teams[$0]?.agents.count } ?? 1
+        let timeoutSec = max(5.0, 5.0 + Double(agentCount - 1) * 0.5)
+        if semaphore.wait(timeout: .now() + timeoutSec) == .timedOut {
             // Cancel the still-running Task so delayed retries inside
             // asyncTeamSend/asyncTeamDelegate don't fire after we've already
             // returned a timeout error to the caller.  Without cancellation the
@@ -1850,7 +1855,7 @@ class TerminalController {
             // delivery to land in the wrong agent pane or doubling up a send.
             task.cancel()
             #if DEBUG
-            dlog("[dispatchTeamCommandAsync] TIMEOUT: cancelling stale task method=\(method)")
+            dlog("[dispatchTeamCommandAsync] TIMEOUT: cancelling stale task method=\(method) timeout=\(timeoutSec)s agents=\(agentCount)")
             #endif
             return "{\"ok\":false,\"error\":{\"code\":\"timeout\",\"message\":\"team command timed out\"}}"
         }
@@ -2124,11 +2129,12 @@ class TerminalController {
         guard let text = params["text"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing text")
         }
-        // Stagger: enforce ≥100ms gap between consecutive team.send MainActor dispatches to
-        // prevent GCD main-queue saturation when the CLI sends to 10+ agents in rapid succession.
-        // asyncTeamBroadcast uses the same 100ms stagger between agents; this mirrors that
-        // behavior for individual team.send calls that arrive back-to-back.
-        let staggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        // Stagger: dynamic gap based on team size to prevent GCD main-queue saturation
+        // when the CLI sends to 10+ agents in rapid succession.
+        let staggerNs = await MainActor.run {
+            let count = TeamOrchestrator.shared.teams[teamName]?.agents.count ?? 1
+            return TerminalController.reserveTeamSendSlot(agentCount: count)
+        }
         if staggerNs > 0 {
             try? await Task.sleep(nanoseconds: staggerNs)
         }
@@ -2152,9 +2158,11 @@ class TerminalController {
         guard let text = params["text"] as? String else {
             return v2Error(id: id, code: "invalid_params", message: "Missing text")
         }
-        // Stagger: same 100ms minimum gap as asyncTeamSend to prevent GCD main-queue
-        // saturation when the CLI sends to leader back-to-back with other sends.
-        let staggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        // Stagger: dynamic gap based on team size to prevent GCD main-queue saturation.
+        let staggerNs = await MainActor.run {
+            let count = TeamOrchestrator.shared.teams[teamName]?.agents.count ?? 1
+            return TerminalController.reserveTeamSendSlot(agentCount: count)
+        }
         if staggerNs > 0 {
             try? await Task.sleep(nanoseconds: staggerNs)
         }
@@ -2653,9 +2661,12 @@ class TerminalController {
         let context = params["context"] as? String
         let store = TeamDataStore.shared
 
-        // Stagger: same 100ms minimum gap as asyncTeamSend / asyncTeamBroadcast to prevent
-        // main-queue saturation when many team.delegate commands arrive in rapid succession.
-        let delegateStaggerNs = await MainActor.run { TerminalController.reserveTeamSendSlot() }
+        // Stagger: dynamic gap based on team size to prevent main-queue saturation
+        // when many team.delegate commands arrive in rapid succession (fan-out).
+        let delegateStaggerNs = await MainActor.run {
+            let count = TeamOrchestrator.shared.teams[teamName]?.agents.count ?? 1
+            return TerminalController.reserveTeamSendSlot(agentCount: count)
+        }
         if delegateStaggerNs > 0 {
             try? await Task.sleep(nanoseconds: delegateStaggerNs)
         }
@@ -2681,9 +2692,8 @@ class TerminalController {
             return v2Error(id: id, code: "internal_error", message: "Task creation failed for agent '\(agentName)'")
         }
 
-        // Note: delegateToAgent sends text WITHOUT Return (withReturn: false).
-        // The daemon sends Return separately via team.send after a delay to ensure
-        // the TUI app (Claude Code) processes the paste before receiving Enter.
+        // delegateToAgent now sends text WITH Return atomically (withReturn: true).
+        // SPSC mailbox guarantees text→Return ordering within the same MainActor turn.
         return v2Ok(id: id, result: [
             "task": store.taskDictionary(delegateResult.task),
             "sent": true,
@@ -2704,12 +2714,17 @@ class TerminalController {
     @MainActor private static var teamSendLastDispatchNs: UInt64 = 0
 
     /// Computes how long to sleep before the next team.send/team.delegate dispatch so
-    /// that successive sends are staggered by at least `kTeamSendStaggerNs`.
+    /// that successive sends are staggered by at least a dynamic interval.
+    /// When `agentCount` > 1, the per-agent stagger shrinks so total fan-out stays
+    /// within a ~5s budget: `max(30ms, 5s / agentCount)`, capped at 100ms.
     /// Must be called on the MainActor; atomically reserves the next dispatch slot.
-    @MainActor private static func reserveTeamSendSlot() -> UInt64 {
+    @MainActor private static func reserveTeamSendSlot(agentCount: Int = 1) -> UInt64 {
+        let count = UInt64(max(agentCount, 1))
+        // Dynamic stagger: 5s budget / agentCount, floor 30ms, cap 100ms
+        let dynamicStagger = min(kTeamSendStaggerNs, max(30_000_000, 5_000_000_000 / count))
         let now = DispatchTime.now().uptimeNanoseconds
-        let elapsed = teamSendLastDispatchNs > 0 ? now &- teamSendLastDispatchNs : kTeamSendStaggerNs
-        let delay = elapsed < kTeamSendStaggerNs ? kTeamSendStaggerNs - elapsed : 0
+        let elapsed = teamSendLastDispatchNs > 0 ? now &- teamSendLastDispatchNs : dynamicStagger
+        let delay = elapsed < dynamicStagger ? dynamicStagger - elapsed : 0
         // Reserve the slot: advance the expected-next-dispatch cursor atomically
         teamSendLastDispatchNs = now + delay
         return delay

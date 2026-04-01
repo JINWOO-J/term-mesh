@@ -57,6 +57,9 @@ Respond with \"Agent {agent} ready.\" to confirm.",
 
 // ── CLI definition ───────────────────────────────────────────────────
 
+const GIT_SHA: &str = env!("TM_GIT_SHA");
+const BUILD_DATE: &str = env!("TM_BUILD_DATE");
+
 #[derive(Parser)]
 #[command(name = "tm-agent", about = "term-mesh team CLI — unified agent & leader tool", version)]
 struct Cli {
@@ -1466,6 +1469,17 @@ fn main() {
             rpc_call(&sock, "team.task.clear", json!({ "team_name": team }))
         }
         Commands::Status => {
+            // Fetch app version info and check for CLI/app mismatch
+            if let Ok(info) = rpc_call(&sock, "system.info", json!({})) {
+                if let Some(app_sha) = info["result"]["git_sha"].as_str() {
+                    if !app_sha.is_empty() && app_sha != "?" && app_sha != GIT_SHA {
+                        eprintln!("⚠ Version mismatch: CLI={} ({}) App={} ({})",
+                            env!("CARGO_PKG_VERSION"), GIT_SHA,
+                            info["result"]["app_version"].as_str().unwrap_or("?"), app_sha);
+                        eprintln!("  Run: make deploy-prod  (or ./scripts/reloadp.sh)");
+                    }
+                }
+            }
             rpc_call(&sock, "team.status", json!({ "team_name": team }))
         }
         Commands::Inbox => {

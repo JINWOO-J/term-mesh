@@ -1040,52 +1040,64 @@ final class TerminalSurface: Identifiable, ObservableObject {
             usleep(5_000) // 5ms — enough for IO thread to flush paste to PTY
         }
 
-        // Send Return key (PRESS+RELEASE) with minimal retry.
-        // Reduced from 3 retries (10+30+150ms = 190ms MainThread block) to 1 retry (10ms).
-        // SPSC mailbox guarantees Return is queued even if pressHandled is false, so
-        // aggressive retry is unnecessary and causes MainThread starvation in fan-out.
+        // Send Return key (PRESS+RELEASE) with sync + async retry.
+        // When a TUI app (Claude Code) is "thinking", ghostty_surface_key(Return)
+        // returns pressHandled=false. Synchronous retries (blocking MainThread) can't
+        // wait long enough. Strategy:
+        //   1. Try once synchronously (immediate)
+        //   2. If fails, one sync retry after 10ms
+        //   3. If still fails, schedule async retries via DispatchQueue.main.asyncAfter
+        //      at 200ms, 500ms, 1000ms — these fire when the TUI returns to idle
         if withReturn {
-            var keyEvent = ghostty_input_key_s()
-            keyEvent.action = GHOSTTY_ACTION_PRESS
-            keyEvent.keycode = 36 // kVK_Return
-            keyEvent.mods = GHOSTTY_MODS_NONE
-            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-            keyEvent.unshifted_codepoint = 13 // CR codepoint for proper logical key mapping
-            keyEvent.composing = false
-            var pressHandled = false
-            "\r".withCString { ptr in
-                keyEvent.text = ptr
-                pressHandled = ghostty_surface_key(surface, keyEvent)
-            }
-            keyEvent.action = GHOSTTY_ACTION_RELEASE
-            keyEvent.text = nil
-            _ = ghostty_surface_key(surface, keyEvent)
-
-            if !pressHandled {
+            let delivered = sendReturnKey(to: surface)
+            if !delivered {
                 #if DEBUG
-                dlog("[sendIMEText.Return] PRESS not handled, retry 1/1 surface=\(id.uuidString.prefix(8))")
+                dlog("[sendIMEText.Return] PRESS not handled, sync retry in 10ms surface=\(id.uuidString.prefix(8))")
                 #endif
-                // Single 10ms retry — enough for IO thread flush without starving MainThread
                 usleep(10_000)
-                pressHandled = false
-                "\r".withCString { ptr in
-                    keyEvent.action = GHOSTTY_ACTION_PRESS
-                    keyEvent.text = ptr
-                    pressHandled = ghostty_surface_key(surface, keyEvent)
-                }
-                keyEvent.action = GHOSTTY_ACTION_RELEASE
-                keyEvent.text = nil
-                _ = ghostty_surface_key(surface, keyEvent)
-
-                if !pressHandled {
+                let retryDelivered = sendReturnKey(to: surface)
+                if !retryDelivered {
                     #if DEBUG
-                    dlog("[sendIMEText.Return] FAIL: Return not delivered after 1 retry surface=\(id.uuidString.prefix(8))")
+                    dlog("[sendIMEText.Return] sync retry failed, scheduling async retries surface=\(id.uuidString.prefix(8))")
                     #endif
-                    return false
+                    // Schedule async retries — don't block MainThread
+                    let asyncDelays: [Double] = [0.2, 0.5, 1.0] // 200ms, 500ms, 1s
+                    for (i, delay) in asyncDelays.enumerated() {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                            guard let self, let surf = self.surface else { return }
+                            let ok = self.sendReturnKey(to: surf)
+                            #if DEBUG
+                            dlog("[sendIMEText.Return] async retry \(i + 1)/\(asyncDelays.count) delay=\(delay)s handled=\(ok) surface=\(self.id.uuidString.prefix(8))")
+                            #endif
+                        }
+                    }
+                    // Return true — async retries will handle delivery
+                    return true
                 }
             }
         }
         return true
+    }
+
+    /// Send a single Return key (PRESS+RELEASE) to the given surface.
+    /// Returns true if ghostty reported the key press as handled.
+    private func sendReturnKey(to surface: ghostty_surface_t) -> Bool {
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.action = GHOSTTY_ACTION_PRESS
+        keyEvent.keycode = 36 // kVK_Return
+        keyEvent.mods = GHOSTTY_MODS_NONE
+        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+        keyEvent.unshifted_codepoint = 13
+        keyEvent.composing = false
+        var pressHandled = false
+        "\r".withCString { ptr in
+            keyEvent.text = ptr
+            pressHandled = ghostty_surface_key(surface, keyEvent)
+        }
+        keyEvent.action = GHOSTTY_ACTION_RELEASE
+        keyEvent.text = nil
+        _ = ghostty_surface_key(surface, keyEvent)
+        return pressHandled
     }
 
     func requestBackgroundSurfaceStartIfNeeded() {

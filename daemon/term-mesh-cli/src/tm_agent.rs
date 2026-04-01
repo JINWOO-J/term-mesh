@@ -2485,8 +2485,32 @@ fn run_delegate_result(
                 }
             }
 
-            // Return key is now delivered atomically by the Swift app (withReturn: true
-            // in delegateToAgent → sendIMEText). No separate sleep + team.send needed.
+            // Send Return key separately via team.send_key RPC.
+            // delegateToAgent sends text WITHOUT Return (paste only). Return is sent
+            // through the reliable sendNamedKey path (same as surface.send_key RPC).
+            if text_delivered {
+                // Brief delay for PTY to flush the bracketed paste
+                std::thread::sleep(Duration::from_millis(150));
+
+                // Retry Return delivery up to 5 times with backoff
+                for attempt in 0..5u32 {
+                    match rpc_call(sock, "team.send_key", json!({
+                        "team_name": team,
+                        "agent_name": target,
+                        "key": "return",
+                    })) {
+                        Ok(r) if r["ok"].as_bool().unwrap_or(false) => break,
+                        Ok(_) | Err(_) => {
+                            if attempt < 4 {
+                                let delay = Duration::from_millis(200 * (attempt as u64 + 1));
+                                std::thread::sleep(delay);
+                            } else {
+                                eprintln!("  Warning: Return key delivery failed after 5 retries");
+                            }
+                        }
+                    }
+                }
+            }
 
             return Ok(v);
         }

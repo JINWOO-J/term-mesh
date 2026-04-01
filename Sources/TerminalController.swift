@@ -1813,6 +1813,8 @@ class TerminalController {
         "team.task.split",
         // Unified delegate: task creation + instruction send in one RPC
         "team.delegate",
+        // Send named key (return, ctrl-c, etc.) to an agent's terminal
+        "team.send_key",
     ]
 
     /// Dispatch ALL team commands via async path.
@@ -1954,6 +1956,8 @@ class TerminalController {
             return await asyncTeamTaskSplit(params: params, id: id)
         case "team.delegate":
             return await asyncTeamDelegate(params: params, id: id)
+        case "team.send_key":
+            return await asyncTeamSendKey(params: params, id: id)
         case "team.interrupt":
             return await asyncTeamInterrupt(params: params, id: id)
         case "team.interrupt_all":
@@ -2692,13 +2696,58 @@ class TerminalController {
             return v2Error(id: id, code: "internal_error", message: "Task creation failed for agent '\(agentName)'")
         }
 
-        // delegateToAgent now sends text WITH Return atomically (withReturn: true).
-        // SPSC mailbox guarantees text→Return ordering within the same MainActor turn.
+        // delegateToAgent sends text WITHOUT Return (withReturn: false).
+        // The Rust CLI sends Return separately via team.send_key RPC.
         return v2Ok(id: id, result: [
             "task": store.taskDictionary(delegateResult.task),
             "sent": true,
             "text_delivered": delegateResult.textDelivered,
         ])
+    }
+
+    /// Send a named key (return, ctrl-c, etc.) to an agent's terminal surface.
+    /// Uses the same `sendNamedKey` path as `surface.send_key` RPC — proven reliable
+    /// for Return delivery to TUI apps (Claude Code).
+    private func asyncTeamSendKey(params: [String: Any], id: Any?) async -> String {
+        guard let teamName = (params["team"] ?? params["team_name"]) as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing team_name")
+        }
+        guard let agentName = (params["agent"] ?? params["agent_name"]) as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing agent_name")
+        }
+        guard let key = params["key"] as? String else {
+            return v2Error(id: id, code: "invalid_params", message: "Missing key")
+        }
+
+        let result: Bool = await MainActor.run {
+            guard let team = TeamOrchestrator.shared.teams[teamName],
+                  let agent = team.agents.first(where: { $0.name == agentName }) else {
+                return false
+            }
+            let tabManager = TeamOrchestrator.shared.resolveTabManager(teamName: teamName) ?? self.tabManager
+            guard let tabManager,
+                  let ws = tabManager.tabs.first(where: { $0.id == agent.workspaceId }),
+                  let panel = ws.terminalPanel(for: agent.panelId),
+                  let surface = panel.surface.surface else {
+                // Fallback: try global surface lookup
+                if let located = AppDelegate.shared?.locateSurface(surfaceId: agent.panelId),
+                   let ws2 = located.tabManager.tabs.first(where: { $0.id == located.workspaceId }),
+                   let panel2 = ws2.terminalPanel(for: agent.panelId),
+                   let surface2 = panel2.surface.surface {
+                    let ok = self.sendNamedKey(surface2, keyName: key)
+                    if ok { panel2.surface.forceRefresh() }
+                    return ok
+                }
+                return false
+            }
+            let ok = self.sendNamedKey(surface, keyName: key)
+            if ok { panel.surface.forceRefresh() }
+            return ok
+        }
+
+        return result
+            ? v2Ok(id: id, result: ["sent": true, "team_name": teamName, "agent_name": agentName, "key": key])
+            : v2Error(id: id, code: "not_found", message: "Agent or surface not found")
     }
 
     // MARK: - Team Send Stagger

@@ -726,11 +726,10 @@ class TerminalController {
             let info = Bundle.main.infoDictionary ?? [:]
             let version = info["CFBundleShortVersionString"] as? String ?? "?"
             let build = info["CFBundleVersion"] as? String ?? "?"
-            let commit = info["TermMeshCommit"] as? String ?? "?"
             return v2Ok(id: id, result: [
                 "app_version": version,
                 "build_number": build,
-                "git_sha": commit,
+                "git_sha": BuildInfo.gitSHA,
             ])
         case "system.identify":
             return v2Ok(id: id, result: v2Identify(params: params))

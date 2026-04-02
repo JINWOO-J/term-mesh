@@ -470,6 +470,16 @@
   .task-column { flex: 1; min-width: 140px; }
   .task-column-header { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
     color: var(--text-dim); margin-bottom: 6px; }
+  /* Kanban board layout */
+  .kanban-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; min-height: 200px; }
+  .kanban-column { display: flex; flex-direction: column; gap: 8px; }
+  .kanban-column-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; }
+  .kanban-column-header .count { font-size: 10px; font-weight: 400; color: var(--text-dim); }
+  .kanban-column-header.pending { color: var(--text-dim); background: rgba(161,161,170,0.08); }
+  .kanban-column-header.running { color: var(--accent); background: rgba(34,211,238,0.08); }
+  .kanban-column-header.done { color: var(--success); background: rgba(74,222,128,0.08); }
+  .kanban-cards { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+
   .task-card { background: var(--surface-strong); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 11px; margin-bottom: 6px; font-size: 11px; cursor: pointer; box-shadow: 0 8px 20px rgba(129, 154, 145, 0.12); }
   .task-card:hover { border-color: var(--accent); }
@@ -574,30 +584,33 @@
   .agent-session .terminate-btn:hover { background: rgba(233,69,96,0.15); }
 
   /* Team Overview — responsive card grid */
-  .team-overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-  .team-overview-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--surface-strong); min-width: 0; }
-  .team-overview-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-  .team-overview-name { font-weight: 600; font-size: 12px; white-space: nowrap; }
-  .team-overview-badge { font-size: 8px; padding: 1px 5px; border-radius: 3px; background: rgba(129,154,145,0.12); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
-  .team-overview-agents { display: flex; flex-direction: column; gap: 2px; }
-  .team-agent-row { display: flex; align-items: center; gap: 5px; padding: 2px 0; min-width: 0; }
-  .team-agent-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .team-agent-dot.running { background: var(--success); box-shadow: 0 0 3px rgba(129,154,145,0.4); }
-  .team-agent-dot.blocked { background: var(--danger); }
+  .team-overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .team-overview-item { border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--surface-strong); min-width: 0; transition: border-color 0.15s; }
+  .team-overview-item:hover { border-color: var(--accent); }
+  .team-overview-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .team-overview-name { font-weight: 700; font-size: 14px; white-space: nowrap; color: var(--text); }
+  .team-overview-badge { font-size: 9px; padding: 2px 7px; border-radius: 4px; background: rgba(34,211,238,0.10); color: var(--accent); text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+  .team-overview-agents { display: flex; flex-direction: column; gap: 4px; }
+  .team-agent-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; min-width: 0; border-radius: 6px; background: rgba(255,255,255,0.03); transition: background 0.15s; }
+  .team-agent-row:hover { background: rgba(255,255,255,0.06); }
+  .team-agent-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .team-agent-dot.running { background: var(--success); box-shadow: 0 0 6px rgba(74,222,128,0.4); }
+  .team-agent-dot.blocked { background: var(--danger); box-shadow: 0 0 6px rgba(248,113,113,0.3); }
   .team-agent-dot.review { background: var(--accent-strong); }
-  .team-agent-dot.idle { background: var(--text-dim); }
-  .team-agent-dot.stale { background: var(--accent); }
-  .team-agent-info { flex: 1; display: flex; align-items: baseline; gap: 4px; min-width: 0; overflow: hidden; }
-  .team-agent-label { font-size: 11px; font-weight: 500; white-space: nowrap; }
-  .team-agent-cli { font-size: 9px; color: var(--text-dim); white-space: nowrap; }
-  .team-agent-task { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-  .team-agent-status { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
-  .team-agent-status.running { background: rgba(129,154,145,0.16); color: var(--success); }
-  .team-agent-status.blocked { background: rgba(143,106,82,0.14); color: var(--danger); }
-  .team-agent-status.review { background: rgba(167,193,168,0.2); color: var(--accent-strong); }
-  .team-agent-status.idle { background: rgba(129,154,145,0.08); color: var(--text-dim); }
-  .team-agent-status.stale { background: rgba(209,216,190,0.9); color: var(--accent-strong); }
-  .team-overview-meta { margin-top: 4px; font-size: 9px; color: var(--text-dim); display: flex; gap: 10px; overflow: hidden; }
+  .team-agent-dot.idle { background: var(--text-dim); opacity: 0.5; }
+  .team-agent-dot.stale { background: var(--warning); }
+  .team-agent-info { flex: 1; display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+  .team-agent-label { font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text); }
+  .team-agent-cli { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+  .team-agent-model { font-size: 9px; color: var(--accent); background: rgba(34,211,238,0.08); padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+  .team-agent-task { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .team-agent-status { font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
+  .team-agent-status.running { background: rgba(74,222,128,0.12); color: var(--success); }
+  .team-agent-status.blocked { background: rgba(248,113,113,0.12); color: var(--danger); }
+  .team-agent-status.review { background: rgba(6,182,212,0.12); color: var(--accent-strong); }
+  .team-agent-status.idle { background: rgba(161,161,170,0.08); color: var(--text-dim); }
+  .team-agent-status.stale { background: rgba(251,191,36,0.12); color: var(--warning); }
+  .team-overview-meta { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-dim); display: flex; gap: 12px; overflow: hidden; }
   .team-overview-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .attention-list { display: flex; flex-direction: column; gap: 6px; }
@@ -1206,7 +1219,20 @@
   <div class="card full" id="team-tasks-card">
     <h2>Team Tasks</h2>
     <div id="team-tasks-toolbar"></div>
-    <div id="team-tasks-board"><div class="empty">No team tasks</div></div>
+    <div id="team-tasks-board" class="kanban-board">
+      <div class="kanban-column">
+        <div class="kanban-column-header pending">Pending <span class="count" id="kanban-pending-count">0</span></div>
+        <div class="kanban-cards" id="kanban-pending"></div>
+      </div>
+      <div class="kanban-column">
+        <div class="kanban-column-header running">In Progress <span class="count" id="kanban-running-count">0</span></div>
+        <div class="kanban-cards" id="kanban-running"></div>
+      </div>
+      <div class="kanban-column">
+        <div class="kanban-column-header done">Done <span class="count" id="kanban-done-count">0</span></div>
+        <div class="kanban-cards" id="kanban-done"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Budget Guard -->
@@ -2212,10 +2238,12 @@ function renderTeamOverview() {
         ? `<span class="team-agent-task" title="${agent.active_task_title}">${agent.active_task_title}</span>` : '';
       const hb = agent.heartbeat_age_seconds != null
         ? `<span class="team-agent-cli">${formatAgeSeconds(agent.heartbeat_age_seconds)}</span>` : '';
+      const modelBadge = agent.model ? `<span class="team-agent-model">${agent.model}</span>` : '';
       return `<div class="team-agent-row">
         <span class="team-agent-dot ${status.className}"></span>
         <div class="team-agent-info">
           <span class="team-agent-label">${agent.name}</span>
+          ${modelBadge}
           <span class="team-agent-cli">${agent.cli || ''}</span>
           ${taskSnippet}
         </div>
@@ -2386,32 +2414,22 @@ function updateTeamTasks(tasks) {
     updateSummaryCards();
     return;
   }
-  const columns = {
-    queued: { label: 'Queued', items: [] },
-    in_progress: { label: 'In Progress', items: [] },
-    blocked: { label: 'Blocked', items: [] },
-    review_ready: { label: 'Review Ready', items: [] },
-    completed: { label: 'Completed', items: [] },
-    other: { label: 'Other', items: [] },
-  };
+  // Kanban: 3 columns (Pending, In Progress, Done)
+  const pending = [], running = [], done = [];
   for (const t of visibleTasks) {
-    if (t.status === 'queued' || t.status === 'assigned') columns.queued.items.push(t);
-    else if (t.status === 'in_progress') columns.in_progress.items.push(t);
-    else if (t.status === 'blocked') columns.blocked.items.push(t);
-    else if (t.status === 'review_ready') columns.review_ready.items.push(t);
-    else if (t.status === 'completed') columns.completed.items.push(t);
-    else columns.other.items.push(t);
+    if (t.status === 'completed') done.push(t);
+    else if (t.status === 'in_progress' || t.status === 'blocked' || t.status === 'review_ready') running.push(t);
+    else pending.push(t);
   }
-  let html = '<div class="task-board">';
-  for (const [key, col] of Object.entries(columns)) {
-    if (key === 'other' && col.items.length === 0) continue;
-    html += `<div class="task-column">
-      <div class="task-column-header">${col.label} (${col.items.length})</div>
-      ${col.items.map(renderTeamTaskCard).join('')}
-    </div>`;
-  }
-  html += '</div>';
-  board.innerHTML = html;
+  const renderCol = (id, items) => {
+    const el = document.getElementById(id);
+    const countEl = document.getElementById(id + '-count');
+    if (el) el.innerHTML = items.length ? items.map(renderTeamTaskCard).join('') : '<div class="empty">—</div>';
+    if (countEl) countEl.textContent = items.length;
+  };
+  renderCol('kanban-pending', pending);
+  renderCol('kanban-running', running);
+  renderCol('kanban-done', done);
   updateLeaderConsole();
   updateSummaryCards();
 }

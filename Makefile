@@ -146,7 +146,7 @@ prod:
 	@echo "           make dmg           (create distributable DMG)"
 	@echo "================================================"
 
-deploy-prod: prod
+deploy-prod: daemon prod
 	@echo "==> Stopping existing app + daemon..."
 	@-pkill -f "term-mesh.app/Contents/MacOS" 2>/dev/null || true
 	@-pkill -f "term-mesh DEV" 2>/dev/null || true

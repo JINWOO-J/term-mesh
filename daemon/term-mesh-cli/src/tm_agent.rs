@@ -1469,23 +1469,37 @@ fn main() {
             rpc_call(&sock, "team.task.clear", json!({ "team_name": team }))
         }
         Commands::Status => {
-            // Fetch app version info and check for CLI/app mismatch
-            if let Ok(info) = rpc_call(&sock, "system.info", json!({})) {
-                let app_ver = info["result"]["app_version"].as_str().unwrap_or("?");
+            // Inject version info into the team.status response JSON
+            let mut status = rpc_call(&sock, "team.status", json!({ "team_name": team }))
+                .unwrap_or_else(|e| json!({"ok": false, "error": {"message": e}}));
+
+            // Fetch app version and merge into result
+            let version_info = if let Ok(info) = rpc_call(&sock, "system.info", json!({})) {
                 let app_sha = info["result"]["git_sha"].as_str().unwrap_or("?");
-                let app_build = info["result"]["build_number"].as_str().unwrap_or("?");
-                if !app_sha.is_empty() && app_sha != "?" && app_sha != GIT_SHA {
-                    eprintln!("⚠ Version mismatch!");
-                    eprintln!("  CLI: {} ({})", env!("CARGO_PKG_VERSION"), GIT_SHA);
-                    eprintln!("  App: {} build {} ({})", app_ver, app_build, app_sha);
-                    eprintln!("  Fix: make deploy-prod");
-                } else {
-                    eprintln!("✓ App {} ({}) CLI {} ({})", app_ver, app_sha, env!("CARGO_PKG_VERSION"), GIT_SHA);
-                }
+                let matched = app_sha == GIT_SHA || app_sha == "?" || app_sha.is_empty();
+                json!({
+                    "app_version": info["result"]["app_version"],
+                    "app_build": info["result"]["build_number"],
+                    "app_sha": app_sha,
+                    "cli_version": env!("CARGO_PKG_VERSION"),
+                    "cli_sha": GIT_SHA,
+                    "version_match": matched,
+                })
             } else {
-                eprintln!("⚠ Cannot reach app (system.info failed) — CLI {} ({})", env!("CARGO_PKG_VERSION"), GIT_SHA);
+                json!({
+                    "cli_version": env!("CARGO_PKG_VERSION"),
+                    "cli_sha": GIT_SHA,
+                    "version_match": null,
+                })
+            };
+
+            // Merge version into result (or top-level for error responses)
+            if let Some(result) = status.get_mut("result") {
+                result["version"] = version_info;
+            } else {
+                status["version"] = version_info;
             }
-            rpc_call(&sock, "team.status", json!({ "team_name": team }))
+            Ok(status)
         }
         Commands::Inbox => {
             rpc_call(&sock, "team.inbox", json!({

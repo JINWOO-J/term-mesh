@@ -202,6 +202,11 @@ pub fn start_watcher() -> WatcherHandle {
             for path in &event.paths {
                 let path_str = path.to_string_lossy().to_string();
 
+                // Skip noisy paths that clutter the heatmap
+                if should_ignore_path(&path_str) {
+                    continue;
+                }
+
                 *state.event_counts.entry(path_str.clone()).or_insert(0) += 1;
                 state.last_event_times.insert(path_str.clone(), now);
 
@@ -237,6 +242,51 @@ pub fn start_watcher() -> WatcherHandle {
         state,
         command_tx: cmd_tx,
     }
+}
+
+/// Directories and file patterns to ignore in the file watcher.
+/// Matches any path component (e.g. "/.git/" anywhere in the path).
+const IGNORE_DIRS: &[&str] = &[
+    "/.git/",
+    "/node_modules/",
+    "/.next/",
+    "/target/",          // Rust/Cargo
+    "/build/",
+    "/dist/",
+    "/.xm/",             // x-kit state
+    "/.omc/",            // OMC state
+    "/__pycache__/",
+    "/.cache/",
+    "/DerivedData/",
+    "/.swiftpm/",
+    "/zig-cache/",
+    "/zig-out/",
+];
+
+const IGNORE_SUFFIXES: &[&str] = &[
+    ".DS_Store",
+    ".swp",
+    ".swo",
+    "~",
+    ".pyc",
+    ".pyo",
+    ".o",
+    ".d",
+    ".lock",
+];
+
+fn should_ignore_path(path: &str) -> bool {
+    for dir in IGNORE_DIRS {
+        if path.contains(dir) {
+            return true;
+        }
+    }
+    for suffix in IGNORE_SUFFIXES {
+        if path.ends_with(suffix) {
+            return true;
+        }
+    }
+    false
 }
 
 fn now_ms() -> u64 {
@@ -360,6 +410,18 @@ mod tests {
         handle.watch_path("/tmp/test");
         let snap = handle.snapshot();
         assert_eq!(snap.watched_paths.len(), 1);
+    }
+
+    #[test]
+    fn should_ignore_git_and_node_modules() {
+        assert!(should_ignore_path("/Users/me/project/.git/objects/pack/abc"));
+        assert!(should_ignore_path("/Users/me/project/node_modules/react/index.js"));
+        assert!(should_ignore_path("/Users/me/project/.DS_Store"));
+        assert!(should_ignore_path("/Users/me/project/src/main.rs.swp"));
+        assert!(should_ignore_path("/Users/me/project/target/release/binary"));
+        assert!(!should_ignore_path("/Users/me/project/src/main.rs"));
+        assert!(!should_ignore_path("/Users/me/project/README.md"));
+        assert!(!should_ignore_path("/Users/me/project/.gitignore"));
     }
 
     #[test]

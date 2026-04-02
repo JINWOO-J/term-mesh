@@ -1473,24 +1473,13 @@ fn main() {
             let mut status = rpc_call(&sock, "team.status", json!({ "team_name": team }))
                 .unwrap_or_else(|e| json!({"ok": false, "error": {"message": e}}));
 
-            // Fetch app version and merge into result
+            // Compact version check: "app_sha:cli_sha" + match flag
             let version_info = if let Ok(info) = rpc_call(&sock, "system.info", json!({})) {
                 let app_sha = info["result"]["git_sha"].as_str().unwrap_or("?");
                 let matched = app_sha == GIT_SHA || app_sha == "?" || app_sha.is_empty();
-                json!({
-                    "app_version": info["result"]["app_version"],
-                    "app_build": info["result"]["build_number"],
-                    "app_sha": app_sha,
-                    "cli_version": env!("CARGO_PKG_VERSION"),
-                    "cli_sha": GIT_SHA,
-                    "version_match": matched,
-                })
+                json!({ "app": app_sha, "cli": GIT_SHA, "ok": matched })
             } else {
-                json!({
-                    "cli_version": env!("CARGO_PKG_VERSION"),
-                    "cli_sha": GIT_SHA,
-                    "version_match": null,
-                })
+                json!({ "cli": GIT_SHA, "ok": null })
             };
 
             // Merge version into result (or top-level for error responses)

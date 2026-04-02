@@ -1,7 +1,8 @@
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -55,11 +56,26 @@ struct WatcherState {
     watched_paths: Vec<String>,
     /// Per-minute event counts: key = minute_ms (floored), value = (create, modify, remove)
     timeline_buckets: HashMap<u64, (u64, u64, u64)>,
+    /// Gitignore-based dynamic ignore patterns (loaded per watched directory).
+    /// Each entry: (base_dir, pattern) where pattern is a glob-like string.
+    gitignore_patterns: Vec<GitignoreRule>,
+    /// Whether to use .gitignore-based filtering.
+    use_gitignore: bool,
+}
+
+/// A parsed .gitignore rule with its base directory.
+#[derive(Debug, Clone)]
+struct GitignoreRule {
+    base_dir: String,
+    pattern: String,
+    negated: bool,
+    dir_only: bool,
 }
 
 enum WatcherCommand {
     Watch(String),
     Unwatch(String),
+    SetUseGitignore(bool),
 }
 
 impl WatcherHandle {
@@ -71,6 +87,11 @@ impl WatcherHandle {
                 return; // Already watching
             }
             state.watched_paths.push(path.to_string());
+            // Load .gitignore rules if enabled
+            if state.use_gitignore {
+                let rules = load_gitignore_rules(path);
+                state.gitignore_patterns.extend(rules);
+            }
         }
         // Send command to the watcher thread to actually start watching
         let _ = self.command_tx.try_send(WatcherCommand::Watch(path.to_string()));
@@ -80,8 +101,33 @@ impl WatcherHandle {
         {
             let mut state = self.state.lock().unwrap();
             state.watched_paths.retain(|p| p != path);
+            // Remove gitignore rules for this base dir
+            state.gitignore_patterns.retain(|r| r.base_dir != path);
         }
         let _ = self.command_tx.try_send(WatcherCommand::Unwatch(path.to_string()));
+    }
+
+    /// Enable/disable .gitignore-based filtering for file events.
+    pub fn set_use_gitignore(&self, enabled: bool) {
+        {
+            let mut state = self.state.lock().unwrap();
+            state.use_gitignore = enabled;
+            if enabled {
+                // Reload gitignore for all watched paths
+                let paths: Vec<String> = state.watched_paths.clone();
+                state.gitignore_patterns.clear();
+                for path in &paths {
+                    let rules = load_gitignore_rules(path);
+                    state.gitignore_patterns.extend(rules);
+                }
+            }
+        }
+        let _ = self.command_tx.try_send(WatcherCommand::SetUseGitignore(enabled));
+    }
+
+    /// Check if .gitignore filtering is enabled.
+    pub fn use_gitignore(&self) -> bool {
+        self.state.lock().unwrap().use_gitignore
     }
 
     pub fn snapshot(&self) -> HeatmapSnapshot {
@@ -144,6 +190,8 @@ pub fn start_watcher() -> WatcherHandle {
         recent_events: Vec::new(),
         watched_paths: Vec::new(),
         timeline_buckets: HashMap::new(),
+        gitignore_patterns: Vec::new(),
+        use_gitignore: true, // enabled by default
     }));
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<WatcherCommand>(256);
@@ -177,6 +225,9 @@ pub fn start_watcher() -> WatcherHandle {
                     tracing::info!("unwatching: {path}");
                     let _ = watcher.unwatch(PathBuf::from(&path).as_path());
                 }
+                WatcherCommand::SetUseGitignore(enabled) => {
+                    tracing::info!("gitignore filtering: {enabled}");
+                }
             }
         }
     });
@@ -185,11 +236,13 @@ pub fn start_watcher() -> WatcherHandle {
     let state_for_events = state.clone();
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
+            // Only track write operations (create/modify/remove).
+            // Access (read) events are skipped — macOS FSEvents rarely emits
+            // them, and they add noise without actionable information.
             let kind_str = match event.kind {
                 EventKind::Create(_) => "create",
                 EventKind::Modify(_) => "modify",
                 EventKind::Remove(_) => "remove",
-                EventKind::Access(_) => "access",
                 _ => continue,
             };
 
@@ -202,8 +255,11 @@ pub fn start_watcher() -> WatcherHandle {
             for path in &event.paths {
                 let path_str = path.to_string_lossy().to_string();
 
-                // Skip noisy paths that clutter the heatmap
+                // Skip noisy paths (hardcoded list + optional gitignore)
                 if should_ignore_path(&path_str) {
+                    continue;
+                }
+                if state.use_gitignore && matches_gitignore(&state.gitignore_patterns, &path_str) {
                     continue;
                 }
 
@@ -242,6 +298,141 @@ pub fn start_watcher() -> WatcherHandle {
         state,
         command_tx: cmd_tx,
     }
+}
+
+/// Load .gitignore rules from a directory (walks up to find all .gitignore files).
+fn load_gitignore_rules(dir: &str) -> Vec<GitignoreRule> {
+    let mut rules = Vec::new();
+    let dir_path = Path::new(dir);
+
+    // Load .gitignore from the watched directory
+    load_gitignore_file(dir_path, dir, &mut rules);
+
+    // Also check subdirectories one level deep for nested .gitignore files
+    // (deeper ones are loaded lazily on demand — not worth the upfront cost)
+    if let Ok(entries) = fs::read_dir(dir_path) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let subdir = entry.path();
+                let gi = subdir.join(".gitignore");
+                if gi.exists() {
+                    load_gitignore_file(&subdir, &subdir.to_string_lossy(), &mut rules);
+                }
+            }
+        }
+    }
+
+    rules
+}
+
+fn load_gitignore_file(dir: &Path, base_dir: &str, rules: &mut Vec<GitignoreRule>) {
+    let gi_path = dir.join(".gitignore");
+    let content = match fs::read_to_string(&gi_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Skip comments and empty lines
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (negated, pattern) = if let Some(rest) = trimmed.strip_prefix('!') {
+            (true, rest.to_string())
+        } else {
+            (false, trimmed.to_string())
+        };
+        let dir_only = pattern.ends_with('/');
+        let pattern = pattern.trim_end_matches('/').to_string();
+        if pattern.is_empty() {
+            continue;
+        }
+        rules.push(GitignoreRule {
+            base_dir: base_dir.to_string(),
+            pattern,
+            negated,
+            dir_only,
+        });
+    }
+}
+
+/// Check if a path matches any gitignore rule.
+fn matches_gitignore(rules: &[GitignoreRule], path: &str) -> bool {
+    let mut ignored = false;
+    for rule in rules {
+        // Only apply rules whose base_dir is a prefix of the path
+        if !path.starts_with(&rule.base_dir) {
+            continue;
+        }
+        // Get relative path from the rule's base dir
+        let rel = &path[rule.base_dir.len()..].trim_start_matches('/');
+        if rel.is_empty() {
+            continue;
+        }
+        if gitignore_pattern_matches(&rule.pattern, rel) {
+            if rule.negated {
+                ignored = false; // Negation un-ignores
+            } else {
+                ignored = true;
+            }
+        }
+    }
+    ignored
+}
+
+/// Simple gitignore glob matching.
+/// Supports: `*` (single segment), `**` (any depth), `*.ext`, `dir/`, prefix match.
+fn gitignore_pattern_matches(pattern: &str, rel_path: &str) -> bool {
+    // If pattern has no slash, match against any path component
+    if !pattern.contains('/') {
+        for component in rel_path.split('/') {
+            if simple_glob_match(pattern, component) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // Pattern with slash: match from the start of relative path
+    simple_glob_match(pattern, rel_path)
+}
+
+/// Basic glob match: `*` matches any chars within a segment, `**` matches across segments.
+fn simple_glob_match(pattern: &str, text: &str) -> bool {
+    if pattern == "**" {
+        return true;
+    }
+    if let Some(ext) = pattern.strip_prefix("*.") {
+        // *.ext — match file extension
+        return text.ends_with(&format!(".{ext}"));
+    }
+    if let Some(prefix) = pattern.strip_suffix("/**") {
+        // dir/** — match anything under dir
+        return text.starts_with(prefix) || text == prefix;
+    }
+    if pattern.contains("**") {
+        // a/**/b — split and check prefix+suffix
+        let parts: Vec<&str> = pattern.splitn(2, "**").collect();
+        if parts.len() == 2 {
+            let prefix = parts[0].trim_end_matches('/');
+            let suffix = parts[1].trim_start_matches('/');
+            if !prefix.is_empty() && !text.starts_with(prefix) {
+                return false;
+            }
+            if !suffix.is_empty() && !text.ends_with(suffix) {
+                return false;
+            }
+            return true;
+        }
+    }
+    // Simple wildcard: * matches any non-slash chars
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        if parts.len() == 2 {
+            return text.starts_with(parts[0]) && text.ends_with(parts[1]);
+        }
+    }
+    // Exact match or prefix match (for directories)
+    text == pattern || text.starts_with(&format!("{pattern}/"))
 }
 
 /// Directories and file patterns to ignore in the file watcher.
@@ -307,6 +498,8 @@ mod tests {
             recent_events: Vec::new(),
             watched_paths: Vec::new(),
             timeline_buckets: HashMap::new(),
+            gitignore_patterns: Vec::new(),
+            use_gitignore: false,
         }))
     }
 
@@ -410,6 +603,42 @@ mod tests {
         handle.watch_path("/tmp/test");
         let snap = handle.snapshot();
         assert_eq!(snap.watched_paths.len(), 1);
+    }
+
+    #[test]
+    fn gitignore_pattern_matching() {
+        // *.log matches any .log file in any directory
+        assert!(gitignore_pattern_matches("*.log", "debug.log"));
+        assert!(gitignore_pattern_matches("*.log", "src/debug.log"));
+        assert!(!gitignore_pattern_matches("*.log", "debug.txt"));
+
+        // dir pattern matches as prefix
+        assert!(gitignore_pattern_matches("build", "build/output.js"));
+        assert!(gitignore_pattern_matches("build", "build"));
+        assert!(!gitignore_pattern_matches("build", "rebuild/x"));
+
+        // dir/** matches everything under dir
+        assert!(gitignore_pattern_matches("logs/**", "logs/a.log"));
+        assert!(gitignore_pattern_matches("logs/**", "logs/deep/nested/file"));
+    }
+
+    #[test]
+    fn matches_gitignore_with_rules() {
+        let rules = vec![
+            GitignoreRule { base_dir: "/project".into(), pattern: "*.log".into(), negated: false, dir_only: false },
+            GitignoreRule { base_dir: "/project".into(), pattern: "dist".into(), negated: false, dir_only: false },
+            GitignoreRule { base_dir: "/project".into(), pattern: "important.log".into(), negated: true, dir_only: false },
+        ];
+        // *.log matches
+        assert!(matches_gitignore(&rules, "/project/debug.log"));
+        // Negation: important.log is un-ignored
+        assert!(!matches_gitignore(&rules, "/project/important.log"));
+        // dist/ matches
+        assert!(matches_gitignore(&rules, "/project/dist/bundle.js"));
+        // Regular file not matched
+        assert!(!matches_gitignore(&rules, "/project/src/main.rs"));
+        // Different base dir — rules don't apply
+        assert!(!matches_gitignore(&rules, "/other/debug.log"));
     }
 
     #[test]

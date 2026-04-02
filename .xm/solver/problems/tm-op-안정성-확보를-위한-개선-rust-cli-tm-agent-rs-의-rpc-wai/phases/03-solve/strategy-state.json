@@ -1,0 +1,54 @@
+{
+  "strategy": "decompose",
+  "current_phase": "decompose",
+  "phases_completed": [],
+  "tree": {
+    "id": "root",
+    "description": "tm-op 안정성 확보를 위한 개선: Rust CLI(tm_agent.rs)의 RPC/wait/reply 수정은 완료됨. 이제 tm-op 전략 수준(chain/debate/red-team/council 등 C등급 전략)의 안정성 개선과, 전체 오케스트레이션 흐름의 견고성 강화가 필요함.",
+    "children": [
+      {
+        "id": "sp1",
+        "description": "SP1: task_id 기반 정확한 추적 — fan-out/delegate 후 task_id를 캡처하여 wait --tasks에 전달하는 패턴 표준화",
+        "difficulty": "medium",
+        "status": "pending",
+        "candidates": [],
+        "selected": null
+      },
+      {
+        "id": "sp2",
+        "description": "SP2: chain 전략 견고화 — status 파싱 제거, task_id 기반 수집, 첫단계 실패시 중단, 중간단계 실패시 skip 로직",
+        "difficulty": "medium",
+        "status": "pending",
+        "candidates": [],
+        "selected": null
+      },
+      {
+        "id": "sp3",
+        "description": "SP3: debate/red-team 턴 교대 및 빈 결과 가드 — 빈 공격/반론 전파 방지, rebuttal 결과 전달 명시화",
+        "difficulty": "medium",
+        "status": "pending",
+        "candidates": [],
+        "selected": null
+      },
+      {
+        "id": "sp4",
+        "description": "SP4: council/refine 라운드 상태 영속화 — 라운드 결과를 result 파일에 기록하여 컨텍스트 윈도우 소실 방지",
+        "difficulty": "medium",
+        "status": "pending",
+        "candidates": [],
+        "selected": null
+      },
+      {
+        "id": "sp5",
+        "description": "SP5: timeout 전략별 분화 및 에이전트 부족 처리 — preset별 하한 설정, idle 에이전트 부족시 순차 할당 로직",
+        "difficulty": "easy",
+        "status": "pending",
+        "candidates": [],
+        "selected": null
+      }
+    ],
+    "status": "pending"
+  },
+  "max_depth": 2,
+  "started_at": "2026-03-31T23:16:18.144Z"
+}

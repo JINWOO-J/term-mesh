@@ -7,27 +7,27 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #f5f7fb;
-    --bg-accent: #eef3f9;
-    --surface: rgba(255, 255, 255, 0.88);
-    --surface-strong: rgba(255, 255, 255, 0.98);
-    --border: rgba(148, 163, 184, 0.20);
-    --text: #27364b;
-    --text-dim: #708198;
-    --accent: #3b82f6;
-    --accent-strong: #2563eb;
-    --danger: #dc6b5f;
-    --success: #16a34a;
-    --warning: #f59e0b;
-    --shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    --bg: #0a0a0a;
+    --bg-accent: #111111;
+    --surface: rgba(24, 24, 27, 0.88);
+    --surface-strong: rgba(30, 30, 35, 0.98);
+    --border: rgba(63, 63, 70, 0.40);
+    --text: #fafafa;
+    --text-dim: #a1a1aa;
+    --accent: #22d3ee;
+    --accent-strong: #06b6d4;
+    --danger: #f87171;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --shadow: 0 10px 24px rgba(0, 0, 0, 0.40);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
     background:
-      radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 24%),
-      radial-gradient(circle at top right, rgba(148, 163, 184, 0.14), transparent 30%),
-      linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+      radial-gradient(circle at top left, rgba(34, 211, 238, 0.06), transparent 24%),
+      radial-gradient(circle at top right, rgba(63, 63, 70, 0.10), transparent 30%),
+      linear-gradient(180deg, #0a0a0a 0%, #09090b 100%);
     color: var(--text);
     font-size: 13px;
     overflow-x: hidden;
@@ -38,19 +38,19 @@
     inset: 0;
     pointer-events: none;
     background-image:
-      linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+      linear-gradient(rgba(63, 63, 70, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(63, 63, 70, 0.06) 1px, transparent 1px);
     background-size: 24px 24px;
     mask-image: linear-gradient(180deg, rgba(0,0,0,0.55), transparent 92%);
   }
   .header {
     padding: 16px 20px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    border-bottom: 1px solid rgba(63, 63, 70, 0.30);
     display: flex;
     align-items: center;
     gap: 12px;
     backdrop-filter: blur(16px);
-    background: rgba(248, 250, 252, 0.82);
+    background: rgba(10, 10, 10, 0.85);
     position: sticky;
     top: 0;
     z-index: 5;
@@ -67,9 +67,9 @@
     color: var(--text-dim);
     margin-left: auto;
     padding: 5px 10px;
-    border: 1px solid rgba(148, 163, 184, 0.16);
+    border: 1px solid rgba(63, 63, 70, 0.30);
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.88);
+    background: rgba(24, 24, 27, 0.60);
   }
   .header .instance {
     font-size: 11px;
@@ -161,7 +161,7 @@
   .heatmap-meter {
     width: 100px;
     height: 6px;
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.04);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -178,7 +178,7 @@
   }
   /* Alerts */
   .alert {
-    background: rgba(248, 250, 252, 0.94);
+    background: rgba(18, 18, 20, 0.90);
     border: 1px solid var(--danger);
     border-radius: 8px;
     padding: 8px 12px;
@@ -186,7 +186,7 @@
     font-size: 12px;
   }
   .alert .pid { color: var(--danger); font-weight: 600; }
-  .alert.warning { background: rgba(255, 247, 237, 0.95); border-color: var(--warning); }
+  .alert.warning { background: rgba(30, 25, 18, 0.90); border-color: var(--warning); }
   .alert.warning .pid { color: var(--warning); }
   .alert .action-badge {
     display: inline-block;
@@ -212,7 +212,7 @@
   .proc-status.running { color: var(--success); }
   .proc-status.stopped { color: var(--danger); }
   .proc-btn {
-    background: rgba(255, 255, 255, 0.94);
+    background: rgba(24, 24, 27, 0.80);
     border: 1px solid var(--border);
     color: var(--text);
     padding: 4px 10px;
@@ -288,7 +288,7 @@
   }
   .event-filter-chip {
     border: 1px solid rgba(129, 154, 145, 0.18);
-    background: rgba(255,255,255,0.9);
+    background: rgba(24, 24, 27, 0.75);
     color: var(--text-dim);
     padding: 4px 10px;
     border-radius: 999px;
@@ -352,7 +352,7 @@
   .tree-file .file-heat {
     width: 60px;
     height: 4px;
-    background: rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.04);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -416,7 +416,7 @@
     width: 14px;
     left: 2px;
     bottom: 2px;
-    background: #fff9f1;
+    background: #1a1714;
     border-radius: 50%;
     transition: 0.2s;
   }
@@ -502,7 +502,7 @@
   .task-toolbar.wrap { flex-wrap: wrap; }
   .task-toolbar input, .task-toolbar select,
   .msg-toolbar select, .msg-toolbar input, .msg-toolbar textarea {
-    background: rgba(255, 255, 248, 0.92);
+    background: rgba(24, 24, 20, 0.85);
     border: 1px solid rgba(148, 163, 184, 0.22);
     color: var(--text);
     padding: 9px 11px;
@@ -515,7 +515,7 @@
   .msg-toolbar select:focus, .msg-toolbar input:focus, .msg-toolbar textarea:focus {
     border-color: rgba(59, 130, 246, 0.34);
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.10);
-    background: #fffffb;
+    background: #18181b;
   }
   .task-toolbar input { flex: 1; }
   .task-filter-group {
@@ -525,7 +525,7 @@
   }
   .task-filter-chip {
     border: 1px solid rgba(129, 154, 145, 0.18);
-    background: rgba(255,255,255,0.9);
+    background: rgba(24, 24, 27, 0.75);
     color: var(--text-dim);
     padding: 8px 10px;
     border-radius: 999px;
@@ -752,8 +752,8 @@
     top: 0;
     height: 100vh;
     padding: 24px 18px;
-    background: linear-gradient(180deg, rgba(241, 245, 249, 0.96), rgba(248,250,252,0.82));
-    border-right: 1px solid rgba(148, 163, 184, 0.14);
+    background: linear-gradient(180deg, rgba(14, 14, 16, 0.96), rgba(10, 10, 10, 0.85));
+    border-right: 1px solid rgba(63, 63, 70, 0.30);
     backdrop-filter: blur(18px);
   }
   .sidebar-brand {
@@ -768,9 +768,9 @@
     border-radius: 8px;
     display: grid;
     place-items: center;
-    background: rgba(255,255,255,0.92);
-    border: 1px solid rgba(148,163,184,0.16);
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    background: rgba(24, 24, 27, 0.80);
+    border: 1px solid rgba(63, 63, 70, 0.30);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.30);
     overflow: hidden;
   }
   .brand-mark img {
@@ -863,7 +863,7 @@
     margin-bottom: 18px;
     padding: 18px 20px;
     border-radius: 8px;
-    background: rgba(255,255,255,0.9);
+    background: rgba(24, 24, 27, 0.75);
     border: 1px solid rgba(148,163,184,0.14);
     box-shadow: var(--shadow);
     backdrop-filter: blur(18px);
@@ -916,7 +916,7 @@
     padding: 9px 11px;
     border-radius: 999px;
     border: 1px solid rgba(129, 154, 145, 0.18);
-    background: rgba(255,255,255,0.9);
+    background: rgba(24, 24, 27, 0.75);
     color: var(--accent-strong);
     font-size: 11px;
     font-weight: 700;

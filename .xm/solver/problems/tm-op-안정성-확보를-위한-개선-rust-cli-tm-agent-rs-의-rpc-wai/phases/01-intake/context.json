@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "id": "ctx-1",
+      "content": "architect 분석 결과: (a) wait --tasks 미사용으로 정확한 task 추적 불가, (b) chain 단계 실패 시 false-positive 완료 위험, (c) debate/council 라운드 상태 유실 (컨텍스트 윈도우 의존), (d) red-team 빈 공격 전파. reviewer 분석 결과: [C1] chain status 파싱 취약, [C2] task_id 기록 부재로 수집 혼동, [M1] 단일 timeout 부적합, [M2] debate rebuttal 전달 미정의, [M3] distribute 에이전트 부족 처리 미흡, [m1] refine 조기종료 기준 불명, [m2] council R2 collect 누락, [m3] chain 첫단계 실패 시 중단 필요",
+      "type": "analysis",
+      "added_at": "2026-03-31T23:16:14.698Z"
+    }
+  ]
+}

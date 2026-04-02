@@ -1,0 +1,18 @@
+{
+  "constraints": [
+    {
+      "id": "c1",
+      "type": "hard",
+      "description": "기존 tm-agent CLI의 하위 호환성 유지 (명령어 인터페이스 변경 금지)",
+      "dimension": "general",
+      "created_at": "2026-03-31T22:42:56.185Z"
+    },
+    {
+      "id": "c2",
+      "type": "hard",
+      "description": "각 수정은 독립적으로 빌드/테스트 가능해야 함",
+      "dimension": "general",
+      "created_at": "2026-03-31T22:42:57.532Z"
+    }
+  ]
+}

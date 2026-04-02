@@ -1,0 +1,14 @@
+{
+  "candidates": [
+    {
+      "id": "cand-1",
+      "source": "analysis",
+      "sub_problem": null,
+      "description": "wait 함수에서 첫 폴링 시 with_tasks 스냅샷을 저장하고, 이후 폴링에서는 스냅샷의 task_id 목록으로 완료 여부를 추적 (agent_filter가 아닌 task_id 기반)",
+      "details": "",
+      "scores": {},
+      "selected": false,
+      "created_at": "2026-03-31T22:34:16.413Z"
+    }
+  ]
+}

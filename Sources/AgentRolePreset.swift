@@ -40,7 +40,7 @@ struct AgentRolePreset: Identifiable, Codable, Equatable {
     static func defaultModel(for cli: String) -> String {
         switch cli {
         case "codex":  return "gpt-5.4"
-        case "gemini": return "gemini-3.1-pro"
+        case "gemini": return "gemini-3.1-pro-preview"
         default:       return "sonnet"
         }
     }

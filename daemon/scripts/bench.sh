@@ -100,7 +100,7 @@ if command -v socat &>/dev/null && [ -S "$SOCK" ]; then
     END=$(python3 -c "import time; print(int(time.time()*1000))")
     LATENCY=$((END - START))
 
-    if echo "$RESP" | grep -q '"pong"'; then
+    if echo "$RESP" | grep -q '"status".*"pong"\|"pong"'; then
         if [ "$LATENCY" -le 50 ]; then
             check_pass "Socket ping latency" "<= 50 ms" "${LATENCY} ms"
         else
@@ -121,7 +121,7 @@ if [ -S "$SOCK" ] && command -v socat &>/dev/null; then
     END=$(python3 -c "import time; print(int(time.time()*1000))")
     SCAN_MS=$((END - START))
 
-    if echo "$RESP" | grep -q '"ok"'; then
+    if echo "$RESP" | grep -q '"status".*"ok"\|"ok"'; then
         if [ "$SCAN_MS" -le 100 ]; then
             check_pass "JSONL scan (usage.scan)" "<= 100 ms" "${SCAN_MS} ms"
         else
@@ -160,7 +160,7 @@ if [ -S "$SOCK" ] && command -v socat &>/dev/null; then
         REMOVE_RESP=$(echo "{\"id\":5,\"method\":\"worktree.remove\",\"params\":{\"repo_path\":\"$TEMP_REPO\",\"name\":\"$WT_NAME\"}}" \
             | socat - UNIX-CONNECT:"$SOCK" 2>/dev/null || true)
 
-        if [ "$LIST_COUNT" -ge 1 ] && echo "$REMOVE_RESP" | grep -q '"ok"'; then
+        if [ "$LIST_COUNT" -ge 1 ] && echo "$REMOVE_RESP" | grep -q '"status".*"ok"\|"ok"'; then
             check_pass "Worktree create/list/remove" "100%" "3/3 ops"
         else
             check_fail "Worktree create/list/remove" "100%" "partial"

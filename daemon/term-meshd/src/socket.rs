@@ -200,7 +200,7 @@ async fn handle_connection(
 async fn dispatch(req: &Request, ctx: &Context) -> Response {
     let result = match req.method.as_str() {
         // --- General ---
-        "ping" => Ok(serde_json::json!("pong")),
+        "ping" => Ok(serde_json::json!({"status": "pong"})),
 
         "daemon.status" => {
             let uptime_secs = crate::START_TIME
@@ -313,7 +313,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
         "worktree.remove" => {
             let params = req.params.clone();
             tokio::task::spawn_blocking(move || {
-                worktree::remove(params).map(|_| serde_json::json!("ok"))
+                worktree::remove(params).map(|_| serde_json::json!({"status": "ok"}))
             })
             .await
             .unwrap_or_else(|e| Err(e.to_string()))
@@ -337,7 +337,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
         "worktree.safe_remove" => {
             let params = req.params.clone();
             tokio::task::spawn_blocking(move || {
-                worktree::safe_remove(params).map(|_| serde_json::json!("ok"))
+                worktree::safe_remove(params).map(|_| serde_json::json!({"status": "ok"}))
             })
             .await
             .unwrap_or_else(|e| Err(e.to_string()))
@@ -371,14 +371,14 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                     });
                     Ok(value)
                 }
-                None => Ok(serde_json::json!(null)),
+                None => Ok(serde_json::json!({})),
             }
         }
         "monitor.track" => {
             #[derive(Deserialize)]
             struct TrackParams { pid: u32 }
             match serde_json::from_value::<TrackParams>(req.params.clone()) {
-                Ok(p) => { ctx.monitor_handle.track_pid(p.pid); Ok(serde_json::json!("ok")) }
+                Ok(p) => { ctx.monitor_handle.track_pid(p.pid); Ok(serde_json::json!({"status": "ok"})) }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -386,7 +386,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             #[derive(Deserialize)]
             struct UntrackParams { pid: u32 }
             match serde_json::from_value::<UntrackParams>(req.params.clone()) {
-                Ok(p) => { ctx.monitor_handle.untrack_pid(p.pid); Ok(serde_json::json!("ok")) }
+                Ok(p) => { ctx.monitor_handle.untrack_pid(p.pid); Ok(serde_json::json!({"status": "ok"})) }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -433,7 +433,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             #[derive(Deserialize)]
             struct WatchParams { path: String }
             match serde_json::from_value::<WatchParams>(req.params.clone()) {
-                Ok(p) => { ctx.watcher_handle.watch_path(&p.path); Ok(serde_json::json!("ok")) }
+                Ok(p) => { ctx.watcher_handle.watch_path(&p.path); Ok(serde_json::json!({"status": "ok"})) }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -441,7 +441,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             #[derive(Deserialize)]
             struct UnwatchParams { path: String }
             match serde_json::from_value::<UnwatchParams>(req.params.clone()) {
-                Ok(p) => { ctx.watcher_handle.unwatch_path(&p.path); Ok(serde_json::json!("ok")) }
+                Ok(p) => { ctx.watcher_handle.unwatch_path(&p.path); Ok(serde_json::json!({"status": "ok"})) }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -457,7 +457,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
         }
         "usage.scan" => {
             match ctx.usage_tracker.scan_all() {
-                Ok(_) => Ok(serde_json::json!("ok")),
+                Ok(_) => Ok(serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("scan error: {e}")),
             }
         }
@@ -502,7 +502,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             }
             match serde_json::from_value::<TerminateParams>(req.params.clone()) {
                 Ok(p) => ctx.agent_manager.terminate(&p.id, p.force, &ctx.watcher_handle)
-                    .map(|_| serde_json::json!("ok")),
+                    .map(|_| serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -511,7 +511,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             struct BindParams { session_id: String, panel_id: String }
             match serde_json::from_value::<BindParams>(req.params.clone()) {
                 Ok(p) => ctx.agent_manager.bind_panel(&p.session_id, &p.panel_id)
-                    .map(|_| serde_json::json!("ok")),
+                    .map(|_| serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -520,7 +520,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             struct UnbindParams { session_id: String }
             match serde_json::from_value::<UnbindParams>(req.params.clone()) {
                 Ok(p) => ctx.agent_manager.unbind_panel(&p.session_id)
-                    .map(|_| serde_json::json!("ok")),
+                    .map(|_| serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -529,7 +529,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             struct AddPidParams { session_id: String, pid: u32 }
             match serde_json::from_value::<AddPidParams>(req.params.clone()) {
                 Ok(p) => ctx.agent_manager.add_pid(&p.session_id, p.pid)
-                    .map(|_| serde_json::json!("ok")),
+                    .map(|_| serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -625,7 +625,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             struct P { session_id: String, text: String }
             match serde_json::from_value::<P>(req.params.clone()) {
                 Ok(p) => ctx.agent_manager.enqueue_input(&p.session_id, &p.text)
-                    .map(|_| serde_json::json!("ok")),
+                    .map(|_| serde_json::json!({"status": "ok"})),
                 Err(e) => Err(format!("invalid params: {e}")),
             }
         }
@@ -654,7 +654,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                 Ok(p) => {
                     let mut mgr = ctx.headless.lock().await;
                     mgr.send_message(&p.agent_id, &p.text).await
-                        .map(|_| serde_json::json!("ok"))
+                        .map(|_| serde_json::json!({"status": "ok"}))
                 }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
@@ -679,7 +679,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                 Ok(p) => {
                     let mut mgr = ctx.headless.lock().await;
                     mgr.terminate(&p.agent_id).await
-                        .map(|_| serde_json::json!("ok"))
+                        .map(|_| serde_json::json!({"status": "ok"}))
                 }
                 Err(e) => Err(format!("invalid params: {e}")),
             }
@@ -724,7 +724,7 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                 Ok(p) => {
                     let mut mgr = ctx.headless.lock().await;
                     mgr.destroy_team(&p.team_name).await
-                        .map(|_| serde_json::json!("ok"))
+                        .map(|_| serde_json::json!({"status": "ok"}))
                 }
                 Err(e) => Err(format!("invalid params: {e}")),
             }

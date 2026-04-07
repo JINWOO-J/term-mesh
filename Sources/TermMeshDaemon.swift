@@ -821,8 +821,10 @@ final class TermMeshDaemon: ObservableObject {
 
     /// Ping the daemon to check connectivity.
     func ping() -> Bool {
-        guard let response = rpcCall(method: "ping", params: [:]) else { return false }
-        return (response as? String) == "pong"
+        guard let response = rpcCall(method: "ping", params: [:]) as? [String: Any],
+              let status = response["status"] as? String,
+              status == "pong" else { return false }
+        return true
     }
 
     /// Connect to the daemon socket and retrieve its PID via LOCAL_PEERPID.
@@ -854,7 +856,7 @@ final class TermMeshDaemon: ObservableObject {
     /// Raw RPC call that returns the result as a JSON string (for injecting into WKWebView).
     func rpcCallRaw(method: String, params: [String: Any]) -> String? {
         guard let response = rpcCall(method: method, params: params) else { return nil }
-        guard let data = try? JSONSerialization.data(withJSONObject: response) else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: response, options: [.fragmentsAllowed]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -925,7 +927,9 @@ final class TermMeshDaemon: ObservableObject {
             return nil
         }
 
-        return json["result"]
+        let result = json["result"]
+        if result is NSNull { return nil }
+        return result
     }
 
     private func daemonBinaryPath() -> String? {

@@ -509,11 +509,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self else { return }
-            let mode = AppearanceSettings.resolvedMode()
-            guard mode == .system else { return }
-            TerminalThemeOverride.write(for: mode.rawValue)
-            self.configProvider.reloadConfiguration(source: "system.appearance.change")
+            // Delay one tick so NSApp.effectiveAppearance has settled to the new value
+            // before we read it to write the terminal theme override.
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let mode = AppearanceSettings.resolvedMode()
+                guard mode == .system else { return }
+                TerminalThemeOverride.write(for: mode.rawValue)
+                self.configProvider.reloadConfiguration(source: "system.appearance.change")
+                // Sync Ghostty app-level color scheme
+                if let app = GhosttyApp.shared.app {
+                    let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                    ghostty_app_set_color_scheme(app, isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+                }
+            }
         }
     }
 

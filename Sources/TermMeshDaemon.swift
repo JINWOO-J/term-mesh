@@ -173,15 +173,13 @@ final class TermMeshDaemon: ObservableObject {
             // Already running (tracked process)?
             if let proc = self.daemonProcess, proc.isRunning { return }
 
-            // Already running (orphaned from previous app launch)? Reuse it.
+            // Orphaned daemon from a previous app launch? Restart it so current
+            // settings (dashboard enabled/port/bind) are applied.
             if self.ping() {
-                Logger.daemon.info("daemon already running on socket, reusing")
-                if let daemonPid = self.getDaemonPeerPid() {
-                    DispatchQueue.main.async {
-                        TerminalController.shared.trustedDaemonPid = daemonPid
-                    }
-                }
-                return
+                Logger.daemon.info("daemon already running on socket — restarting with current settings")
+                self.stopDaemon()
+                // Brief pause so the socket file is fully released
+                Thread.sleep(forTimeInterval: 0.3)
             }
 
             // Clean up stale socket before starting

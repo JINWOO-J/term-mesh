@@ -249,6 +249,11 @@ struct TermMeshApp: App {
                     // Write terminal color override and reload Ghostty config
                     TerminalThemeOverride.write(for: appearanceMode)
                     configProvider.reloadConfiguration(source: "appearance.toggle")
+                    // Sync Ghostty app-level color scheme so new surfaces inherit the correct theme
+                    if let app = GhosttyApp.shared.app {
+                        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                        ghostty_app_set_color_scheme(app, isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+                    }
                 }
                 .onChange(of: terminalFontFamily) { _ in applyTerminalSettings() }
                 .onChange(of: terminalFontSize) { _ in applyTerminalSettings() }

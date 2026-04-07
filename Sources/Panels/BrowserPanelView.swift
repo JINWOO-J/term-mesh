@@ -2545,13 +2545,13 @@ private struct OmnibarTextFieldRepresentable: NSViewRepresentable {
         context.coordinator.parentField = nsView
         nsView.placeholderString = placeholder
 
-        // Sync NSTextField appearance with the SwiftUI color scheme environment
-        let isDark = context.environment.colorScheme == .dark
-        let desiredAppearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-        if nsView.appearance !== desiredAppearance {
-            nsView.appearance = desiredAppearance
-            nsView.textColor = .labelColor
-        }
+        // Do not set nsView.appearance explicitly — let it inherit from the parent view
+        // hierarchy so system light/dark transitions propagate automatically.
+        // OmnibarTextFieldRepresentable lacks @Environment(\.colorScheme) as a stored
+        // property, so SwiftUI would not call updateNSView when colorScheme changes;
+        // an explicit override would therefore become stale after a system appearance
+        // switch. .labelColor is a dynamic semantic color that adapts without any
+        // appearance override.
 
         let activeInlineCompletion = omnibarInlineCompletionIfBufferMatchesTypedPrefix(
             bufferText: text,

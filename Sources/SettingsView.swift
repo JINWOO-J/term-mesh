@@ -1392,6 +1392,22 @@ struct SettingsView: View {
 
                         SettingsCardNote("Dashboard settings auto-restart the daemon when changed. The dashboard shows system metrics, team status, agents, and task boards.")
         }
+        .onChange(of: dashboardEnabled) { _ in
+            restartDaemonForDashboard()
+        }
+        .onChange(of: dashboardLocalhostOnly) { _ in
+            restartDaemonForDashboard()
+        }
+        .onSubmit {
+            // Port and password text fields: restart on Enter/commit, not per keystroke.
+            restartDaemonForDashboard()
+        }
+    }
+
+    /// Restart the daemon so dashboard settings (port, bind, enabled) take effect immediately.
+    private func restartDaemonForDashboard() {
+        let daemon = daemonService ?? TermMeshDaemon.shared
+        daemon.restartDaemon {}
     }
 
     // MARK: - Section: Services

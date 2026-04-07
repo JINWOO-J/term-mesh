@@ -2123,6 +2123,9 @@ extension BrowserPanel {
 
     func refreshAppearanceDrivenColors() {
         webView.underPageBackgroundColor = Self.resolvedBrowserChromeBackgroundColor()
+        // Re-apply browser theme so the WKWebView appearance and JS color-scheme
+        // injection stay in sync after a system light/dark switch.
+        applyBrowserThemeModeIfNeeded()
     }
 
     func suppressOmnibarAutofocus(for seconds: TimeInterval) {

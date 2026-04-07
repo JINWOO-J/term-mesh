@@ -1065,6 +1065,47 @@ final class Workspace: Identifiable, ObservableObject {
         return newPanel
     }
 
+    // MARK: - Session Restore Split
+
+    /// Create a terminal split targeting a specific bonsplit PaneID.
+    /// Used during session restore to rebuild saved split layouts.
+    /// Returns the new pane ID, or nil if the split failed.
+    @discardableResult
+    func restoreSplitTerminal(
+        at paneId: PaneID,
+        orientation: SplitOrientation,
+        directory: String
+    ) -> PaneID? {
+        let newPanel = TerminalPanel(
+            workspaceId: id,
+            context: GHOSTTY_SURFACE_CONTEXT_SPLIT,
+            configTemplate: nil,
+            workingDirectory: directory,
+            portOrdinal: portOrdinal
+        )
+        panels[newPanel.id] = newPanel
+        panelTitles[newPanel.id] = newPanel.displayTitle
+
+        let newTab = Bonsplit.Tab(
+            title: newPanel.displayTitle,
+            icon: newPanel.displayIcon,
+            kind: SurfaceKind.terminal,
+            isDirty: false,
+            isPinned: false
+        )
+        surfaceIdToPanelId[newTab.id] = newPanel.id
+
+        isProgrammaticSplit = true
+        defer { isProgrammaticSplit = false }
+        guard let newPaneId = bonsplitController.splitPane(paneId, orientation: orientation, withTab: newTab, insertFirst: false) else {
+            panels.removeValue(forKey: newPanel.id)
+            panelTitles.removeValue(forKey: newPanel.id)
+            surfaceIdToPanelId.removeValue(forKey: newTab.id)
+            return nil
+        }
+        return newPaneId
+    }
+
     // MARK: - Split Equalization
 
     /// Equalize divider positions so all leaf panes in same-orientation split

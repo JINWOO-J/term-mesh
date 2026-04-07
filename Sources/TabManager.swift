@@ -172,12 +172,29 @@ class TabManager: ObservableObject {
         setupChildExitSplitUITestIfNeeded()
         setupChildExitKeyboardUITestIfNeeded()
 #endif
+
+        // Periodic session save for crash-safety (every 30s).
+        startPeriodicSessionSave()
     }
 
     deinit {
         selectionSideEffectWorkItem?.cancel()
         workspaceCycleCooldownTask?.cancel()
+        periodicSessionSaveTimer?.cancel()
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    private var periodicSessionSaveTimer: DispatchSourceTimer?
+
+    private func startPeriodicSessionSave() {
+        periodicSessionSaveTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 30, repeating: 30)
+        timer.setEventHandler { [weak self] in
+            self?.saveSessionState()
+        }
+        timer.resume()
+        periodicSessionSaveTimer = timer
     }
 
     private func wireClosedBrowserTracking(for workspace: Workspace) {
@@ -371,27 +388,42 @@ class TabManager: ObservableObject {
         )
         let nonTeamTabs = tabs.filter { !teamWorkspaceIds.contains($0.id) }
 
-        let workspaceStates = nonTeamTabs.map { workspace in
-            SavedWorkspaceState(
+        let encoder = JSONEncoder()
+        let workspaceStates = nonTeamTabs.map { workspace -> SavedWorkspaceState in
+            // v2: Serialize bonsplit split tree
+            let treeData: Data? = {
+                let snapshot = workspace.bonsplitController.treeSnapshot()
+                return try? encoder.encode(snapshot)
+            }()
+
+            // v2: Per-pane directories — for now, all panes share the workspace directory.
+            // Future: track per-pane pwd via OSC 7 callbacks.
+            let paneDirectories: [String: String]? = nil
+
+            return SavedWorkspaceState(
                 title: workspace.title,
                 customTitle: workspace.customTitle,
                 directory: workspace.currentDirectory,
                 isPinned: workspace.isPinned,
-                customColor: workspace.customColor
+                customColor: workspace.customColor,
+                paneDirectories: paneDirectories,
+                splitTree: treeData,
+                focusedPaneId: workspace.bonsplitController.focusedPaneId?.id.uuidString
             )
         }
         let selectedIndex = selectedTabId.flatMap { id in
             nonTeamTabs.firstIndex(where: { $0.id == id })
         }
         let session = SavedSessionState(
-            version: 1,
+            version: 2,
             workspaces: workspaceStates,
-            selectedIndex: selectedIndex
+            selectedIndex: selectedIndex,
+            windowFrame: nil
         )
         do {
-            let data = try JSONEncoder().encode(session)
-            try data.write(to: URL(fileURLWithPath: SessionRestoreSettings.sessionFilePath), options: .atomic)
-            Logger.app.info("session-restore: saved \(workspaceStates.count, privacy: .public) workspace(s)")
+            let data = try encoder.encode(session)
+            try data.write(to: URL(fileURLWithPath: SessionRestoreSettings.sessionFilePath), options: .atomicWrite)
+            Logger.app.info("session-restore: saved \(workspaceStates.count, privacy: .public) workspace(s) (v2, split trees included)")
         } catch {
             Logger.app.error("session-restore: save failed: \(error, privacy: .public)")
         }
@@ -429,7 +461,7 @@ class TabManager: ObservableObject {
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             let session = try JSONDecoder().decode(SavedSessionState.self, from: data)
-            guard session.version == 1, !session.workspaces.isEmpty else { return nil }
+            guard (session.version == 1 || session.version == 2), !session.workspaces.isEmpty else { return nil }
             return session
         } catch {
             Logger.app.error("session-restore: load failed: \(error, privacy: .public)")
@@ -454,6 +486,11 @@ class TabManager: ObservableObject {
             }
             workspace.isPinned = saved.isPinned
             workspace.customColor = saved.customColor
+
+            // v2: Restore split layout from saved tree
+            if session.version >= 2, let treeData = saved.splitTree {
+                restoreSplitTree(treeData, in: workspace, directory: directory)
+            }
         }
 
         // Restore selected tab
@@ -462,7 +499,109 @@ class TabManager: ObservableObject {
         } else if let first = tabs.first {
             selectedTabId = first.id
         }
-        Logger.app.info("session-restore: restored \(self.tabs.count, privacy: .public) workspace(s)")
+        let version = session.version
+        Logger.app.info("session-restore: restored \(self.tabs.count, privacy: .public) workspace(s) (v\(version, privacy: .public))")
+    }
+
+    /// Rebuild bonsplit split tree from a serialized ExternalTreeNode.
+    /// The workspace already has one pane (created by addWorkspace). We walk the saved tree
+    /// recursively: at each split node, split the current pane to produce two children,
+    /// then recurse into each subtree. Divider positions are set on the LIVE split UUID
+    /// (not the saved one) by querying the tree immediately after each split.
+    private func restoreSplitTree(_ treeData: Data, in workspace: Workspace, directory: String) {
+        guard let savedTree = try? JSONDecoder().decode(ExternalTreeNode.self, from: treeData) else {
+            Logger.app.warning("session-restore: failed to decode split tree")
+            return
+        }
+
+        let paneCount = countPanes(in: savedTree, depth: 0)
+        guard paneCount > 1, paneCount <= 128 else {
+            if paneCount > 128 {
+                Logger.app.warning("session-restore: split tree too large (\(paneCount, privacy: .public) panes), skipping")
+            }
+            return
+        }
+
+        guard let rootPaneId = workspace.bonsplitController.allPaneIds.first else { return }
+        rebuildSubtree(savedTree, currentPaneId: rootPaneId, workspace: workspace, directory: directory)
+
+        Logger.app.info("session-restore: rebuilt \(paneCount, privacy: .public) panes from split tree")
+    }
+
+    /// Recursively rebuild the tree starting from a single pane.
+    /// - `currentPaneId`: the live pane that represents this subtree position
+    /// - `node`: the saved tree node to reconstruct
+    private func rebuildSubtree(
+        _ node: ExternalTreeNode,
+        currentPaneId: PaneID,
+        workspace: Workspace,
+        directory: String
+    ) {
+        switch node {
+        case .pane:
+            // Leaf — pane already exists, nothing to do
+            break
+
+        case .split(let split):
+            let orientation: SplitOrientation = split.orientation == "horizontal" ? .horizontal : .vertical
+
+            // Split the current pane. The new pane appears as "second" (insertFirst: false).
+            // After this: currentPaneId = first child, newPaneId = second child.
+            guard let newPaneId = workspace.restoreSplitTerminal(
+                at: currentPaneId,
+                orientation: orientation,
+                directory: directory
+            ) else {
+                Logger.app.warning("session-restore: split failed, aborting subtree")
+                return
+            }
+
+            // Find the LIVE split UUID by walking the current tree to find the split
+            // that directly contains currentPaneId and newPaneId as children.
+            let liveTree = workspace.bonsplitController.treeSnapshot()
+            if let liveSplitId = findLiveSplitId(containing: currentPaneId, in: liveTree) {
+                workspace.bonsplitController.setDividerPosition(
+                    CGFloat(split.dividerPosition),
+                    forSplit: liveSplitId,
+                    fromExternal: true
+                )
+            }
+
+            // Recurse: first child keeps currentPaneId, second child uses newPaneId
+            rebuildSubtree(split.first, currentPaneId: currentPaneId, workspace: workspace, directory: directory)
+            rebuildSubtree(split.second, currentPaneId: newPaneId, workspace: workspace, directory: directory)
+        }
+    }
+
+    /// Count leaf panes in a saved tree, with a depth guard to prevent stack overflow.
+    private func countPanes(in node: ExternalTreeNode, depth: Int) -> Int {
+        guard depth < 64 else { return 0 }
+        switch node {
+        case .pane:
+            return 1
+        case .split(let split):
+            return countPanes(in: split.first, depth: depth + 1) + countPanes(in: split.second, depth: depth + 1)
+        }
+    }
+
+    /// Find the UUID of the live split node that directly contains `paneId` as a child.
+    private func findLiveSplitId(containing paneId: PaneID, in node: ExternalTreeNode) -> UUID? {
+        switch node {
+        case .pane:
+            return nil
+        case .split(let split):
+            // Check if either direct child is the target pane
+            if case .pane(let p) = split.first, p.id == paneId.id.uuidString {
+                return UUID(uuidString: split.id)
+            }
+            if case .pane(let p) = split.second, p.id == paneId.id.uuidString {
+                return UUID(uuidString: split.id)
+            }
+            // Also check if a direct child split contains the pane as its first leaf
+            // (after a split, the pane is the leftmost leaf of a subtree)
+            return findLiveSplitId(containing: paneId, in: split.first)
+                ?? findLiveSplitId(containing: paneId, in: split.second)
+        }
     }
 
     func terminalPanelForWorkspaceConfigInheritanceSource() -> TerminalPanel? {

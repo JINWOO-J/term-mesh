@@ -51,12 +51,27 @@ struct SavedWorkspaceState: Codable {
     let directory: String
     let isPinned: Bool
     let customColor: String?
+    /// v2: Per-pane working directories keyed by bonsplit tab UUID string.
+    let paneDirectories: [String: String]?
+    /// v2: Serialized bonsplit split tree (ExternalTreeNode JSON).
+    let splitTree: Data?
+    /// v2: Focused pane UUID string.
+    let focusedPaneId: String?
 }
 
 struct SavedSessionState: Codable {
     let version: Int
     let workspaces: [SavedWorkspaceState]
     let selectedIndex: Int?
+    /// v2: Window frame for restoring size/position.
+    let windowFrame: SavedWindowFrame?
+}
+
+struct SavedWindowFrame: Codable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
 }
 
 enum NewWorkspacePlacement: String, CaseIterable, Identifiable {

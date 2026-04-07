@@ -2,6 +2,15 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.88.0] - 2026-04-07
+
+### Added
+- `tm-agent research <topic>` — autonomous multi-agent research with board.jsonl stigmergy coordination
+  - Idle agent detection with graceful degradation (uses available agents, warns on shortfall)
+  - Configurable depth (shallow/deep/exhaustive), round budget, timeout, web search toggle
+  - Staggered dispatch with 3s intervals to reduce board write contention
+  - Structured synthesis output with per-agent finding statistics
+
 ## [0.87.1] - 2026-04-07
 
 ### Fixed

@@ -15,6 +15,7 @@ use protocol::AgentProtocol;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
+    #[allow(dead_code)] // Part of status protocol
     Spawning,
     Running,
     Terminated,
@@ -475,6 +476,7 @@ impl HeadlessManager {
     }
 
     /// Get a specific team.
+    #[allow(dead_code)] // Public API for future use
     pub fn get_team(&self, team_name: &str) -> Option<&HeadlessTeam> {
         self.teams.get(team_name)
     }
@@ -538,6 +540,7 @@ impl HeadlessManager {
     }
 
     /// Check if an agent exists and is headless.
+    #[allow(dead_code)] // Public API for future use
     pub fn is_headless(&self, agent_id: &str) -> bool {
         self.agents.contains_key(agent_id)
     }

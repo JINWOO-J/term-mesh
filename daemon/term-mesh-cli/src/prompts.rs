@@ -1,3 +1,4 @@
+#![allow(dead_code)] // Used by tm-agent binary but not term-mesh-run
 //! Prompt templates for autonomous research agents.
 //!
 //! Extracted from x-agent SKILL.md (v1.3.0) — Research Agent Prompt.

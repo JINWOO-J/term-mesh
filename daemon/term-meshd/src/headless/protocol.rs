@@ -5,11 +5,13 @@ pub trait AgentProtocol: Send + Sync {
 
     /// Optional handshake bytes to send immediately after spawn.
     /// Returns None if the CLI doesn't need a handshake.
+    #[allow(dead_code)] // Trait interface for future protocol adapters
     fn handshake(&self) -> Option<Vec<u8>> {
         None
     }
 
     /// Protocol name for logging/debugging.
+    #[allow(dead_code)] // Trait interface for future protocol adapters
     fn name(&self) -> &'static str;
 }
 

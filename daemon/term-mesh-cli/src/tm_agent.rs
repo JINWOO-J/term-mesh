@@ -60,7 +60,7 @@ Respond with \"Agent {agent} ready.\" to confirm.",
 // ── CLI definition ───────────────────────────────────────────────────
 
 const GIT_SHA: &str = env!("TM_GIT_SHA");
-const BUILD_DATE: &str = env!("TM_BUILD_DATE");
+const _BUILD_DATE: &str = env!("TM_BUILD_DATE");
 
 #[derive(Parser)]
 #[command(name = "tm-agent", about = "term-mesh team CLI — unified agent & leader tool", version)]
@@ -1039,6 +1039,7 @@ fn append_report_suffix(text: &str, no_report: bool) -> String {
 #[derive(Debug, Clone)]
 struct AgentInfo {
     name: String,
+    #[allow(dead_code)] // Parsed from status, used for future model routing
     model: String,
     cli: String,
     agent_state: String,
@@ -2973,8 +2974,8 @@ fn run_delegate(
 /// It uses `claude -p` (print mode) for single-shot execution.
 fn run_delegate_autonomous(
     sock: &PathBuf, team: &str, target: &str, text: &str,
-    title: Option<String>, priority: Option<u32>, no_report: bool,
-    context: Option<&str>, fix_budget: Option<u8>,
+    title: Option<String>, priority: Option<u32>, _no_report: bool,
+    context: Option<&str>, _fix_budget: Option<u8>,
 ) {
     let resolved_title = title.unwrap_or_else(|| task_title_from_text(text));
     let resolved_priority = priority.unwrap_or(2);

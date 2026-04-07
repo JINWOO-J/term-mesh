@@ -15,6 +15,7 @@ use crate::worktree;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionStatus {
+    #[allow(dead_code)] // Part of protocol, deserialized from state
     Spawning,
     Running,
     Suspended,

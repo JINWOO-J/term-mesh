@@ -69,12 +69,14 @@ struct GitignoreRule {
     base_dir: String,
     pattern: String,
     negated: bool,
+    #[allow(dead_code)] // Parsed for future dir-only matching support
     dir_only: bool,
 }
 
 enum WatcherCommand {
     Watch(String),
     Unwatch(String),
+    #[allow(dead_code)] // Wired internally but not exposed via RPC yet
     SetUseGitignore(bool),
 }
 
@@ -108,6 +110,7 @@ impl WatcherHandle {
     }
 
     /// Enable/disable .gitignore-based filtering for file events.
+    #[allow(dead_code)] // Not exposed via RPC yet
     pub fn set_use_gitignore(&self, enabled: bool) {
         {
             let mut state = self.state.lock().unwrap();
@@ -126,6 +129,7 @@ impl WatcherHandle {
     }
 
     /// Check if .gitignore filtering is enabled.
+    #[allow(dead_code)] // Not exposed via RPC yet
     pub fn use_gitignore(&self) -> bool {
         self.state.lock().unwrap().use_gitignore
     }

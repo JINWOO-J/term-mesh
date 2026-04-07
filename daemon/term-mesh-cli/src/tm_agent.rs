@@ -3,6 +3,8 @@
 //! Replaces both tm-rpc (agent-side) and team.py (leader-side).
 //! ~1-3ms per call for all commands.
 
+mod prompts;
+
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -304,6 +306,29 @@ enum Commands {
         /// Timeout in seconds (default: 30)
         #[arg(long, default_value_t = 30)]
         timeout: u32,
+    },
+    /// Run a research task across idle agents
+    Research {
+        /// Topic to research
+        topic: String,
+        /// Number of agents to assign (0 = all idle)
+        #[arg(long, default_value_t = 0)]
+        agents: u32,
+        /// Number of research rounds
+        #[arg(long, default_value_t = 5)]
+        budget: u32,
+        /// Timeout in seconds
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+        /// Research depth (shallow|deep|exhaustive)
+        #[arg(long, default_value = "deep")]
+        depth: String,
+        /// Allow web search
+        #[arg(long)]
+        web: bool,
+        /// Focus hint for the research
+        #[arg(long)]
+        focus: Option<String>,
     },
 
     // ── Legacy hyphenated aliases (hidden) ───────────────────────────
@@ -939,6 +964,88 @@ fn append_report_suffix(text: &str, no_report: bool) -> String {
     if no_report { text.to_string() } else { format!("{text}{REPORT_SUFFIX}") }
 }
 
+// ── Research helpers ──────────────────────────────────────────────────────────
+
+/// Lightweight info about one agent, extracted from `team.status` response.
+#[derive(Debug, Clone)]
+struct AgentInfo {
+    name: String,
+    model: String,
+    cli: String,
+    agent_state: String,
+}
+
+impl AgentInfo {
+    fn from_value(v: &Value) -> Option<Self> {
+        let name = v["name"].as_str()?.to_string();
+        let model = v["model"].as_str().unwrap_or("sonnet").to_string();
+        let cli = v["cli"].as_str().unwrap_or("claude").to_string();
+        let agent_state = v["agent_state"].as_str().unwrap_or("").to_string();
+        Some(Self { name, model, cli, agent_state })
+    }
+}
+
+/// Query `team.status` and return agents that are currently idle,
+/// optionally restricted to those running the given CLI (e.g. "claude").
+fn detect_idle_agents(sock: &PathBuf, team: &str, model_filter: Option<&str>) -> Vec<AgentInfo> {
+    let status = match rpc_call(sock, "team.status", json!({ "team_name": team })) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error querying team status: {e}");
+            return Vec::new();
+        }
+    };
+
+    let agents = match status["result"]["agents"].as_array() {
+        Some(a) => a.clone(),
+        None => return Vec::new(),
+    };
+
+    agents
+        .iter()
+        .filter_map(AgentInfo::from_value)
+        .filter(|a| a.agent_state == "idle")
+        .filter(|a| {
+            if let Some(filter) = model_filter {
+                a.cli == filter
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
+/// Choose which agents to assign from the idle pool.
+///
+/// Returns `(selected, warning)`:
+/// - If no idle agents → returns empty vec and an error string (caller should exit).
+/// - If fewer idle agents than `requested` → returns all idle with a warning.
+/// - Otherwise → returns exactly `requested` agents (or all if `requested == 0`).
+fn select_agents(idle: Vec<AgentInfo>, requested: u32) -> (Vec<AgentInfo>, Option<String>) {
+    if idle.is_empty() {
+        return (
+            Vec::new(),
+            Some("No idle claude agents. Create a team first: tm-agent create 3".to_string()),
+        );
+    }
+
+    if requested == 0 || requested as usize >= idle.len() {
+        // Use all idle agents; warn if we asked for more than available.
+        let warn = if requested > 0 && (requested as usize) > idle.len() {
+            Some(format!(
+                "Warning: requested {requested} agents but only {} idle — using all {}.",
+                idle.len(),
+                idle.len()
+            ))
+        } else {
+            None
+        };
+        (idle, warn)
+    } else {
+        (idle.into_iter().take(requested as usize).collect(), None)
+    }
+}
+
 fn task_title_from_text(text: &str) -> String {
     let compact: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if compact.is_empty() {
@@ -1123,6 +1230,112 @@ fn cleanup_old_results(team: &str) {
             }
         }
     }
+}
+
+// ── Board helpers ────────────────────────────────────────────────────
+
+/// Detect the git root by walking up from `start`, falling back to `start`.
+fn find_project_root(start: &std::path::Path) -> PathBuf {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join(".git").exists() {
+            return dir;
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => return start.to_path_buf(),
+        }
+    }
+}
+
+/// Create `.xm/{behavior_type}/{run-id}/board.jsonl` under the project root.
+/// Returns `(board_path, run_id)` where `board_path` is absolute.
+fn create_board(behavior_type: &str) -> Result<(PathBuf, String), String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let cwd = env::current_dir().map_err(|e| format!("current_dir: {e}"))?;
+    let project_root = find_project_root(&cwd);
+
+    // run-id: {behavior_type}-{YYYYMMDD-HHMMSS}-{random_hex_4}
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Compute calendar fields from Unix timestamp (UTC, no external crate needed).
+    let (year, month, day, hour, min, sec) = unix_ts_to_ymd_hms(now);
+    let rand_hex = {
+        // Use low bits of nanos for entropy.
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        format!("{:04x}", (nanos ^ (process::id() << 16)) & 0xFFFF)
+    };
+    let run_id = format!(
+        "{behavior_type}-{year:04}{month:02}{day:02}-{hour:02}{min:02}{sec:02}-{rand_hex}"
+    );
+
+    let board_dir = project_root
+        .join(".xm")
+        .join(behavior_type)
+        .join(&run_id);
+
+    std::fs::create_dir_all(&board_dir)
+        .map_err(|e| format!("create_dir_all {}: {e}", board_dir.display()))?;
+
+    let board_path = board_dir.join("board.jsonl");
+    std::fs::File::create(&board_path)
+        .map_err(|e| format!("create board.jsonl {}: {e}", board_path.display()))?;
+
+    Ok((board_path, run_id))
+}
+
+/// Return the absolute board path as a string suitable for template injection.
+fn board_path_for_prompt(board: &std::path::Path) -> String {
+    board
+        .canonicalize()
+        .unwrap_or_else(|_| board.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Convert a Unix timestamp (seconds) to (year, month, day, hour, min, sec) in UTC.
+/// No external crates; handles leap years.
+fn unix_ts_to_ymd_hms(ts: u64) -> (u32, u32, u32, u32, u32, u32) {
+    let sec = (ts % 60) as u32;
+    let min = ((ts / 60) % 60) as u32;
+    let hour = ((ts / 3600) % 24) as u32;
+    let days = ts / 86400; // days since 1970-01-01
+
+    // Compute year/month/day from days since epoch.
+    let mut y: u32 = 1970;
+    let mut d = days as u32;
+    loop {
+        let days_in_year = if is_leap(y) { 366 } else { 365 };
+        if d < days_in_year {
+            break;
+        }
+        d -= days_in_year;
+        y += 1;
+    }
+    let month_days: &[u32] = if is_leap(y) {
+        &[31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        &[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut m: u32 = 1;
+    for &md in month_days {
+        if d < md {
+            break;
+        }
+        d -= md;
+        m += 1;
+    }
+    (y, m, d + 1, hour, min, sec)
+}
+
+fn is_leap(y: u32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
 // ── Main ─────────────────────────────────────────────────────────────
@@ -1727,6 +1940,13 @@ fn main() {
         }
         Commands::Warmup { agent: ref target, timeout } => {
             run_warmup(&sock, &team, target.as_deref(), timeout);
+            return;
+        }
+        Commands::Research { topic, agents, budget, timeout, depth, web, focus } => {
+            run_research(
+                &sock, &team, &topic, agents, budget, timeout,
+                &depth, web, focus.as_deref(),
+            );
             return;
         }
         Commands::Brief { agent: ref target, lines } => {
@@ -3485,4 +3705,242 @@ fn run_brief(sock: &PathBuf, team: &str, target: &str, lines: u32) {
         "recent_messages": messages,
         "terminal_tail": terminal_tail,
     })));
+}
+
+/// Read board.jsonl and print a human-readable synthesis to stderr.
+/// Each line in board.jsonl is expected to be a JSON object with fields:
+///   agent, round, finding, source, implication
+/// Missing fields are tolerated — raw JSON is used as fallback.
+fn synthesize_board(board_path: &PathBuf, board_path_str: &str) {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    let file = match File::open(board_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("\n══ Research Results ══");
+            eprintln!("(Could not read board.jsonl: {e})");
+            eprintln!("Board path: {board_path_str}");
+            return;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    let mut entries: Vec<Value> = Vec::new();
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(v) => entries.push(v),
+            Err(_) => {
+                // Keep malformed lines as raw string values so they appear in output
+                entries.push(Value::String(trimmed.to_string()));
+            }
+        }
+    }
+
+    eprintln!("\n══ Research Results ══");
+
+    if entries.is_empty() {
+        eprintln!("No board entries found. Check agent outputs above for results.");
+        eprintln!("Board path: {board_path_str}");
+        return;
+    }
+
+    // Count entries per agent and rounds covered
+    let mut per_agent: HashMap<String, usize> = HashMap::new();
+    let mut rounds: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    for entry in &entries {
+        let agent = entry.get("agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        *per_agent.entry(agent).or_insert(0) += 1;
+        if let Some(r) = entry.get("round").and_then(|v| v.as_u64()) {
+            rounds.insert(r);
+        }
+    }
+
+    let rounds_str = if rounds.is_empty() {
+        "unknown".to_string()
+    } else {
+        let v: Vec<String> = rounds.iter().map(|r| r.to_string()).collect();
+        v.join(", ")
+    };
+
+    eprintln!(
+        "Board statistics: {} entries | {} agent(s) | rounds: {}",
+        entries.len(),
+        per_agent.len(),
+        rounds_str
+    );
+    for (agent, count) in &per_agent {
+        eprintln!("  {agent}: {count} finding(s)");
+    }
+    eprintln!();
+
+    // Print each entry in readable format
+    for (i, entry) in entries.iter().enumerate() {
+        match entry {
+            Value::Object(_) => {
+                let agent = entry.get("agent")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let round = entry.get("round")
+                    .and_then(|v| v.as_u64())
+                    .map(|r| r.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let finding = entry.get("finding")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(no finding field)");
+                let source = entry.get("source")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let implication = entry.get("implication")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                eprintln!("[{}] (round {}): {}", agent, round, finding);
+                if !source.is_empty() {
+                    eprintln!("  source: {source}");
+                }
+                if !implication.is_empty() {
+                    eprintln!("  implication: {implication}");
+                }
+            }
+            Value::String(raw) => {
+                eprintln!("[entry {}]: {}", i + 1, raw);
+            }
+            other => {
+                eprintln!("[entry {}]: {}", i + 1, other);
+            }
+        }
+    }
+
+    eprintln!("\nBoard path: {board_path_str}");
+}
+
+fn run_research(
+    sock: &PathBuf, team: &str,
+    topic: &str, agents_requested: u32, budget: u32,
+    timeout: u64, depth: &str, web: bool, focus: Option<&str>,
+) {
+    // Detect idle claude agents
+    let idle = detect_idle_agents(sock, team, Some("claude"));
+    let (selected, warn_or_err) = select_agents(idle, agents_requested);
+
+    if selected.is_empty() {
+        // warn_or_err is guaranteed Some when selected is empty
+        eprintln!("Error: {}", warn_or_err.unwrap_or_default());
+        process::exit(1);
+    }
+
+    if let Some(ref w) = warn_or_err {
+        eprintln!("{w}");
+    }
+
+    let agent_names: Vec<&str> = selected.iter().map(|a| a.name.as_str()).collect();
+    let total_agents = agent_names.len() as u32;
+    eprintln!(
+        "Research: topic='{}' agents={} budget={} timeout={}s depth={} web={}",
+        topic, agent_names.join(","), budget, timeout, depth, web
+    );
+
+    // Create shared board for stigmergic coordination
+    let (board_path, run_id) = match create_board("research") {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Error creating research board: {e}");
+            process::exit(1);
+        }
+    };
+    let board_path_str = board_path_for_prompt(&board_path);
+    eprintln!("Board: {board_path_str} (run: {run_id})");
+
+    // Build per-agent instructions using the full research prompt
+    let instructions: Vec<String> = agent_names.iter().enumerate().map(|(i, _name)| {
+        prompts::research_prompt(
+            topic,
+            &board_path_str,
+            (i + 1) as u32,   // 1-indexed agent number
+            total_agents,
+            depth,
+            budget,
+            web,
+            focus,
+        )
+    }).collect();
+
+    // Delegate to each agent with a 3-second stagger to reduce board.jsonl write contention
+    let mut handles = Vec::new();
+    for (i, (name, instr)) in agent_names.iter().zip(instructions.iter()).enumerate() {
+        if i > 0 {
+            thread::sleep(Duration::from_secs(3));
+        }
+        let instr = instr.clone();
+        let task_title = format!("research: {}", &topic[..topic.len().min(60)]);
+        // We can't use thread::scope with staggered spawning (scope blocks until all exit),
+        // so we use scoped-like approach: collect JoinHandles manually.
+        // SAFETY: sock, team, name all outlive this function's stack; we join before returning.
+        let sock_clone = sock.clone();
+        let team_owned = team.to_string();
+        let name_owned = name.to_string();
+        let h = thread::spawn(move || {
+            let result = run_delegate_result(
+                &sock_clone, &team_owned, &name_owned, &instr,
+                Some(task_title),
+                None, &[], &[], None, false, None, None,
+            );
+            (name_owned, result)
+        });
+        handles.push(h);
+    }
+
+    // Collect results
+    let results: Vec<(String, Result<Value, String>)> =
+        handles.into_iter().map(|h| h.join().expect("thread panicked")).collect();
+
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for (name, result) in &results {
+        match result {
+            Ok(v) => {
+                println!("{}", pretty(v));
+                succeeded.push(name.clone());
+            }
+            Err(e) => {
+                eprintln!("Error delegating research to {name}: {e}");
+                failed.push(name.clone());
+            }
+        }
+    }
+
+    // Read and synthesize board.jsonl entries
+    synthesize_board(&board_path, &board_path_str);
+
+    println!("{}", pretty(&json!({
+        "ok": !succeeded.is_empty(),
+        "result": {
+            "topic": topic,
+            "depth": depth,
+            "budget": budget,
+            "timeout_secs": timeout,
+            "assigned": succeeded,
+            "failed": failed,
+            "agent_count": succeeded.len(),
+            "board_path": board_path_str,
+            "run_id": run_id,
+        }
+    })));
+
+    if succeeded.is_empty() {
+        process::exit(1);
+    }
 }

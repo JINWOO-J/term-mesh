@@ -213,6 +213,17 @@ tm-agent task update <id> <status>
 tm-agent task reassign <id> <agent>
 tm-agent task unblock <id>
 tm-agent task clear
+
+# Autonomous behaviors
+tm-agent research <topic> [options]       # Multi-agent research with board.jsonl stigmergy
+
+# Options:
+#   --agents N          Number of agents (default: 0 = all idle claude agents)
+#   --budget N          Round count (default: 5)
+#   --timeout N         Max wait seconds (default: 600)
+#   --depth <d>         shallow|deep|exhaustive (default: deep)
+#   --web               Allow web search
+#   --focus "hint"      Focus hint for agents
 ```
 
 ### Leader: reading full agent reports

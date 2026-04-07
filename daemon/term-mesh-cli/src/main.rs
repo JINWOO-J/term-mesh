@@ -1,3 +1,4 @@
+mod prompts;
 mod pty;
 mod rpc;
 

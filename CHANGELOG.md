@@ -2,6 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.86.6] - 2026-04-07
+
+### Fixed
+- Memory growth in long-running agent teams — message history now capped at 500 per team with FIFO pruning
+
 ## [0.86.5] - 2026-04-07
 
 ### Fixed

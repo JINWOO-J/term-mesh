@@ -172,6 +172,7 @@ struct SettingsView: View {
     @State private var isDaemonRestarting = false
     @State private var daemonLogTail: AttributedString?
     @State private var shellHealthEntries: [ShellHealthEntry] = []
+    @State private var shellFixCopied = false
     @State private var selectedSection: SettingsSection = .app
 
     private var selectedWorkspacePlacement: NewWorkspacePlacement {
@@ -2048,6 +2049,24 @@ struct SettingsView: View {
 
             HStack {
                 Spacer(minLength: 0)
+                if shellHealthEntries.filter({ !$0.isAgentPanel })
+                    .contains(where: { $0.health.status == .notLoaded || $0.health.status == .stale }) {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(shellFixCommand, forType: .string)
+                        shellFixCopied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            shellFixCopied = false
+                        }
+                    } label: {
+                        Label(
+                            shellFixCopied ? (isZshShell ? "Copied — opens a fixed shell" : "Copied!") : "Copy Fix Command",
+                            systemImage: shellFixCopied ? "checkmark" : "doc.on.clipboard"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 Button("Refresh") {
                     refreshShellIntegrationHealth()
                 }
@@ -2117,6 +2136,31 @@ struct SettingsView: View {
             pwdAge = "never"
         }
         return "pwd: \(h.reportPwdCount), last \(pwdAge) | tty: \(h.reportTtyCount > 0 ? "yes" : "no") | git: \(h.reportGitBranchCount > 0 ? "yes" : "no")"
+    }
+
+    private var isZshShell: Bool {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        return URL(fileURLWithPath: shell).lastPathComponent == "zsh"
+    }
+
+    private var shellFixCommand: String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let shellName = URL(fileURLWithPath: shell).lastPathComponent
+        guard let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path else {
+            return "# Shell integration directory not found. Try reinstalling term-mesh."
+        }
+        switch shellName {
+        case "zsh":
+            // zsh integration requires ZDOTDIR at startup; cannot source into running session.
+            // This opens a nested zsh with integration active.
+            return "ZDOTDIR=\"\(integrationDir)/zsh\" zsh"
+        case "bash":
+            return "source \"\(integrationDir)/bash/ghostty.bash\""
+        case "fish":
+            return "source \"\(integrationDir)/fish/vendor_conf.d/ghostty.fish\""
+        default:
+            return "# Open a new term-mesh tab to reload shell integration (detected shell: \(shellName))"
+        }
     }
 
     private func refreshShellIntegrationHealth() {

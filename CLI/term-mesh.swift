@@ -300,7 +300,7 @@ final class SocketClient {
         // Verify socket is owned by the current user to prevent fake-socket attacks
         var st = stat()
         guard stat(path, &st) == 0 else {
-            throw CLIError(message: "Socket not found at \(path)")
+            throw CLIError(message: "Socket not found at \(path). term-mesh is not running — launch it from Applications, or check TERMMESH_SOCKET_PATH if using a custom path.")
         }
         guard st.st_uid == getuid() else {
             throw CLIError(message: "Socket at \(path) is not owned by the current user — refusing to connect")
@@ -365,7 +365,7 @@ final class SocketClient {
                     break
                 }
                 if Date().timeIntervalSince(start) > Self.responseTimeoutSeconds {
-                    throw CLIError(message: "Command timed out")
+                    throw CLIError(message: "Command timed out: '\(command)' (limit: \(Int(Self.responseTimeoutSeconds))s). Set TERMMESH_CLI_RESPONSE_TIMEOUT_SEC to override.")
                 }
                 continue
             }
@@ -4028,7 +4028,7 @@ struct TermMeshCLI {
                 }
                 Thread.sleep(forTimeInterval: 0.05)
             }
-            throw CLIError(message: "wait-for timed out waiting for '\(name)'")
+            throw CLIError(message: "wait-for timed out waiting for '\(name)' (limit: \(Int(timeout))s)")
 
         case "swap-pane":
             let workspaceArg = workspaceFromArgsOrEnv(commandArgs, windowOverride: windowOverride)

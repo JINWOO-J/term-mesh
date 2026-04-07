@@ -70,7 +70,8 @@ export default function ApiPage() {
         </tbody>
       </table>
       <p>
-        Override with the <code>CMUX_SOCKET_PATH</code> environment variable.
+        Override with the <code>TERMMESH_SOCKET_PATH</code> environment variable
+        (legacy: <code>CMUX_SOCKET_PATH</code>).
         Send one newline-terminated JSON request per call:
       </p>
       <CodeBlock lang="json">{`{"id":"req-1","method":"workspace.list","params":{}}
@@ -97,7 +98,7 @@ export default function ApiPage() {
               <strong>Off</strong>
             </td>
             <td>Socket disabled</td>
-            <td>Settings UI or <code>CMUX_SOCKET_MODE=off</code></td>
+            <td>Settings UI or <code>TERMMESH_SOCKET_MODE=off</code></td>
           </tr>
           <tr>
             <td>
@@ -110,11 +111,42 @@ export default function ApiPage() {
           </tr>
           <tr>
             <td>
+              <strong>automation</strong>
+            </td>
+            <td>
+              Allow external local automation clients from this macOS user
+              (no ancestry check).
+            </td>
+            <td>
+              Settings UI or{" "}
+              <code>TERMMESH_SOCKET_MODE=automation</code>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <strong>password</strong>
+            </td>
+            <td>
+              Require socket authentication with a password stored in your
+              keychain.
+            </td>
+            <td>
+              Settings UI or{" "}
+              <code>TERMMESH_SOCKET_MODE=password</code>
+            </td>
+          </tr>
+          <tr>
+            <td>
               <strong>allowAll</strong>
             </td>
-            <td>Allow any local process to connect (no ancestry check).</td>
             <td>
-              Environment override only: <code>CMUX_SOCKET_MODE=allowAll</code>
+              Allow any local process from any user to connect (no ancestry or
+              password gate). Auto-reverts to <em>term-mesh processes only</em>{" "}
+              after 1 hour.
+            </td>
+            <td>
+              Environment override only:{" "}
+              <code>TERMMESH_SOCKET_MODE=allowAll</code>
             </td>
           </tr>
         </tbody>
@@ -172,7 +204,7 @@ export default function ApiPage() {
         </tbody>
       </table>
 
-      <h2>Workspace commands</h2>
+      <h2>Workspace commands <small>[v2 JSON-RPC]</small></h2>
 
       <Cmd
         name="list-workspaces"
@@ -217,17 +249,17 @@ term-mesh new-split down`}
         socket={`{"id":"split-new","method":"surface.split","params":{"direction":"right"}}`}
       />
       <Cmd
-        name="list-surfaces"
-        desc="List all surfaces in the current workspace."
-        cli={`term-mesh list-surfaces
-term-mesh list-surfaces --json`}
-        socket={`{"id":"surface-list","method":"surface.list","params":{}}`}
+        name="list-panels"
+        desc="List all panels in the current workspace."
+        cli={`term-mesh list-panels
+term-mesh list-panels --json`}
+        socket={`{"id":"panel-list","method":"surface.list","params":{}}`}
       />
       <Cmd
-        name="focus-surface"
-        desc="Focus a specific surface."
-        cli={`term-mesh focus-surface --surface <id>`}
-        socket={`{"id":"surface-focus","method":"surface.focus","params":{"surface_id":"<id>"}}`}
+        name="focus-panel"
+        desc="Focus a specific panel."
+        cli={`term-mesh focus-panel --surface <id>`}
+        socket={`{"id":"panel-focus","method":"surface.focus","params":{"surface_id":"<id>"}}`}
       />
 
       <h2>Input commands</h2>
@@ -246,16 +278,16 @@ term-mesh send "ls -la\\n"`}
         socket={`{"id":"send-key","method":"surface.send_key","params":{"key":"enter"}}`}
       />
       <Cmd
-        name="send-surface"
-        desc="Send text to a specific surface."
-        cli={`term-mesh send-surface --surface <id> "command"`}
-        socket={`{"id":"send-surface","method":"surface.send_text","params":{"surface_id":"<id>","text":"command"}}`}
+        name="send-panel"
+        desc="Send text to a specific panel."
+        cli={`term-mesh send-panel --surface <id> "command"`}
+        socket={`{"id":"send-panel","method":"surface.send_text","params":{"surface_id":"<id>","text":"command"}}`}
       />
       <Cmd
-        name="send-key-surface"
-        desc="Send a key press to a specific surface."
-        cli={`term-mesh send-key-surface --surface <id> enter`}
-        socket={`{"id":"send-key-surface","method":"surface.send_key","params":{"surface_id":"<id>","key":"enter"}}`}
+        name="send-key-panel"
+        desc="Send a key press to a specific panel."
+        cli={`term-mesh send-key-panel --surface <id> enter`}
+        socket={`{"id":"send-key-panel","method":"surface.send_key","params":{"surface_id":"<id>","key":"enter"}}`}
       />
 
       <h2>Notification commands</h2>
@@ -281,12 +313,17 @@ term-mesh list-notifications --json`}
         socket={`{"id":"notif-clear","method":"notification.clear","params":{}}`}
       />
 
-      <h2>Sidebar metadata commands</h2>
+      <h2>Sidebar metadata commands <small>[v1 Legacy]</small></h2>
       <p>
         Set status pills, progress bars, and log entries in the sidebar for any
         workspace. Useful for build scripts, CI integrations, and AI coding
         agents that want to surface state at a glance.
       </p>
+      <Callout>
+        Sidebar metadata socket commands use the <strong>v1 text protocol</strong>{" "}
+        (space-delimited arguments), not JSON-RPC. JSON-RPC equivalents are
+        planned for a future release.
+      </Callout>
 
       <Cmd
         name="set-status"
@@ -384,42 +421,53 @@ term-mesh identify --json`}
         <tbody>
           <tr>
             <td>
-              <code>CMUX_SOCKET_PATH</code>
+              <code>TERMMESH_SOCKET_PATH</code>
             </td>
-            <td>Override the socket path used by CLI and integrations</td>
+            <td>
+              Override the socket path used by CLI and integrations{" "}
+              (legacy: <code>CMUX_SOCKET_PATH</code>)
+            </td>
           </tr>
           <tr>
             <td>
-              <code>CMUX_SOCKET_ENABLE</code>
+              <code>TERMMESH_SOCKET_ENABLE</code>
             </td>
             <td>
               Force-enable/disable socket (<code>1</code>/<code>0</code>,{" "}
               <code>true</code>/<code>false</code>, <code>on</code>/
-              <code>off</code>)
+              <code>off</code>). Legacy: <code>CMUX_SOCKET_ENABLE</code>
             </td>
           </tr>
           <tr>
             <td>
-              <code>CMUX_SOCKET_MODE</code>
+              <code>TERMMESH_SOCKET_MODE</code>
             </td>
             <td>
-              Override access mode (<code>term-meshOnly</code>,{" "}
+              Override access mode (<code>termMeshOnly</code>,{" "}
+              <code>automation</code>, <code>password</code>,{" "}
               <code>allowAll</code>, <code>off</code>). Also accepts{" "}
               <code>term-mesh-only</code>/<code>term-mesh_only</code> and{" "}
-              <code>allow-all</code>/<code>allow_all</code>
+              <code>allow-all</code>/<code>allow_all</code>. Legacy:{" "}
+              <code>CMUX_SOCKET_MODE</code>
             </td>
           </tr>
           <tr>
             <td>
-              <code>CMUX_WORKSPACE_ID</code>
+              <code>TERMMESH_WORKSPACE_ID</code>
             </td>
-            <td>Auto-set: current workspace ID</td>
+            <td>
+              Auto-set: current workspace ID{" "}
+              (legacy: <code>CMUX_WORKSPACE_ID</code>)
+            </td>
           </tr>
           <tr>
             <td>
-              <code>CMUX_SURFACE_ID</code>
+              <code>TERMMESH_PANEL_ID</code>
             </td>
-            <td>Auto-set: current surface ID</td>
+            <td>
+              Auto-set: current panel ID{" "}
+              (legacy: <code>CMUX_SURFACE_ID</code>)
+            </td>
           </tr>
           <tr>
             <td>
@@ -440,23 +488,25 @@ term-mesh identify --json`}
         </tbody>
       </table>
       <Callout>
-        Legacy <code>CMUX_SOCKET_MODE</code> values <code>full</code> and{" "}
-        <code>notifications</code> are still accepted for compatibility.
+        Legacy <code>CMUX_*</code> variable names are still accepted for
+        compatibility. <code>TERMMESH_*</code> takes precedence when both are
+        set. Legacy <code>TERMMESH_SOCKET_MODE</code> values{" "}
+        <code>full</code> and <code>notifications</code> are still accepted.
       </Callout>
 
       <h2>Detecting term-mesh</h2>
       <CodeBlock title="bash" lang="bash">{`# Prefer explicit socket path if set
-SOCK="\${CMUX_SOCKET_PATH:-/tmp/term-mesh.sock}"
+SOCK="\${TERMMESH_SOCKET_PATH:-\${CMUX_SOCKET_PATH:-/tmp/term-mesh.sock}}"
 [ -S "$SOCK" ] && echo "Socket available"
 
 # Check for the CLI
 command -v term-mesh &>/dev/null && echo "term-mesh available"
 
 # In term-mesh-managed terminals these are auto-set
-[ -n "\${CMUX_WORKSPACE_ID:-}" ] && [ -n "\${CMUX_SURFACE_ID:-}" ] && echo "Inside term-mesh surface"
+[ -n "\${TERMMESH_WORKSPACE_ID:-}" ] && [ -n "\${TERMMESH_PANEL_ID:-}" ] && echo "Inside term-mesh panel"
 
 # Distinguish from regular Ghostty
-[ "$TERM_PROGRAM" = "ghostty" ] && [ -n "\${CMUX_WORKSPACE_ID:-}" ] && echo "In term-mesh"`}</CodeBlock>
+[ "$TERM_PROGRAM" = "ghostty" ] && [ -n "\${TERMMESH_WORKSPACE_ID:-}" ] && echo "In term-mesh"`}</CodeBlock>
 
       <h2>Examples</h2>
 
@@ -465,7 +515,7 @@ command -v term-mesh &>/dev/null && echo "term-mesh available"
 import os
 import socket
 
-SOCKET_PATH = os.environ.get("CMUX_SOCKET_PATH", "/tmp/term-mesh.sock")
+SOCKET_PATH = os.environ.get("TERMMESH_SOCKET_PATH") or os.environ.get("CMUX_SOCKET_PATH", "/tmp/term-mesh.sock")
 
 def rpc(method, params=None, req_id=1):
     payload = {"id": req_id, "method": method, "params": params or {}}
@@ -486,7 +536,7 @@ print(rpc(
 
       <h3>Shell script</h3>
       <CodeBlock title="bash" lang="bash">{`#!/bin/bash
-SOCK="\${CMUX_SOCKET_PATH:-/tmp/term-mesh.sock}"
+SOCK="\${TERMMESH_SOCKET_PATH:-\${CMUX_SOCKET_PATH:-/tmp/term-mesh.sock}}"
 
 term-mesh_cmd() {
     printf "%s\\n" "$1" | nc -U "$SOCK"

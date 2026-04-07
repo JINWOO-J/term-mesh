@@ -4,16 +4,22 @@ struct WelcomeView: View {
     @AppStorage("hideWelcomeScreen") private var hideWelcomeScreen: Bool = false
     let onGetStarted: () -> Void
 
-    private let shortcuts: [(key: String, description: String)] = [
-        ("⌘T", "New Tab"),
-        ("⌘D", "Split Right"),
-        ("⌘⇧D", "Split Down / Dashboard"),
-        ("⌘⇧I", "IME Input Bar"),
-        ("⌘⇧T", "New Agent Team"),
-        ("⌘W", "Close Tab"),
-        ("⌘⇧A", "Run Agent"),
-        ("⌘K", "Command Palette"),
-    ]
+    private var shortcuts: [(key: String, description: String)] {
+        [
+            (KeyboardShortcutSettings.shortcut(for: .newSurface).displayString,
+             KeyboardShortcutSettings.Action.newSurface.label),
+            (KeyboardShortcutSettings.shortcut(for: .splitRight).displayString,
+             KeyboardShortcutSettings.Action.splitRight.label),
+            (KeyboardShortcutSettings.shortcut(for: .splitDown).displayString,
+             KeyboardShortcutSettings.Action.splitDown.label),
+            ("⌘⇧I", "IME Input Bar"),
+            ("⌘⇧T", "New Agent Team"),
+            (KeyboardShortcutSettings.shortcut(for: .closeWorkspace).displayString,
+             KeyboardShortcutSettings.Action.closeWorkspace.label),
+            ("⌘⇧A", "Run Agent"),
+            ("⌘K", "Command Palette"),
+        ]
+    }
 
     var body: some View {
         VStack(spacing: 28) {

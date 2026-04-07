@@ -96,16 +96,28 @@ working-directory = ~/Projects`}</CodeBlock>
         </li>
         <li>
           <strong>term-mesh processes only</strong> — only allow processes started
-          inside term-mesh terminals to connect
+          inside term-mesh terminals to connect (default)
         </li>
         <li>
-          <strong>allowAll</strong> — allow any local process to connect (
-          <code>CMUX_SOCKET_MODE=allowAll</code>, env override only)
+          <strong>automation</strong> — allow external local automation clients
+          from this macOS user; no ancestry check required (
+          <code>TERMMESH_SOCKET_MODE=automation</code>)
+        </li>
+        <li>
+          <strong>password</strong> — require socket authentication with a
+          password stored in your keychain (
+          <code>TERMMESH_SOCKET_MODE=password</code>)
+        </li>
+        <li>
+          <strong>allowAll</strong> — allow any local process to connect; no
+          ancestry or password gate; auto-reverts after 1 hour (
+          <code>TERMMESH_SOCKET_MODE=allowAll</code>, env override only)
         </li>
       </ul>
       <Callout type="warn">
         On shared machines, consider using &ldquo;Off&rdquo; or
-        &ldquo;term-mesh processes only&rdquo; mode.
+        &ldquo;term-mesh processes only&rdquo; mode. The legacy environment
+        variable <code>CMUX_SOCKET_MODE</code> is still accepted.
       </Callout>
 
       <h3>Browser link behavior</h3>

@@ -2,6 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.88.1] - 2026-04-07
+
+### Added
+- `/tm-op research` strategy — invoke autonomous multi-agent research from the tm-op command palette
+
 ## [0.88.0] - 2026-04-07
 
 ### Added

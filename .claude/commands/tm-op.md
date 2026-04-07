@@ -20,6 +20,7 @@ Parse `$ARGUMENTS`의 첫 단어로 전략을 결정한다:
 - `brainstorm` → [Strategy: brainstorm] 섹션 실행
 - `distribute` → [Strategy: distribute] 섹션 실행
 - `council` → [Strategy: council] 섹션 실행
+- `research` → [Strategy: research] 섹션 실행
 - 빈 입력 → 사용자에게 전략 선택 질문
 
 ## Options
@@ -37,6 +38,11 @@ Parse `$ARGUMENTS`의 첫 단어로 전략을 결정한다:
 - `--attackers "agent,agent"` — red-team 공격팀 수동 지정
 - `--defenders "agent,agent"` — red-team 방어팀 수동 지정
 - `--vote` — brainstorm에서 도트 투표 활성화
+- `--agents N` — research 에이전트 수 (기본 0 = 모든 idle)
+- `--budget N` — research 라운드 수 (기본 5)
+- `--depth shallow|deep|exhaustive` — research 탐색 깊이 (기본 deep)
+- `--web` — research에서 웹검색 허용
+- `--focus "hint"` — research 포커스 힌트
 - `--splits "agent:task,agent:task"` — distribute 분할 수동 지정
 - `--no-merge` — distribute 결과 병합 비활성화
 - `--conflict-check` — distribute 파일 충돌 검사 (기본 활성)
@@ -182,6 +188,7 @@ tm-op — 전략 오케스트레이션 커맨드
   brainstorm <topic>      수렴 없이 아이디어 발산→분류→투표
   distribute <topic>      대규모 태스크를 독립 서브태스크로 분할하여 병렬 실행·병합
   council <topic>         N명 자유 토의 → 교차 질의 → 심화 → 합의 도출. 다자간 숙의 회의
+  research <topic>        idle 에이전트가 board.jsonl로 stigmergy 협동 자율 탐색
 
 옵션 (Options):
   --rounds N              refine 라운드 수 (기본 4)
@@ -1400,6 +1407,46 @@ tm-agent collect --lines 100
 자동 판단으로 맥락이 감지되지 않으면 이 단계를 건너뛴다.
 
 사용자가 전략과 태스크를 모두 입력하면 해당 전략 섹션을 실행한다.
+
+## Strategy: research
+
+idle 에이전트를 활용한 자율 multi-agent 탐색. board.jsonl을 통한 stigmergy 협동.
+
+### Execution
+
+`/tm-op research "<topic>" [options]` 실행 시:
+
+1. `tm-agent research "<topic>"` CLI 호출로 위임
+2. 옵션 매핑:
+   - `--agents N` → `--agents N`
+   - `--budget N` → `--budget N`
+   - `--timeout N` → `--timeout N`
+   - `--depth shallow|deep|exhaustive` → `--depth <d>`
+   - `--web` → `--web`
+   - `--focus "hint"` → `--focus "hint"`
+
+### Flow
+
+```
+1. tm-agent가 idle claude 에이전트를 자동 감지
+2. 각 에이전트에게 research prompt 주입 (staggered 3s intervals)
+3. 에이전트들이 .xm/research/{run-id}/board.jsonl로 stigmergy 협동
+4. 완료 후 board 합성 결과가 리더 세션에 출력
+```
+
+### 실행 예시
+
+```bash
+/tm-op research "Rust error handling best practices"
+/tm-op research "term-mesh 성능 병목점 분석" --depth exhaustive --web
+/tm-op research "SwiftUI vs AppKit trade-offs" --agents 2 --budget 3
+```
+
+### 에이전트 부족 시
+
+- 0명 idle → 에러: "No idle claude agents. Create a team first: tm-agent create 3"
+- 요청보다 부족 → 경고 + 가용한 만큼 사용
+- `--agents 0` (기본) → 모든 idle claude 에이전트 사용
 
 ## Safety Rules
 

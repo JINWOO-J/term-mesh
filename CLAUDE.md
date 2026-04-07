@@ -117,7 +117,7 @@ tail -f "$(cat /tmp/term-mesh-last-debug-log-path 2>/dev/null || echo /tmp/term-
 
 ## tm-op 전략 커맨드
 
-활성 에이전트 팀에게 구조화된 전략(발산·수렴·경쟁·파이프라인·분배·숙의·토론·공격방어·브레인스토밍)을 지시한다.
+활성 에이전트 팀에게 구조화된 전략(발산·수렴·경쟁·파이프라인·분배·숙의·토론·공격방어·브레인스토밍·자율탐색)을 지시한다.
 `tm-agent create`로 팀이 먼저 구성되어 있어야 한다.
 
 ```bash
@@ -131,6 +131,7 @@ tail -f "$(cat /tmp/term-mesh-last-debug-log-path 2>/dev/null || echo /tmp/term-
 /tm-op brainstorm "v2 기능 아이디어" --vote # 자유 발산 + 투표
 /tm-op distribute "6개 Sentry 이슈 분석"  # 병렬 분배 실행
 /tm-op council "ECS vs K8s" --rounds 4    # 다자간 숙의 회의
+/tm-op research "Rust error handling"     # 자율 multi-agent 탐색 (board.jsonl stigmergy)
 ```
 
 | 전략 | 설명 |
@@ -144,12 +145,14 @@ tail -f "$(cat /tmp/term-mesh-last-debug-log-path 2>/dev/null || echo /tmp/term-
 | **brainstorm** | 수렴 없이 아이디어 발산→분류→투표. `--vote`로 도트 투표 활성화 |
 | **distribute** | 대규모 태스크를 독립 서브태스크로 분할·병렬 실행·병합. `--splits`로 수동 분할, `--no-merge`로 병합 비활성화 |
 | **council** | N명 자유 토의 → 교차 질의 → 심화 → 합의 도출. `--agenda`로 다중 안건, `--rounds N`으로 라운드 수 조절 |
+| **research** | idle 에이전트가 board.jsonl로 stigmergy 협동 탐색. `--depth shallow\|deep\|exhaustive`, `--budget N`, `--web` |
 
 옵션: `--rounds N`, `--preset quick|thorough|deep`, `--steps "a:t,b:t"`, `--target <file>`,
 `--pr <number>`, `--judge <agent>`, `--timeout N`, `--resume`,
 `--pro`/`--con` (debate), `--attackers`/`--defenders` (red-team), `--vote` (brainstorm),
 `--splits "a:t,b:t"` (distribute 수동 분할), `--no-merge` (distribute 병합 비활성화),
-`--agenda "a,b,c"` (council 다중 안건), `--context` (강제 맥락 주입), `--no-context` (맥락 주입 비활성화)
+`--agenda "a,b,c"` (council 다중 안건), `--context` (강제 맥락 주입), `--no-context` (맥락 주입 비활성화),
+`--agents N` (research 에이전트 수), `--budget N` (research 라운드), `--depth shallow|deep|exhaustive` (research 깊이), `--web` (research 웹검색 허용)
 
 ## Team agent system (OMC override)
 

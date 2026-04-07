@@ -199,6 +199,8 @@ final class TeamOrchestrator: ObservableObject {
 
     private(set) var messages: [String: [TeamMessage]] = [:]   // team_name → messages
     private(set) var taskBoards: [String: [TeamTask]] = [:]    // team_name → tasks
+    /// Maximum messages retained per team. Oldest messages are pruned on insert.
+    private let maxMessagesPerTeam = 500
     private var heartbeats: [String: [String: (at: Date, summary: String?)]] = [:]
     private let staleTaskThreshold: TimeInterval = 10 * 60
     private let staleHeartbeatThreshold: TimeInterval = 5 * 60
@@ -2335,6 +2337,10 @@ final class TeamOrchestrator: ObservableObject {
             type: normalizedMessageType(type)
         )
         messages[teamName, default: []].append(msg)
+        // Prune oldest messages when exceeding the per-team cap.
+        if let count = messages[teamName]?.count, count > maxMessagesPerTeam {
+            messages[teamName]?.removeFirst(count - maxMessagesPerTeam)
+        }
         syncTeamStateToDaemon()
         return msg
     }

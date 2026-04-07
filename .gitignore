@@ -15,6 +15,9 @@ xcuserdata/
 # Swift Package Manager
 .swiftpm/
 
+# Auto-generated build info
+Sources/BuildInfo.swift
+
 # GhosttyKit binary (built from ghostty submodule via scripts/setup.sh)
 GhosttyKit.xcframework
 GhosttyKit.xcframework.bak-*/

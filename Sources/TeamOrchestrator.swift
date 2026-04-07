@@ -2201,7 +2201,7 @@ final class TeamOrchestrator: ObservableObject {
     /// Legacy short names kept for backward compatibility with saved presets.
     private static func geminiModelName(_ shortName: String) -> String {
         switch shortName.lowercased() {
-        case "opus":   return "gemini-3.1-pro-preview"
+        case "opus":   return "gemini-3.1-pro"
         case "sonnet": return "gemini-3-flash-preview"
         case "haiku":  return "gemini-2.5-flash"
         default:       return shortName

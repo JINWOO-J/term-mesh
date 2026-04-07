@@ -2,6 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.89.1] - 2026-04-07
+
+### Changed
+- Default Gemini model updated from `gemini-3.1-pro-preview` to `gemini-3.1-pro` (GA release)
+
 ## [0.88.1] - 2026-04-07
 
 ### Added

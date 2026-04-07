@@ -2,6 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.87.1] - 2026-04-07
+
+### Fixed
+- Dashboard metric cards (Teams, Agents, Open Tasks, Attention) now visible in dark theme — replaced hardcoded white background with theme-aware colors
+
 ## [0.87.0] - 2026-04-07
 
 ### Added

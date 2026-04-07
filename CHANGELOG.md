@@ -2,7 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
-## [0.86.6] - 2026-04-07
+## [0.87.0] - 2026-04-07
+
+### Added
+- Split pane layouts are now saved and restored across app restarts — no more manual re-splitting after relaunch
+- Periodic session auto-save every 30 seconds for crash and force-quit resilience
 
 ### Fixed
 - Memory growth in long-running agent teams — message history now capped at 500 per team with FIFO pruning

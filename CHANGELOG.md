@@ -2,6 +2,11 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.91.1] - 2026-04-08
+
+### Fixed
+- **Sleep/wake white-screen regression** — Removed the stale `suppressLayoutDuringDisplayReconfiguration` workaround (TERM-MESH-2). It was added to dodge a 2 s main-thread block from `NSHostingView.layout → CVDisplayLinkCreateWithCGDisplays`, but upstream Ghostty's 2025-06-16 renderer rework (`371d62a82`) moved macOS rendering to `IOSurfaceLayer`, so that blocker no longer exists. The leftover `contentView.isHidden = true/false` dance instead detached descendant `IOSurfaceLayer` contents on wake, leaving windows white until the user clicked. Removing the mechanism restores correct behavior with no measurable hang on current Ghostty.
+
 ## [0.91.0] - 2026-04-08
 
 ### Added

@@ -288,6 +288,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             daemon.startDaemon()
         }
 
+        // Fix initial terminal size (intermittent cursor-in-middle-of-prompt bug):
+        // The first surface may be created before SwiftUI finishes layout (sidebar,
+        // titlebar). Force-refresh visible terminal surfaces at multiple intervals so
+        // SIGWINCH corrects the column count even on slower launches. Idempotent.
+        if !isRunningUnderXCTest {
+            for delay in [0.3, 0.8, 1.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self else { return }
+                    for (_, context) in self.mainWindowContexts {
+                        for tab in context.tabManager.tabs {
+                            for (_, panel) in tab.panels {
+                                if let terminalPanel = panel as? TerminalPanel,
+                                   !terminalPanel.surface.renderingPaused {
+                                    terminalPanel.surface.forceRefresh()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Install Claude slash commands from bundle to ~/.claude/commands/
         if !isRunningUnderXCTest {
             DispatchQueue.global(qos: .utility).async {

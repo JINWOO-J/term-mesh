@@ -170,6 +170,7 @@ struct SettingsView: View {
     @State private var workspaceTabCustomColors = WorkspaceTabColorSettings.customColors()
     @State private var daemonStatusInfo: TermMeshDaemon.DaemonStatus?
     @State private var isDaemonRestarting = false
+    @State private var dashboardRestartWork: DispatchWorkItem?
     @State private var daemonLogTail: AttributedString?
     @State private var shellHealthEntries: [ShellHealthEntry] = []
     @State private var shellFixCopied = false
@@ -1338,6 +1339,9 @@ struct SettingsView: View {
                             Toggle("", isOn: $dashboardEnabled)
                                 .labelsHidden()
                                 .controlSize(.small)
+                                .onChange(of: dashboardEnabled) { _ in
+                                    scheduleDaemonRestart(delay: 0)
+                                }
                         }
 
                         if dashboardEnabled {
@@ -1356,6 +1360,9 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
+                                .onChange(of: dashboardLocalhostOnly) { _ in
+                                    scheduleDaemonRestart(delay: 0)
+                                }
                             }
 
                             SettingsCardDivider()
@@ -1364,6 +1371,9 @@ struct SettingsView: View {
                                 TextField("", value: $dashboardPort, format: .number.grouping(.never))
                                     .textFieldStyle(.roundedBorder)
                                     .multilineTextAlignment(.trailing)
+                                    .onChange(of: dashboardPort) { _ in
+                                        scheduleDaemonRestart(delay: 1.5)
+                                    }
                             }
 
                             SettingsCardDivider()
@@ -1372,12 +1382,15 @@ struct SettingsView: View {
                                 SecureField("Optional", text: $dashboardPassword)
                                     .textFieldStyle(.roundedBorder)
                                     .multilineTextAlignment(.trailing)
+                                    .onChange(of: dashboardPassword) { _ in
+                                        scheduleDaemonRestart(delay: 1.5)
+                                    }
                             }
                         }
 
                         SettingsCardDivider()
 
-                        SettingsCardNote("Changes take effect after restarting the daemon (quit and relaunch the app). The dashboard shows system metrics, team status, agents, and task boards.")
+                        SettingsCardNote("Dashboard settings auto-restart the daemon when changed. The dashboard shows system metrics, team status, agents, and task boards.")
         }
     }
 
@@ -1884,6 +1897,27 @@ struct SettingsView: View {
 
     private var resolvedDaemon: (any DaemonService)? {
         daemonService ?? TermMeshDaemon.shared
+    }
+
+    private func scheduleDaemonRestart(delay: TimeInterval) {
+        dashboardRestartWork?.cancel()
+        if delay <= 0 {
+            isDaemonRestarting = true
+            resolvedDaemon?.restartDaemon {
+                refreshDaemonStatus()
+                isDaemonRestarting = false
+            }
+            return
+        }
+        let work = DispatchWorkItem { [self] in
+            isDaemonRestarting = true
+            resolvedDaemon?.restartDaemon {
+                refreshDaemonStatus()
+                isDaemonRestarting = false
+            }
+        }
+        dashboardRestartWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func refreshDaemonStatus() {

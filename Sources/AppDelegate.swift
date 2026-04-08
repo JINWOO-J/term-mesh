@@ -2684,6 +2684,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        // Toggle dashboard window: Cmd+Shift+D
+        if matchShortcut(event: event, shortcut: KeyboardShortcutSettings.shortcut(for: .toggleDashboard)) {
+            DashboardController.shared.toggleDashboard()
+            return true
+        }
+
         // Focus browser address bar: Cmd+L
         if flags == [.command] && chars == "l" {
             if let focusedPanel = tabManager?.focusedBrowserPanel {

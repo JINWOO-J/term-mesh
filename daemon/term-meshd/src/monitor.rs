@@ -8,6 +8,7 @@ use tokio::time::{interval, Duration};
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessSnapshot {
     pub pid: u32,
+    pub ppid: u32,
     pub name: String,
     pub cpu_percent: f32,
     pub memory_bytes: u64,
@@ -139,9 +140,11 @@ pub fn start_monitor(
                     let mem = proc.memory();
                     let is_stopped = stopped_set.contains(&pid);
                     let name = proc.name().to_string_lossy().into_owned();
+                    let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
 
                     processes.push(ProcessSnapshot {
                         pid,
+                        ppid,
                         name: name.clone(),
                         cpu_percent: cpu,
                         memory_bytes: mem,

@@ -212,7 +212,9 @@ final class TermMeshDaemon: ObservableObject {
             }
 
             // Dashboard settings
-            if !self.isDashboardEnabled {
+            // Tagged apps (parallel dev builds) disable HTTP to avoid port conflicts.
+            let isTaggedBuild = termMeshEnv("TAG") != nil
+            if !self.isDashboardEnabled || isTaggedBuild {
                 env["TERM_MESH_HTTP_DISABLED"] = "1"
             } else {
                 let host = self.isLocalhostOnly ? "127.0.0.1" : "0.0.0.0"

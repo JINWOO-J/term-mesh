@@ -227,6 +227,9 @@
   .proc-btn.stop:hover { background: rgba(143, 106, 82, 0.12); }
   .proc-btn.resume { border-color: var(--success); color: var(--success); }
   .proc-btn.resume:hover { background: rgba(129, 154, 145, 0.14); }
+  .tree-toggle { cursor:pointer; width:16px; display:inline-block; opacity:0.6; font-size:10px; user-select:none; }
+  .tree-toggle:hover { opacity:1; }
+  .tree-spacer { width:16px; display:inline-block; }
   /* Event log */
   .event-log {
     max-height: 240px;
@@ -844,8 +847,8 @@
     margin-top: auto;
     padding: 14px;
     border-radius: 8px;
-    background: rgba(255,255,255,0.86);
-    border: 1px solid rgba(148,163,184,0.14);
+    background: var(--bg-accent);
+    border: 1px solid var(--border);
     box-shadow: var(--shadow);
   }
   .sidebar-meta .kicker {
@@ -858,6 +861,7 @@
   .sidebar-meta .value {
     font-size: 18px;
     font-weight: 700;
+    color: var(--text);
     margin-bottom: 4px;
   }
   .sidebar-meta .meta {
@@ -1267,7 +1271,10 @@
 
   <!-- Process Monitor Chart -->
   <div class="card full section-anchor" id="process-monitor">
-    <h2>Process Monitor</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <h2 style="margin-bottom:0">Process Monitor</h2>
+      <button id="proc-expand-all" class="proc-btn" onclick="toggleAllProcesses()">Expand All</button>
+    </div>
     <div id="process-list"></div>
     <div class="chart-container">
       <canvas id="cpuChart"></canvas>
@@ -1323,6 +1330,8 @@
 let cpuHistory = [];
 const MAX_HISTORY = 30;
 let cpuChart = null;
+let _allExpanded = false;
+const _expandedPids = new Set();
 let timelineChart = null;
 let watchedPaths = []; // tracks current watched project roots
 let activeEventFilter = 'all';
@@ -1490,6 +1499,60 @@ function projectName(path) {
   return parts[parts.length - 1] || path;
 }
 
+// ── Process Tree ──
+
+function buildProcessTree(processes) {
+  const byPid = new Map();
+  processes.forEach(p => byPid.set(p.pid, {...p, children: []}));
+  const roots = [];
+  for (const p of byPid.values()) {
+    const parent = p.ppid ? byPid.get(p.ppid) : null;
+    if (parent) parent.children.push(p);
+    else roots.push(p);
+  }
+  return roots;
+}
+
+function renderProcessNode(node, depth) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = _allExpanded || _expandedPids.has(node.pid);
+  const toggle = hasChildren
+    ? `<span class="tree-toggle" onclick="event.stopPropagation();togglePid(${node.pid})">${isExpanded ? '▼' : '▶'}</span>`
+    : `<span class="tree-spacer"></span>`;
+  let html = `<div class="proc-row" style="padding-left:${depth * 20}px">
+    ${toggle}
+    <div class="proc-info"><span class="stat-label">PID ${node.pid} (${node.name})</span><span class="proc-status ${node.stopped ? 'stopped' : 'running'}">${node.stopped ? 'STOPPED' : 'running'}</span></div>
+    <span class="stat-value">${node.cpu_percent.toFixed(1)}% · ${formatBytes(node.memory_bytes)}</span>
+    ${node.stopped ? `<button class="proc-btn resume" onclick="resumeProcess(${node.pid})">Resume</button>` : `<button class="proc-btn stop" onclick="stopProcess(${node.pid})">Stop</button>`}
+  </div>`;
+  if (hasChildren && isExpanded) node.children.forEach(c => { html += renderProcessNode(c, depth + 1); });
+  return html;
+}
+
+function togglePid(pid) {
+  if (_expandedPids.has(pid)) _expandedPids.delete(pid);
+  else _expandedPids.add(pid);
+  if (window._lastMonitorData) updateProcessTree(window._lastMonitorData);
+}
+
+function toggleAllProcesses() {
+  _allExpanded = !_allExpanded;
+  if (!_allExpanded) _expandedPids.clear();
+  document.getElementById('proc-expand-all').textContent = _allExpanded ? 'Collapse All' : 'Expand All';
+  if (window._lastMonitorData) updateProcessTree(window._lastMonitorData);
+}
+
+function updateProcessTree(data) {
+  window._lastMonitorData = data;
+  const procEl = document.getElementById('process-list');
+  if (!data.processes || data.processes.length === 0) {
+    procEl.innerHTML = '<div class="empty">No tracked processes</div>';
+    return;
+  }
+  const trees = buildProcessTree(data.processes);
+  procEl.innerHTML = trees.map(t => renderProcessNode(t, 0)).join('');
+}
+
 // ── Data Update ──
 
 function updateMonitor(data) {
@@ -1540,27 +1603,8 @@ function updateMonitor(data) {
   drawSparkline('disk-read-spark', _sparkData.diskR, 0, '#8e7d69');
   drawSparkline('disk-write-spark', _sparkData.diskW, 0, '#6f867e');
 
-  // Process list with stop/resume controls
-  const procEl = document.getElementById('process-list');
-  if (data.processes.length === 0) {
-    procEl.innerHTML = '<div class="empty">No tracked processes</div>';
-  } else {
-    procEl.innerHTML = data.processes.map(p => {
-      const statusClass = p.stopped ? 'stopped' : 'running';
-      const statusText = p.stopped ? 'STOPPED' : 'running';
-      const btn = p.stopped
-        ? `<button class="proc-btn resume" onclick="resumeProcess(${p.pid})">Resume</button>`
-        : `<button class="proc-btn stop" onclick="stopProcess(${p.pid})">Stop</button>`;
-      return `<div class="proc-row">
-        <div class="proc-info">
-          <span class="stat-label">PID ${p.pid} (${p.name})</span>
-          <span class="proc-status ${statusClass}">${statusText}</span>
-        </div>
-        <span class="stat-value">${p.cpu_percent.toFixed(1)}% · ${formatBytes(p.memory_bytes)}</span>
-        ${btn}
-      </div>`;
-    }).join('');
-  }
+  // Process tree with stop/resume controls
+  updateProcessTree(data);
 
   // CPU chart
   if (cpuChart) {

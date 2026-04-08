@@ -116,6 +116,14 @@ final class DashboardController: NSObject, WKNavigationDelegate {
         startUIPolling()
     }
 
+    func toggleDashboard() {
+        if window?.isVisible == true {
+            closeDashboard()
+        } else {
+            showDashboard()
+        }
+    }
+
     func closeDashboard() {
         stopUIPolling()
         window?.close()

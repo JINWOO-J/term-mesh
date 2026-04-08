@@ -795,27 +795,6 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     /// Force a full size recalculation and surface redraw.
     func forceRefresh() {
-	        let viewState: String
-	        if let view = attachedView {
-	            let inWindow = view.window != nil
-	            let bounds = view.bounds
-	            let metalOK = (view.layer as? CAMetalLayer) != nil
-	            viewState = "inWindow=\(inWindow) bounds=\(bounds) metalOK=\(metalOK)"
-	        } else {
-	            viewState = "NO_ATTACHED_VIEW"
-	        }
-        #if DEBUG
-        let ts = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(ts)] forceRefresh: \(id) \(viewState)\n"
-        let logPath = "/tmp/term-mesh-refresh-debug.log"
-        if let handle = FileHandle(forWritingAtPath: logPath) {
-            handle.seekToEndOfFile()
-            handle.write(line.data(using: .utf8)!)
-            handle.closeFile()
-        } else {
-            FileManager.default.createFile(atPath: logPath, contents: line.data(using: .utf8))
-        }
-	        #endif
         guard let view = attachedView,
               view.window != nil,
               view.bounds.width > 0,

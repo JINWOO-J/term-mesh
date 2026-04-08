@@ -3,6 +3,33 @@ import UserNotifications
 import WebKit
 import os
 
+// MARK: - Dashboard Preset
+
+enum DashboardPreset: String {
+    case overview, teamOps, devOps, cost
+}
+
+// MARK: - Agent Timeline
+
+struct AgentTimelineEntry {
+    let agentName: String
+    let status: String  // idle, working, blocked, done
+    let taskTitle: String?
+    let startTime: Date
+    var endTime: Date?
+}
+
+// MARK: - Agent Performance
+
+struct AgentPerformance {
+    let agentName: String
+    var completedTasks: Int
+    var totalDurationSecs: Double
+    var avgDurationSecs: Double
+    var fixAttempts: Int
+    var tokensUsed: Int64
+}
+
 /// Manages the term-mesh monitoring dashboard in a separate window.
 ///
 /// Watch criteria: each terminal tab's **project root** (detected by .git, Cargo.toml, etc.)
@@ -30,6 +57,19 @@ final class DashboardController: NSObject, WKNavigationDelegate {
     private var notifiedAlertPIDs: Set<Int32> = []
     /// Whether we've requested notification permission.
     private var notificationPermissionRequested = false
+
+    // MARK: - Preset Mode State
+
+    fileprivate var currentPreset: DashboardPreset = .overview
+    /// When true, auto-focus is suppressed because the user manually selected a preset.
+    fileprivate var userOverride: Bool = false
+
+    // MARK: - Agent Timeline & Performance
+
+    private var agentTimeline: [AgentTimelineEntry] = []
+    /// Last known agent statuses keyed by agent name, used to detect status changes.
+    private var lastAgentStatuses: [String: String] = [:]
+    private var agentPerformanceCache: [String: AgentPerformance] = [:]
 
     /// Reference to the tab manager (set from AppDelegate.configure)
     weak var tabManager: TabManager? {
@@ -81,6 +121,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
             config.userContentController.add(handler, name: "setAutoStop")
             config.userContentController.add(handler, name: "teamTaskAction")
             config.userContentController.add(handler, name: "teamTaskCreate")
+            config.userContentController.add(handler, name: "switchPreset")
         }
 
         let wv = WKWebView(frame: .zero, configuration: config)
@@ -206,9 +247,98 @@ final class DashboardController: NSObject, WKNavigationDelegate {
 
     private func syncTeamsToDaemon() {
         let payload = currentTeamPayload()
+        recordAgentTimeline(from: payload)
+        computeAgentPerformance(from: payload)
         DispatchQueue.global(qos: .utility).async {
             self.daemon.syncTeams(payload)
         }
+    }
+
+    // MARK: - Agent Timeline Recording
+
+    private func recordAgentTimeline(from payload: [String: Any]) {
+        guard let teams = payload["teams"] as? [[String: Any]] else { return }
+        let now = Date()
+        for team in teams {
+            guard let agents = team["agents"] as? [[String: Any]] else { continue }
+            for agent in agents {
+                guard let name = agent["name"] as? String else { continue }
+                let status = agent["agent_state"] as? String ?? "idle"
+                let taskTitle = agent["active_task_title"] as? String
+
+                let lastStatus = lastAgentStatuses[name]
+                if lastStatus != status {
+                    // Close the previous entry for this agent
+                    if let idx = agentTimeline.lastIndex(where: { $0.agentName == name && $0.endTime == nil }) {
+                        agentTimeline[idx].endTime = now
+                    }
+                    // Open a new entry
+                    agentTimeline.append(AgentTimelineEntry(
+                        agentName: name,
+                        status: status,
+                        taskTitle: taskTitle,
+                        startTime: now,
+                        endTime: nil
+                    ))
+                    lastAgentStatuses[name] = status
+
+                    // Cap at 100 entries
+                    if agentTimeline.count > 100 {
+                        agentTimeline.removeFirst(agentTimeline.count - 100)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Agent Performance Computation
+
+    private func computeAgentPerformance(from payload: [String: Any]) {
+        guard let tasks = payload["tasks"] as? [[String: Any]] else { return }
+        var stats: [String: AgentPerformance] = [:]
+
+        for task in tasks {
+            guard let assignee = task["assignee"] as? String, !assignee.isEmpty else { continue }
+            let status = task["status"] as? String ?? ""
+
+            if stats[assignee] == nil {
+                stats[assignee] = AgentPerformance(
+                    agentName: assignee,
+                    completedTasks: 0,
+                    totalDurationSecs: 0,
+                    avgDurationSecs: 0,
+                    fixAttempts: 0,
+                    tokensUsed: -1  // -1 signals N/A (no per-agent token tracking available)
+                )
+            }
+
+            if status == "completed" {
+                stats[assignee]?.completedTasks += 1
+                if let startedAt = task["started_at"] as? String,
+                   let completedAt = task["completed_at"] as? String {
+                    let fmt = ISO8601DateFormatter()
+                    if let start = fmt.date(from: startedAt), let end = fmt.date(from: completedAt) {
+                        let duration = end.timeIntervalSince(start)
+                        stats[assignee]?.totalDurationSecs += duration
+                    }
+                }
+            }
+
+            // fix_attempts: use reassignment_count from task data as proxy
+            if let fixes = task["reassignment_count"] as? Int {
+                stats[assignee]?.fixAttempts += fixes
+            }
+            // tokens_used: not directly in task data; default 0
+        }
+
+        // Compute averages
+        for key in stats.keys {
+            guard var perf = stats[key], perf.completedTasks > 0 else { continue }
+            perf.avgDurationSecs = perf.totalDurationSecs / Double(perf.completedTasks)
+            stats[key] = perf
+        }
+
+        agentPerformanceCache = stats
     }
 
     // MARK: - Budget Guard Alerts
@@ -528,8 +658,69 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                 if let tasksJson = Self.dashboardJSONString(teamTasks) {
                     webView.evaluateJavaScript("if(window.updateTeamTasks)updateTeamTasks(\(tasksJson));") { _, _ in }
                 }
+
+                // Task flow DAG data
+                let taskFlowPayload: [[String: Any]] = teamTasks.compactMap { task in
+                    guard let id = task["id"] as? String else { return nil }
+                    return [
+                        "id": id,
+                        "title": task["title"] as? String ?? "",
+                        "status": task["status"] as? String ?? "assigned",
+                        "assignee": task["assignee"] as? String ?? "",
+                        "dependsOn": task["depends_on"] as? [String] ?? [],
+                    ]
+                }
+                if let flowJson = Self.dashboardJSONString(taskFlowPayload) {
+                    webView.evaluateJavaScript("if(window.updateTaskFlow)updateTaskFlow(\(flowJson));") { _, _ in }
+                }
+
                 if let instanceJson = Self.dashboardJSONString(instanceMeta) {
                     webView.evaluateJavaScript("if(window.updateInstanceStatus)updateInstanceStatus(\(instanceJson));") { _, _ in }
+                }
+
+                // Agent timeline
+                let timelinePayload = self.agentTimeline.map { entry -> [String: Any] in
+                    var dict: [String: Any] = [
+                        "agentName": entry.agentName,
+                        "status": entry.status,
+                        "startTime": Int(entry.startTime.timeIntervalSince1970 * 1000),
+                    ]
+                    if let title = entry.taskTitle { dict["taskTitle"] = title }
+                    if let end = entry.endTime { dict["endTime"] = Int(end.timeIntervalSince1970 * 1000) }
+                    return dict
+                }
+                if let timelineJson = Self.dashboardJSONString(timelinePayload) {
+                    webView.evaluateJavaScript("if(window.updateTimeline)updateTimeline(\(timelineJson));") { _, _ in }
+                }
+
+                // Agent performance
+                let perfPayload = Array(self.agentPerformanceCache.values).map { p -> [String: Any] in
+                    [
+                        "agentName": p.agentName,
+                        "completedTasks": p.completedTasks,
+                        "totalDurationSecs": p.totalDurationSecs,
+                        "avgDurationSecs": p.avgDurationSecs,
+                        "fixAttempts": p.fixAttempts,
+                        "tokensUsed": p.tokensUsed,
+                    ]
+                }
+                if let perfJson = Self.dashboardJSONString(perfPayload) {
+                    webView.evaluateJavaScript("if(window.updatePerformance)updatePerformance(\(perfJson));") { _, _ in }
+                }
+
+                // Context-based auto-focus (skip if user manually selected a preset)
+                if !self.userOverride {
+                    let hasTeams = !teamData.isEmpty
+                    let hasAttention = !teamAttention.isEmpty
+                    let focusTarget: String
+                    if hasAttention {
+                        focusTarget = "attention"
+                    } else if hasTeams {
+                        focusTarget = "teamOps"
+                    } else {
+                        focusTarget = "overview"
+                    }
+                    webView.evaluateJavaScript("if(window.setAutoFocus)setAutoFocus('\(focusTarget)');") { _, _ in }
                 }
             }
         }
@@ -711,6 +902,13 @@ private class DashboardMessageHandler: NSObject, WKScriptMessageHandler {
             let assignee = body["assignee"] as? String
             Task { @MainActor in
                 self.controller?.handleTeamTaskCreate(teamName: teamName, title: title, assignee: assignee)
+            }
+        case "switchPreset":
+            guard let presetStr = message.body as? String,
+                  let preset = DashboardPreset(rawValue: presetStr) else { return }
+            Task { @MainActor in
+                self.controller?.currentPreset = preset
+                self.controller?.userOverride = true
             }
         default:
             break

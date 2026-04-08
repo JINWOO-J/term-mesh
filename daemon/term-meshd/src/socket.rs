@@ -8,7 +8,7 @@ use tokio::sync::watch;
 
 use crate::agent::AgentSessionManager;
 use crate::headless::HeadlessManager;
-use crate::monitor::{MonitorHandle, SystemSnapshot};
+use crate::monitor::{Anomaly, MonitorHandle, SystemSnapshot};
 use crate::tokens::UsageTracker;
 use crate::watcher::WatcherHandle;
 use crate::worktree;
@@ -369,6 +369,14 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
                         "memory_threshold_bytes": ctx.monitor_handle.memory_threshold(),
                         "auto_stop": ctx.monitor_handle.is_auto_stop(),
                     });
+                    // Inject agent anomalies computed from task/session state.
+                    let extra_anomalies = compute_agent_anomalies(&ctx.agent_manager);
+                    if !extra_anomalies.is_empty() {
+                        let existing = value["anomalies"].as_array().cloned().unwrap_or_default();
+                        let mut all = existing;
+                        all.extend(extra_anomalies.into_iter().map(|a| serde_json::to_value(a).unwrap()));
+                        value["anomalies"] = serde_json::json!(all);
+                    }
                     Ok(value)
                 }
                 None => Ok(serde_json::json!({})),
@@ -803,4 +811,75 @@ async fn dispatch(req: &Request, ctx: &Context) -> Response {
             }),
         },
     }
+}
+
+/// Compute no_heartbeat and repeated_failure anomalies from daemon task state.
+///
+/// - no_heartbeat: in_progress tasks whose `updated_at_ms` is older than 5 minutes.
+/// - repeated_failure: tasks where fix_count >= 3.
+fn compute_agent_anomalies(agent_manager: &AgentSessionManager) -> Vec<Anomaly> {
+    let params = crate::agent::TaskListParams { status: None, assignee: None };
+    let tasks = agent_manager.task_list(params);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let five_min_ms: u64 = 5 * 60 * 1000;
+
+    let mut anomalies = Vec::new();
+    let detected_at = {
+        let secs = now_ms / 1000;
+        let s = secs % 60;
+        let m = (secs / 60) % 60;
+        let h = (secs / 3600) % 24;
+        let days = secs / 86400;
+        let jd = days as i64 + 2440588;
+        let p = jd + 68569;
+        let q = 4 * p / 146097;
+        let r = p - (146097 * q + 3) / 4;
+        let s2 = 4000 * (r + 1) / 1461001;
+        let r2 = r - 1461 * s2 / 4 + 31;
+        let month = 80 * r2 / 2447;
+        let day = r2 - 2447 * month / 80;
+        let month2 = month + 2 - 12 * (month / 11);
+        let year = 100 * (q - 49) + s2 + month / 11;
+        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month2, day, h, m, s)
+    };
+
+    for task in &tasks {
+        // no_heartbeat: task is in_progress and hasn't been updated in 5+ minutes
+        if matches!(task.status, crate::agent::TaskStatus::InProgress)
+            && now_ms.saturating_sub(task.updated_at_ms) >= five_min_ms
+        {
+            let idle_mins = now_ms.saturating_sub(task.updated_at_ms) / 60_000;
+            let agent_id = task.assignee.clone().unwrap_or_else(|| task.id.clone());
+            anomalies.push(Anomaly {
+                agent_id,
+                kind: "no_heartbeat".into(),
+                message: format!(
+                    "Task '{}' (id={}) has been in_progress with no update for {}m",
+                    task.title, task.id, idle_mins
+                ),
+                severity: if idle_mins >= 10 { "critical".into() } else { "warning".into() },
+                detected_at: detected_at.clone(),
+            });
+        }
+
+        // repeated_failure: fix_count >= 3
+        if task.fix_count >= 3 {
+            let agent_id = task.assignee.clone().unwrap_or_else(|| task.id.clone());
+            anomalies.push(Anomaly {
+                agent_id,
+                kind: "repeated_failure".into(),
+                message: format!(
+                    "Task '{}' (id={}) has had {} fix attempts",
+                    task.title, task.id, task.fix_count
+                ),
+                severity: if task.fix_count >= 5 { "critical".into() } else { "warning".into() },
+                detected_at: detected_at.clone(),
+            });
+        }
+    }
+
+    anomalies
 }

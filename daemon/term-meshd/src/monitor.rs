@@ -1,8 +1,11 @@
 use serde::Serialize;
-use std::collections::HashSet;
-use sysinfo::{Disks, Pid, ProcessesToUpdate, System};
+use std::collections::{HashMap, HashSet};
+use sysinfo::{Disks, Networks, Pid, ProcessesToUpdate, System};
 use tokio::sync::watch;
 use tokio::time::{interval, Duration};
+
+// Sustained high-CPU threshold: 15 ticks × 2s = 30 seconds
+const HIGH_CPU_TICKS_THRESHOLD: u32 = 15;
 
 /// Snapshot of a single process's resource usage.
 #[derive(Debug, Clone, Serialize)]
@@ -13,6 +16,51 @@ pub struct ProcessSnapshot {
     pub cpu_percent: f32,
     pub memory_bytes: u64,
     pub stopped: bool,
+    /// First 200 chars of the command line (space-joined argv).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cmdline: Option<String>,
+    /// Seconds the process has been running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_secs: Option<u64>,
+    /// Number of threads (Linux only; None on macOS).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_count: Option<u32>,
+}
+
+/// Per-network-interface I/O.
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkIO {
+    pub name: String,
+    /// Total bytes received since process start.
+    pub rx_bytes: u64,
+    /// Total bytes transmitted since process start.
+    pub tx_bytes: u64,
+    /// Received bytes/sec (delta since last tick).
+    pub rx_rate: f64,
+    /// Transmitted bytes/sec (delta since last tick).
+    pub tx_rate: f64,
+}
+
+/// Per-disk-mount space info.
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskInfo {
+    pub mount_point: String,
+    pub total: u64,
+    pub used: u64,
+    pub available: u64,
+}
+
+/// Agent anomaly detected by the monitor.
+#[derive(Debug, Clone, Serialize)]
+pub struct Anomaly {
+    pub agent_id: String,
+    /// "no_heartbeat" | "repeated_failure" | "high_resource"
+    pub kind: String,
+    pub message: String,
+    /// "warning" | "critical"
+    pub severity: String,
+    /// ISO 8601 UTC timestamp.
+    pub detected_at: String,
 }
 
 /// System-wide resource snapshot.
@@ -24,7 +72,7 @@ pub struct SystemSnapshot {
     pub memory_percent: f32,
     pub cpu_count: usize,
     pub cpu_usage_percent: f32,
-    /// Disk totals
+    /// Disk totals (aggregate of all mounts)
     pub disk_total_bytes: u64,
     pub disk_available_bytes: u64,
     /// Aggregate disk I/O from tracked processes (bytes since last tick)
@@ -34,6 +82,23 @@ pub struct SystemSnapshot {
     pub processes: Vec<ProcessSnapshot>,
     /// Budget guard alerts
     pub alerts: Vec<BudgetAlert>,
+    // ── New fields ──
+    /// 1-minute, 5-minute, 15-minute load averages.
+    pub load_avg: [f64; 3],
+    /// Total swap memory in bytes.
+    pub swap_total: u64,
+    /// Used swap memory in bytes.
+    pub swap_used: u64,
+    /// Per-interface network I/O.
+    pub network_io: Vec<NetworkIO>,
+    /// Per-CPU-core usage percentages.
+    pub per_core_cpu: Vec<f32>,
+    /// Per-mount-point disk space breakdown.
+    pub disk_space: Vec<DiskInfo>,
+    /// Anomalies detected by the resource monitor (high_resource).
+    /// no_heartbeat / repeated_failure are injected in socket.rs.
+    #[serde(default)]
+    pub anomalies: Vec<Anomaly>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,6 +139,30 @@ fn send_signal(pid: u32, signal: i32) -> bool {
     unsafe { libc::kill(pid as i32, signal) == 0 }
 }
 
+fn iso8601_now() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    // Simple ISO 8601 UTC formatter without chrono dependency.
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let days = secs / 86400;
+    // Julian Date → Gregorian calendar (Meeus algorithm)
+    let jd = days as i64 + 2440588; // 1970-01-01 = JD 2440588
+    let p = jd + 68569;
+    let q = 4 * p / 146097;
+    let r = p - (146097 * q + 3) / 4;
+    let s2 = 4000 * (r + 1) / 1461001;
+    let r2 = r - 1461 * s2 / 4 + 31;
+    let month = 80 * r2 / 2447;
+    let day = r2 - 2447 * month / 80;
+    let month2 = month + 2 - 12 * (month / 11);
+    let year = 100 * (q - 49) + s2 + month / 11;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month2, day, h, m, s)
+}
+
 /// Start background resource monitor with auto-process-discovery.
 /// Watch paths are managed separately by the Swift app (per terminal tab).
 pub fn start_monitor(
@@ -93,8 +182,13 @@ pub fn start_monitor(
     tokio::spawn(async move {
         let mut sys = System::new_all();
         let mut disks = Disks::new_with_refreshed_list();
+        let mut networks = Networks::new_with_refreshed_list();
         let mut tick = interval(Duration::from_secs(2));
         let mut tick_count: u64 = 0;
+        // Track previous per-interface totals for rate calculation.
+        let mut prev_net: HashMap<String, (u64, u64)> = HashMap::new();
+        // Track consecutive ticks where each PID exceeded the CPU threshold.
+        let mut high_cpu_ticks: HashMap<u32, u32> = HashMap::new();
 
         loop {
             tick.tick().await;
@@ -107,6 +201,8 @@ pub fn start_monitor(
             if tick_count % 15 == 1 {
                 disks.refresh(false);
             }
+            // Refresh network stats every tick
+            networks.refresh(false);
 
             // Only refresh tracked PIDs (registered by Swift app via monitor.track RPC)
             let tracked_snapshot: Vec<u32> = pids.lock().unwrap().clone();
@@ -126,6 +222,8 @@ pub fn start_monitor(
                 let mut stopped_set = stopped.lock().unwrap();
                 stopped_set.retain(|&pid| sys.process(Pid::from_u32(pid)).is_some());
             }
+            // Clean up high_cpu_ticks for dead processes
+            high_cpu_ticks.retain(|&pid, _| sys.process(Pid::from_u32(pid)).is_some());
 
             let tracked: Vec<u32> = pids.lock().unwrap().clone();
             let stopped_set: HashSet<u32> = stopped.lock().unwrap().clone();
@@ -133,6 +231,7 @@ pub fn start_monitor(
 
             let mut processes = Vec::new();
             let mut alerts = Vec::new();
+            let mut anomalies: Vec<Anomaly> = Vec::new();
 
             for &pid in &tracked {
                 if let Some(proc) = sys.process(Pid::from_u32(pid)) {
@@ -142,6 +241,25 @@ pub fn start_monitor(
                     let name = proc.name().to_string_lossy().into_owned();
                     let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
 
+                    // cmdline: join argv, truncate to 200 chars
+                    let cmdline: Option<String> = {
+                        let args: Vec<String> = proc.cmd()
+                            .iter()
+                            .map(|a| a.to_string_lossy().into_owned())
+                            .collect();
+                        if args.is_empty() {
+                            None
+                        } else {
+                            let joined = args.join(" ");
+                            Some(if joined.len() > 200 { joined[..200].to_string() } else { joined })
+                        }
+                    };
+
+                    let runtime_secs: Option<u64> = Some(proc.run_time());
+
+                    // thread_count: available on Linux via tasks(); None on macOS
+                    let thread_count: Option<u32> = proc.tasks().map(|t| t.len() as u32);
+
                     processes.push(ProcessSnapshot {
                         pid,
                         ppid,
@@ -149,6 +267,9 @@ pub fn start_monitor(
                         cpu_percent: cpu,
                         memory_bytes: mem,
                         stopped: is_stopped,
+                        cmdline,
+                        runtime_secs,
+                        thread_count,
                     });
 
                     // Skip threshold checks for already-stopped processes
@@ -174,7 +295,26 @@ pub fn start_monitor(
                             threshold: config.cpu_threshold_percent as f64,
                             action: action.into(),
                         });
+
+                        // Track sustained high CPU for anomaly detection
+                        let count = high_cpu_ticks.entry(pid).or_insert(0);
+                        *count += 1;
+                        if *count == HIGH_CPU_TICKS_THRESHOLD {
+                            anomalies.push(Anomaly {
+                                agent_id: format!("pid:{pid}"),
+                                kind: "high_resource".into(),
+                                message: format!(
+                                    "Process '{name}' (PID {pid}) sustained {cpu:.1}% CPU for 30s",
+                                ),
+                                severity: "warning".into(),
+                                detected_at: iso8601_now(),
+                            });
+                        }
+                    } else {
+                        // Reset counter when CPU drops below threshold
+                        high_cpu_ticks.remove(&pid);
                     }
+
                     if mem > config.memory_threshold_bytes {
                         let action = if should_auto_stop {
                             if send_signal(pid, libc::SIGSTOP) {
@@ -202,10 +342,25 @@ pub fn start_monitor(
             // System-wide CPU
             let cpu_usage = sys.global_cpu_usage();
 
+            // Per-core CPU
+            let per_core_cpu: Vec<f32> = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
+
             // Disk space
             let (disk_total, disk_avail) = disks.list().iter().fold((0u64, 0u64), |(t, a), d| {
                 (t + d.total_space(), a + d.available_space())
             });
+
+            let disk_space: Vec<DiskInfo> = disks.list().iter().map(|d| {
+                let total = d.total_space();
+                let avail = d.available_space();
+                let used = total.saturating_sub(avail);
+                DiskInfo {
+                    mount_point: d.mount_point().to_string_lossy().into_owned(),
+                    total,
+                    used,
+                    available: avail,
+                }
+            }).collect();
 
             // System-wide disk I/O: aggregate across ALL processes
             // disk_usage().read_bytes is bytes since last refresh (already a delta)
@@ -215,6 +370,36 @@ pub fn start_monitor(
             });
             let read_per_sec = io_read / 2; // 2s interval
             let write_per_sec = io_write / 2;
+
+            // Network I/O with rate calculation
+            let mut network_io: Vec<NetworkIO> = Vec::new();
+            for (iface_name, data) in networks.iter() {
+                let rx_total = data.total_received();
+                let tx_total = data.total_transmitted();
+                let (rx_rate, tx_rate) = if let Some(&(prev_rx, prev_tx)) = prev_net.get(iface_name) {
+                    let rx_delta = rx_total.saturating_sub(prev_rx);
+                    let tx_delta = tx_total.saturating_sub(prev_tx);
+                    (rx_delta as f64 / 2.0, tx_delta as f64 / 2.0) // 2s interval
+                } else {
+                    (0.0, 0.0)
+                };
+                prev_net.insert(iface_name.clone(), (rx_total, tx_total));
+                network_io.push(NetworkIO {
+                    name: iface_name.clone(),
+                    rx_bytes: rx_total,
+                    tx_bytes: tx_total,
+                    rx_rate,
+                    tx_rate,
+                });
+            }
+
+            // Load average
+            let la = System::load_average();
+            let load_avg = [la.one, la.five, la.fifteen];
+
+            // Swap
+            let swap_total = sys.total_swap();
+            let swap_used = sys.used_swap();
 
             let total_mem = sys.total_memory();
             let used_mem = sys.used_memory();
@@ -236,6 +421,13 @@ pub fn start_monitor(
                 disk_write_bytes_per_sec: write_per_sec,
                 processes,
                 alerts,
+                load_avg,
+                swap_total,
+                swap_used,
+                network_io,
+                per_core_cpu,
+                disk_space,
+                anomalies,
             };
 
             let _ = tx.send(Some(snapshot));

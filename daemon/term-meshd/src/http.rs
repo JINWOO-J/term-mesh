@@ -1029,8 +1029,10 @@ fn find_dashboard_dir() -> Option<PathBuf> {
 const HTTP_POLL_SCRIPT: &str = r#"<script>
 // ── HTTP Fetch Polling + Session Picker (injected by term-meshd) ──
 (function() {
-  const isWKWebView = window.webkit && window.webkit.messageHandlers;
-  if (isWKWebView) return;
+  // Only skip polling if this is the dedicated dashboard WKWebView (has stopProcess handler).
+  // Split/browser panels are also WKWebView but lack dashboard-specific handlers.
+  const isDashboardWKWebView = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.stopProcess;
+  if (isDashboardWKWebView) return;
 
   const POLL_INTERVAL = 2000;
   const baseUrl = window.location.origin;

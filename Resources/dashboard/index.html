@@ -953,8 +953,171 @@
   }
   .status.connecting::before {
     background: var(--warning);
-    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+    box-shadow: 0 0 0 4px rgba(24, 211, 238, 0.12);
   }
+
+  /* Preset Switcher */
+  .preset-switcher {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .preset-switcher button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 6px 4px;
+    border-radius: 7px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .preset-switcher button.active {
+    background: var(--accent);
+    color: #000;
+  }
+  .preset-switcher button:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+  }
+
+  /* Per-Core CPU Heatmap */
+  .core-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+    gap: 4px;
+    margin-top: 8px;
+  }
+  .core-cell {
+    height: 30px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(0, 0, 0, 0.7);
+    transition: background 0.3s ease;
+  }
+
+  /* Notification Bell */
+  .notification-bell {
+    position: relative;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(129, 154, 145, 0.08);
+    border: 1px solid rgba(129, 154, 145, 0.16);
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .notification-bell:hover {
+    background: rgba(129, 154, 145, 0.15);
+    color: var(--text);
+  }
+  .notification-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: var(--danger);
+    color: white;
+    font-size: 9px;
+    font-weight: 800;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--bg);
+  }
+  .notification-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 320px;
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    display: none;
+    z-index: 100;
+    overflow: hidden;
+    backdrop-filter: blur(20px);
+  }
+  .notification-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .notification-list {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .notification-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    gap: 12px;
+  }
+  .notification-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .notification-item .icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .notification-content { flex: 1; }
+  .notification-msg { font-size: 11px; line-height: 1.4; margin-bottom: 4px; }
+  .notification-meta { font-size: 10px; color: var(--text-dim); }
+
+  /* Gantt & Flow placeholders */
+  .timeline-container, .flow-container {
+    width: 100%;
+    min-height: 300px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    overflow: auto;
+    position: relative;
+  }
+  .performance-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .performance-table th {
+    text-align: left;
+    padding: 8px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+  }
+  .performance-table td {
+    padding: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .perf-bar-bg { height: 4px; background: rgba(255, 255, 255, 0.05); border-radius: 2px; width: 60px; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .perf-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+
+  /* Section management */
+  .dashboard-section { transition: opacity 0.3s ease; }
   .metrics-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -993,7 +1156,7 @@
   }
   .card { grid-column: span 6; }
   .card.full { grid-column: 1 / -1; }
-  #agents-card, #tasks-card, #team-tasks-card, #team-attention-card { grid-column: 1 / -1; }
+  #agents-card, #tasks-card, #team-tasks-card, #team-attention-card { grid-column: span 6; }
   #messages-card, #heatmap, #event-log { min-width: 0; }
   #messages-card { grid-column: span 6; }
   .section-anchor { scroll-margin-top: 24px; }
@@ -1029,9 +1192,19 @@
     .content-shell { padding: 12px; }
     .topbar { flex-direction: column; align-items: stretch; }
     .topbar-actions { margin-left: 0; flex-direction: column; align-items: stretch; }
-    .metrics-grid { grid-template-columns: 1fr; }
+    .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .grid { grid-template-columns: 1fr; }
-    .card, .card.full, #messages-card { grid-column: auto; }
+    .card, .card.full, #messages-card,
+    #agents-card, #tasks-card, #team-tasks-card, #team-attention-card { grid-column: auto; }
+    /* Prevent inner grids from forcing horizontal scroll */
+    #system-stats { grid-template-columns: 1fr 1fr !important; }
+    #system-extended { grid-template-columns: 1fr !important; }
+    .core-grid { grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)) !important; }
+    /* Kanban becomes vertical on mobile */
+    .kanban-board { grid-template-columns: 1fr !important; }
+    /* Tables and wide content scroll inside their card, not the page */
+    .card { overflow-x: auto; min-width: 0; }
+    .card > * { min-width: 0; }
   }
 </style>
 </head>
@@ -1051,25 +1224,34 @@
         <span class="brand-instance" id="brand-instance">waiting for instance sync</span>
       </div>
     </div>
+
+    <div class="preset-switcher">
+      <button data-preset="overview" class="active" onclick="switchPreset('overview')">Overview</button>
+      <button data-preset="teamOps" onclick="switchPreset('teamOps')">Team Ops</button>
+      <button data-preset="devOps" onclick="switchPreset('devOps')">DevOps</button>
+      <button data-preset="cost" onclick="switchPreset('cost')">Cost</button>
+    </div>
+
     <div class="sidebar-section">
       <div class="sidebar-label">Operations</div>
       <nav class="sidebar-nav">
-        <a class="active" href="#overview">Executive Summary</a>
-        <a href="#team-attention-card">Needs Attention</a>
-        <a href="#team-completions-card">Recent Completions</a>
-        <a href="#team-tasks-card">Team Tasks</a>
-        <a href="#messages-card">Messages</a>
-        <a href="#agents-card">Agents</a>
-        <a href="#tasks-card">Daemon Tasks</a>
+        <a class="active" href="#overview" data-presets="overview,teamOps,devOps,cost">Executive Summary</a>
+        <a href="#team-attention-card" data-presets="overview,teamOps">Needs Attention</a>
+        <a href="#team-completions-card" data-presets="teamOps">Recent Completions</a>
+        <a href="#team-tasks-card" data-presets="overview,teamOps">Team Tasks</a>
+        <a href="#messages-card" data-presets="teamOps">Messages</a>
+        <a href="#agents-card" data-presets="overview,teamOps">Agents</a>
+        <a href="#tasks-card" data-presets="overview,devOps">Daemon Tasks</a>
       </nav>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">Diagnostics</div>
       <nav class="sidebar-nav">
-        <a href="#process-monitor">Processes</a>
-        <a href="#file-activity">File Activity</a>
-        <a href="#heatmap-card">Heatmap</a>
-        <a href="#events-card">Events</a>
+        <a href="#process-monitor" data-presets="devOps">Processes</a>
+        <a href="#file-activity" data-presets="teamOps,devOps">File Activity</a>
+        <a href="#heatmap-card" data-presets="devOps">Heatmap</a>
+        <a href="#events-card" data-presets="devOps">Events</a>
+        <a href="#alert-history-card" data-presets="overview,teamOps,devOps,cost">Alert History</a>
       </nav>
     </div>
     <div class="sidebar-meta">
@@ -1089,12 +1271,25 @@
       </div>
       <div class="topbar-actions">
         <div id="session-picker"></div>
+        <div class="notification-bell" onclick="toggleNotificationPanel()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+          <div id="notification-badge" class="notification-badge">0</div>
+          <div id="notification-panel" class="notification-panel">
+            <div class="notification-header">
+              <span>Notifications</span>
+              <button class="proc-btn" style="margin:0;font-size:9px" onclick="clearNotifications(event)">Clear All</button>
+            </div>
+            <div id="notification-list" class="notification-list">
+              <div class="empty" style="padding:20px">No notifications</div>
+            </div>
+          </div>
+        </div>
         <span class="topbar-chip" id="instance-status"><span class="chip-label">instance</span><strong>loading...</strong></span>
         <span class="status connecting" id="status">connecting</span>
       </div>
     </div>
 
-    <div class="metrics-grid">
+    <div class="metrics-grid dashboard-section" data-presets="overview,teamOps,devOps,cost">
       <div class="metric-card">
         <div class="label">Teams</div>
         <div class="value" id="summary-team-count">0</div>
@@ -1118,20 +1313,63 @@
     </div>
 
     <div class="grid">
-  <!-- Watched Projects (per terminal tab) -->
-  <div class="card full">
-    <h2>Watched Projects (per terminal tab)</h2>
+  <!-- Agent Timeline (Team Ops) -->
+  <div class="card full dashboard-section" data-presets="teamOps" id="agent-timeline-card">
+    <h2>Agent Timeline</h2>
+    <div class="chart-container" style="height:250px">
+      <canvas id="timelineGanttChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Task Flow (Team Ops) -->
+  <div class="card full dashboard-section" data-presets="teamOps" id="task-flow-card">
+    <h2>Task Flow (DAG)</h2>
+    <div id="task-flow-container" class="flow-container">
+      <svg id="task-flow-svg" width="100%" height="400"></svg>
+    </div>
+  </div>
+
+  <!-- Agent Performance (Team Ops) -->
+  <div class="card full dashboard-section" data-presets="teamOps" id="agent-performance-card">
+    <h2>Agent Performance</h2>
+    <div id="agent-performance-list"></div>
+  </div>
+
+  <!-- Cache Efficiency (Cost) -->
+  <div class="card dashboard-section" data-presets="cost">
+    <h2>Cache Efficiency</h2>
+    <div style="display:flex;gap:14px;align-items:center">
+      <div style="width:140px;height:140px"><canvas id="cacheDonutChart"></canvas></div>
+      <div id="cache-stats" style="flex:1"></div>
+    </div>
+  </div>
+
+  <!-- Cost Summary (Cost) -->
+  <div class="card dashboard-section" data-presets="cost">
+    <h2>Cost by Model</h2>
+    <div id="model-cost-chart" style="height:140px"><canvas id="costBarChart"></canvas></div>
+  </div>
+
+  <!-- Alert History (All) -->
+  <div class="card full dashboard-section" data-presets="overview,teamOps,devOps,cost" id="alert-history-card">
+    <h2>Alert History</h2>
+    <div id="alert-history-list" class="event-log" style="max-height:200px">
+      <div class="empty">No alerts yet</div>
+    </div>
+  </div>
+
+  <!-- Watched Projects + Agent Status + Team Overview — side by side -->
+  <div class="card dashboard-section" data-presets="overview,devOps">
+    <h2>Watched Projects</h2>
     <div id="watched-projects"><div class="empty">No projects watched</div></div>
   </div>
 
-  <!-- Agent Status -->
-  <div class="card full" id="agent-status-card" style="display:none">
+  <div class="card dashboard-section" id="agent-status-card" data-presets="overview,teamOps" style="display:none">
     <h2>Agent Status</h2>
     <div id="agent-status"></div>
   </div>
 
-  <!-- Team Overview -->
-  <div class="card full" id="team-overview-card">
+  <div class="card full dashboard-section" id="team-overview-card" data-presets="overview,teamOps">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <h2>Team Overview</h2>
       <div style="display:flex;gap:6px">
@@ -1159,7 +1397,7 @@
   </div>
 
   <!-- System Resources -->
-  <div class="card">
+  <div class="card dashboard-section" data-presets="overview,devOps">
     <h2>System</h2>
     <div id="system-stats" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">
       <div class="sys-metric">
@@ -1207,43 +1445,80 @@
     </div>
   </div>
 
+  <!-- System Extended (Overview, DevOps) -->
+  <div class="card dashboard-section" data-presets="overview,devOps">
+    <h2>System Extended</h2>
+    <div id="system-extended" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div>
+        <div class="sys-metric-header">
+          <span class="sys-metric-label">Load Average (1/5/15)</span>
+          <span class="sys-metric-value" id="load-avg">—</span>
+        </div>
+        <div id="load-bars" style="display:flex;gap:4px;height:24px;align-items:end"></div>
+      </div>
+      <div>
+        <div class="sys-metric-header">
+          <span class="sys-metric-label">Swap Usage</span>
+          <span class="sys-metric-value" id="swap-val">—</span>
+        </div>
+        <div class="sys-bar-track"><div class="sys-bar-fill" id="swap-bar" style="background:var(--warning)"></div></div>
+      </div>
+      <div style="grid-column: 1 / -1; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="document.getElementById('network-io-detail').style.display=document.getElementById('network-io-detail').style.display==='none'?'block':'none'; this.querySelector('.tree-toggle').textContent=document.getElementById('network-io-detail').style.display==='none'?'▶':'▼'">
+          <span class="sys-metric-label">Network I/O</span>
+          <span style="display:flex;align-items:center;gap:8px">
+            <span class="sys-metric-value" id="network-io-total">—</span>
+            <span class="tree-toggle">▶</span>
+          </span>
+        </div>
+        <div id="network-io-detail" style="display:none;margin-top:6px">
+          <div id="network-io"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Per-Core CPU (DevOps) -->
+  <div class="card dashboard-section" data-presets="devOps">
+    <h2>Per-Core CPU Heatmap</h2>
+    <div id="per-core-cpu" class="core-grid"></div>
+  </div>
+
   <!-- API Usage (Claude Code JSONL) -->
-  <div class="card">
+  <div class="card dashboard-section" data-presets="overview,cost">
     <h2>API Usage</h2>
     <div id="usage-stats"><div class="empty">Scanning...</div></div>
   </div>
 
-  <!-- Agent Sessions (full width) -->
-  <div class="card full" id="agents-card">
+  <!-- Agent Sessions + Needs Attention — side by side -->
+  <div class="card dashboard-section" id="agents-card" data-presets="overview,teamOps">
     <h2>Agent Sessions</h2>
     <div id="agents-list"><div class="empty">No agents</div></div>
   </div>
 
-  <!-- Team Attention -->
-  <div class="card full" id="team-attention-card" style="display:none">
+  <div class="card dashboard-section" id="team-attention-card" data-presets="overview,teamOps" style="display:none">
     <h2>Needs Attention</h2>
     <div id="team-attention-list"></div>
   </div>
 
-  <div class="card full" id="leader-console-card" style="display:none">
+  <div class="card full dashboard-section" id="leader-console-card" data-presets="teamOps" style="display:none">
     <h2>Leader Console</h2>
     <div id="leader-console"></div>
   </div>
 
-  <div class="card full" id="team-completions-card" style="display:none">
+  <div class="card full dashboard-section" id="team-completions-card" data-presets="teamOps" style="display:none">
     <h2>Recent Completions</h2>
     <div id="team-completions-list"></div>
   </div>
 
-  <!-- Task Board (full width) -->
-  <div class="card full" id="tasks-card">
+  <!-- Daemon Tasks + Team Tasks — side by side -->
+  <div class="card dashboard-section" id="tasks-card" data-presets="overview,devOps">
     <h2>Daemon Tasks</h2>
     <div id="tasks-toolbar"></div>
     <div id="tasks-board"><div class="empty">No tasks</div></div>
   </div>
 
-  <!-- Team Tasks -->
-  <div class="card full" id="team-tasks-card">
+  <div class="card dashboard-section" id="team-tasks-card" data-presets="overview,teamOps">
     <h2>Team Tasks</h2>
     <div id="team-tasks-toolbar"></div>
     <div id="team-tasks-board" class="kanban-board">
@@ -1263,14 +1538,14 @@
   </div>
 
   <!-- Budget Guard -->
-  <div class="card">
+  <div class="card dashboard-section" data-presets="overview,cost">
     <h2>Budget Guard</h2>
     <div id="budget-overview"></div>
     <div id="alerts" style="margin-top:8px"></div>
   </div>
 
   <!-- Process Monitor Chart -->
-  <div class="card full section-anchor" id="process-monitor">
+  <div class="card full section-anchor dashboard-section" id="process-monitor" data-presets="devOps">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <h2 style="margin-bottom:0">Process Monitor</h2>
       <button id="proc-expand-all" class="proc-btn" onclick="toggleAllProcesses()">Expand All</button>
@@ -1282,7 +1557,7 @@
   </div>
 
   <!-- File Activity Timeline -->
-  <div class="card full section-anchor" id="file-activity">
+  <div class="card full section-anchor dashboard-section" id="file-activity" data-presets="teamOps,devOps">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
       <h2 style="margin-bottom:0">File Activity Timeline</h2>
       <div class="event-filters" style="margin-bottom:0">
@@ -1298,13 +1573,13 @@
   </div>
 
   <!-- File Heatmap Tree -->
-  <div class="card full section-anchor" id="heatmap-card">
+  <div class="card full section-anchor dashboard-section" id="heatmap-card" data-presets="devOps">
     <h2>File Heatmap</h2>
     <div id="heatmap"><div class="empty">No files tracked</div></div>
   </div>
 
   <!-- Event Log -->
-  <div class="card full section-anchor" id="events-card">
+  <div class="card full section-anchor dashboard-section" id="events-card" data-presets="devOps">
     <h2>Recent Events</h2>
     <div class="event-filters" id="event-filters">
       <span class="event-filter-chip active" data-filter="all" onclick="setEventFilter('all')">All</span>
@@ -1317,7 +1592,7 @@
   </div>
 
   <!-- Messages -->
-  <div class="card section-anchor" id="messages-card">
+  <div class="card section-anchor dashboard-section" id="messages-card" data-presets="teamOps">
     <h2>Messages</h2>
     <div id="messages-list"><div class="empty">No messages</div></div>
   </div>
@@ -1337,8 +1612,307 @@ let watchedPaths = []; // tracks current watched project roots
 let activeEventFilter = 'all';
 let timelineRangeMinutes = 10;
 
-// ── Helpers ──
+let currentPreset = 'overview';
+let userManualPreset = false;
+let alertHistory = [];
+let timelineGanttChart = null;
+let cacheDonutChart = null;
+let costBarChart = null;
+
+// ── Preset Management ──
+function switchPreset(preset) {
+  currentPreset = preset;
+  // Update buttons
+  document.querySelectorAll('.preset-switcher button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.preset === preset);
+  });
+  // Update sidebar links active state
+  document.querySelectorAll('.sidebar-nav a').forEach(a => {
+    const presets = a.dataset.presets || '';
+    if (presets.includes(preset)) {
+      // a.style.display = 'block'; // Keep links visible but maybe dim? 
+      // Requirement says "Sections display", let's focus on sections first.
+    }
+  });
+  // Update sections — use '' (not 'block') to preserve CSS display (grid, flex, etc.)
+  document.querySelectorAll('.dashboard-section').forEach(section => {
+    const presets = section.dataset.presets || '';
+    if (presets.includes(preset)) {
+      const isEmpty = section.id === 'agent-status-card' || section.id === 'team-attention-card' || section.id === 'leader-console-card' || section.id === 'team-completions-card';
+      if (isEmpty && section.innerHTML.includes('empty')) {
+        section.style.display = 'none';
+      } else {
+        section.style.display = '';
+        section.style.opacity = '0';
+        setTimeout(() => section.style.opacity = '1', 50);
+      }
+    } else {
+      section.style.display = 'none';
+    }
+  });
+
+  // Special layout adjustments for DevOps (Process Monitor full width)
+  const procMon = document.getElementById('process-monitor');
+  if (procMon) {
+    procMon.classList.toggle('full', preset === 'devOps');
+  }
+
+  // Swift notification
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.switchPreset) {
+    window.webkit.messageHandlers.switchPreset.postMessage(preset);
+  }
+}
+
+function setAutoFocus(context) {
+  if (userManualPreset) return;
+  const target = (context === 'teamOps' || context === 'attention') ? 'teamOps' : 'overview';
+  if (currentPreset !== target) switchPreset(target);
+}
+
+// ── Notifications ──
+function toggleNotificationPanel() {
+  const panel = document.getElementById('notification-panel');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function clearNotifications(e) {
+  e.stopPropagation();
+  alertHistory = [];
+  updateAlertUI();
+}
+
+function addAlert(alert) {
+  // agent_id + kind 조합으로 중복 체크 (최근 5분 이내)
+  const detectedAt = alert.detected_at ? new Date(alert.detected_at).getTime() : Date.now();
+  const isDupe = alertHistory.some(a => 
+    a.agent_id === alert.agent_id && 
+    a.kind === alert.kind && 
+    (Date.now() - (a.ts || Date.now())) < 300000
+  );
+  if (isDupe) return;
+
+  alert.id = Date.now() + Math.random();
+  alert.ts = Date.now();
+  alertHistory.unshift(alert);
+  if (alertHistory.length > 50) alertHistory.pop();
+  updateAlertUI();
+  
+  // Show badge
+  const unreadCount = alertHistory.length; 
+  const badge = document.getElementById('notification-badge');
+  if (unreadCount > 0) {
+    badge.textContent = unreadCount;
+    badge.style.display = 'flex';
+  }
+}
+
+function updateAlertUI() {
+  const list = document.getElementById('notification-list');
+  const historyList = document.getElementById('alert-history-list');
+  const badge = document.getElementById('notification-badge');
+
+  if (alertHistory.length === 0) {
+    list.innerHTML = '<div class="empty" style="padding:20px">No notifications</div>';
+    historyList.innerHTML = '<div class="empty">No alerts yet</div>';
+    badge.style.display = 'none';
+    return;
+  }
+
+  const html = alertHistory.map(a => `
+    <div class="notification-item">
+      <div class="icon" style="background:${a.severity === 'critical' ? 'var(--danger)' : 'var(--warning)'}"></div>
+      <div class="notification-content">
+        <div class="notification-msg">${a.message}</div>
+        <div class="notification-meta">${new Date(a.ts || Date.now()).toLocaleTimeString()}</div>
+      </div>
+    </div>
+  `).join('');
+  
+  list.innerHTML = html;
+  historyList.innerHTML = html;
+}
+
+// Close panel on click outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.notification-bell')) {
+    document.getElementById('notification-panel').style.display = 'none';
+  }
+});
+
+function updateTimeline(data) {
+  // data = [{agentName, status, taskTitle, startTime, endTime}, ...]
+  const ctx = document.getElementById('timelineGanttChart');
+  if (!ctx) return;
+  
+  if (timelineGanttChart) timelineGanttChart.destroy();
+  
+  const statusColors = { idle: '#a1a1aa', working: '#4ade80', blocked: '#f87171', done: '#22d3ee' };
+  
+  const datasets = data.map(d => {
+    const agentName = d.agentName || d.agent_name;
+    const taskTitle = d.taskTitle || d.task_title;
+    const startTime = d.startTime || d.start_time;
+    const endTime = d.endTime || d.end_time;
+    const status = d.status;
+
+    return {
+      label: taskTitle,
+      data: [{
+        x: [new Date(startTime), new Date(endTime || Date.now())],
+        y: agentName
+      }],
+      backgroundColor: statusColors[status] || '#a1a1aa',
+      borderWidth: 1,
+      borderRadius: 4,
+      barPercentage: 0.6
+    };
+  });
+
+  timelineGanttChart = new Chart(ctx, {
+    type: 'bar',
+    data: { datasets },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { type: 'time', time: { unit: 'minute' }, min: Date.now() - 30 * 60 * 1000 },
+        y: { stacked: true }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function updateTaskFlow(tasks) {
+  const svg = document.getElementById('task-flow-svg');
+  if (!svg) return;
+  
+  // Simple layout: group by depth
+  const nodes = new Map();
+  tasks.forEach(t => nodes.set(t.id, { ...t, children: [], parents: [], depth: 0 }));
+  
+  tasks.forEach(t => {
+    const dependsOn = t.depends_on || t.dependsOn;
+    if (dependsOn) {
+      dependsOn.forEach(pid => {
+        if (nodes.has(pid)) {
+          nodes.get(pid).children.push(t.id);
+          nodes.get(t.id).parents.push(pid);
+        }
+      });
+    }
+  });
+
+  // Calculate depths
+  let changed = true;
+  while (changed) {
+    changed = false;
+    nodes.forEach(n => {
+      let maxParentDepth = -1;
+      n.parents.forEach(pid => {
+        maxParentDepth = Math.max(maxParentDepth, nodes.get(pid).depth);
+      });
+      if (maxParentDepth + 1 > n.depth) {
+        n.depth = maxParentDepth + 1;
+        changed = true;
+      }
+    });
+  }
+
+  const columns = [];
+  nodes.forEach(n => {
+    if (!columns[n.depth]) columns[n.depth] = [];
+    columns[n.depth].push(n);
+  });
+
+  const nodeW = 140, nodeH = 50, gapX = 60, gapY = 30;
+  let html = '';
+  const coords = new Map();
+
+  columns.forEach((col, x) => {
+    col.forEach((n, y) => {
+      const px = 20 + x * (nodeW + gapX);
+      const py = 20 + y * (nodeH + gapY);
+      coords.set(n.id, { x: px, y: py });
+      
+      const colors = { pending: '#3f3f46', in_progress: '#3b82f6', completed: '#22c55e', blocked: '#ef4444' };
+      const color = colors[n.status] || '#3f3f46';
+      
+      html += `<g transform="translate(${px},${py})">
+        <rect width="${nodeW}" height="${nodeH}" rx="8" fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.5" />
+        <text x="10" y="20" font-size="10" font-weight="700" fill="var(--text)">${n.title.substring(0,20)}</text>
+        <text x="10" y="38" font-size="9" fill="var(--text-dim)">${n.assignee || 'unassigned'}</text>
+      </g>`;
+    });
+  });
+
+  // Lines
+  nodes.forEach(n => {
+    const start = coords.get(n.id);
+    n.children.forEach(cid => {
+      const end = coords.get(cid);
+      if (start && end) {
+        html += `<line x1="${start.x + nodeW}" y1="${start.y + nodeH/2}" x2="${end.x}" y2="${end.y + nodeH/2}" stroke="var(--border)" stroke-width="1" marker-end="url(#arrowhead)" />`;
+      }
+    });
+  });
+
+  svg.innerHTML = `<defs><marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="var(--border)" /></marker></defs>` + html;
+}
+
+function updatePerformance(data) {
+  const el = document.getElementById('agent-performance-list');
+  if (!el) return;
+  
+  if (!data || data.length === 0) {
+    el.innerHTML = '<div class="empty">No performance data</div>';
+    return;
+  }
+
+  const maxTasks = Math.max(...data.map(d => d.completedTasks || d.completed_tasks), 0);
+  const html = `
+    <table class="performance-table">
+      <thead>
+        <tr><th>Agent</th><th>Completed</th><th>Avg Time</th><th>Fixes</th><th>Tokens</th></tr>
+      </thead>
+      <tbody>
+        ${data.map(d => {
+          const agentName = d.agentName || d.agent_name;
+          const completedTasks = d.completedTasks || d.completed_tasks || 0;
+          const avgDurationSecs = d.avgDurationSecs || d.avg_duration_secs || 0;
+          const fixAttempts = d.fixAttempts || d.fix_attempts || 0;
+          const tokensUsedValue = (d.tokensUsed !== undefined) ? d.tokensUsed : (d.tokens_used !== undefined ? d.tokens_used : 0);
+          const tokensDisplay = tokensUsedValue < 0 ?
+            `<span style="color: var(--text-dim)">N/A</span>` :
+            formatTokens(tokensUsedValue);
+
+          return `
+          <tr>
+            <td style="font-weight:700">${agentName}</td>
+            <td>
+              <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${maxTasks > 0 ? (completedTasks/maxTasks)*100 : 0}%"></div></div>
+              ${completedTasks}
+            </td>
+            <td>${formatDuration(avgDurationSecs * 1000)}</td>
+            <td>${fixAttempts}</td>
+            <td class="stat-value">${tokensDisplay}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  el.innerHTML = html;
+}
+
+function formatTokens(n) {
+  if (n > 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n > 1000) return (n/1000).toFixed(1) + 'K';
+  return n;
+}
+
 function initChart() {
+  if (cpuChart) cpuChart.destroy();
   const ctx = document.getElementById('cpuChart').getContext('2d');
   cpuChart = new Chart(ctx, {
     type: 'line',
@@ -1364,6 +1938,7 @@ function initChart() {
 }
 
 function initTimelineChart() {
+  if (timelineChart) timelineChart.destroy();
   const ctx = document.getElementById('timelineChart').getContext('2d');
   timelineChart = new Chart(ctx, {
     type: 'bar',
@@ -1519,11 +2094,23 @@ function renderProcessNode(node, depth) {
   const toggle = hasChildren
     ? `<span class="tree-toggle" onclick="event.stopPropagation();togglePid(${node.pid})">${isExpanded ? '▼' : '▶'}</span>`
     : `<span class="tree-spacer"></span>`;
+
+  // Runtime calculation
+  const runtime = node.runtime_secs ? formatDuration(node.runtime_secs * 1000) : '—';
+  const cmd = node.cmdline || node.name || '—';
+
   let html = `<div class="proc-row" style="padding-left:${depth * 20}px">
     ${toggle}
-    <div class="proc-info"><span class="stat-label">PID ${node.pid} (${node.name})</span><span class="proc-status ${node.stopped ? 'stopped' : 'running'}">${node.stopped ? 'STOPPED' : 'running'}</span></div>
-    <span class="stat-value">${node.cpu_percent.toFixed(1)}% · ${formatBytes(node.memory_bytes)}</span>
-    ${node.stopped ? `<button class="proc-btn resume" onclick="resumeProcess(${node.pid})">Resume</button>` : `<button class="proc-btn stop" onclick="stopProcess(${node.pid})">Stop</button>`}
+    <div class="proc-info" style="display:grid;grid-template-columns:120px 1fr 100px 80px 100px;gap:8px;align-items:center">
+      <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="stat-label">PID ${node.pid}</span> <span class="proc-status ${node.stopped ? 'stopped' : 'running'}">${node.stopped ? 'STOP' : 'RUN'}</span></div>
+      <div class="stat-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${cmd}">${cmd}</div>
+      <div class="stat-value">${runtime}</div>
+      <div class="stat-value">${node.thread_count || 1} thr</div>
+      <div class="stat-value" style="text-align:right">${node.cpu_percent.toFixed(1)}% · ${formatBytes(node.memory_bytes)}</div>
+    </div>
+    <div style="margin-left:8px">
+      ${node.stopped ? `<button class="proc-btn resume" onclick="resumeProcess(${node.pid})">Resume</button>` : `<button class="proc-btn stop" onclick="stopProcess(${node.pid})">Stop</button>`}
+    </div>
   </div>`;
   if (hasChildren && isExpanded) node.children.forEach(c => { html += renderProcessNode(c, depth + 1); });
   return html;
@@ -1553,7 +2140,13 @@ function updateProcessTree(data) {
   procEl.innerHTML = trees.map(t => renderProcessNode(t, 0)).join('');
 }
 
-// ── Data Update ──
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return [h, m, sec].map(v => v.toString().padStart(2, '0')).join(':');
+}
 
 function updateMonitor(data) {
   if (!data) return;
@@ -1570,20 +2163,81 @@ function updateMonitor(data) {
   document.getElementById('mem-usage').textContent = formatBytes(data.used_memory_bytes) + ' / ' + formatBytes(data.total_memory_bytes) + ' (' + memPct + '%)';
   document.getElementById('cpu-count').textContent = data.cpu_count + ' cores';
 
+  // Load Average
+  if (data.load_avg) {
+    const [l1, l5, l15] = data.load_avg;
+    document.getElementById('load-avg').textContent = `${l1.toFixed(2)} / ${l5.toFixed(2)} / ${l15.toFixed(2)}`;
+    const lbars = document.getElementById('load-bars');
+    lbars.innerHTML = [l1, l5, l15].map(v => {
+      const h = Math.min(100, (v / (data.cpu_count || 1)) * 100);
+      return `<div style="flex:1;height:${h}%;background:var(--accent);border-radius:2px 2px 0 0"></div>`;
+    }).join('');
+  }
+
+  // Swap
+  if (data.swap_total > 0) {
+    const swapPct = (data.swap_used / data.swap_total * 100).toFixed(1);
+    document.getElementById('swap-val').textContent = formatBytes(data.swap_used) + ' / ' + formatBytes(data.swap_total);
+    document.getElementById('swap-bar').style.width = swapPct + '%';
+  }
+
+  // Network I/O
+  if (data.network_io) {
+    const totalRx = data.network_io.reduce((s, n) => s + (n.rx_rate || 0), 0);
+    const totalTx = data.network_io.reduce((s, n) => s + (n.tx_rate || 0), 0);
+    const totalEl = document.getElementById('network-io-total');
+    if (totalEl) totalEl.textContent = '↓ ' + formatBytes(totalRx) + '/s · ↑ ' + formatBytes(totalTx) + '/s';
+    const netEl = document.getElementById('network-io');
+    netEl.innerHTML = data.network_io.map(stats => `
+      <div class="stat-row" style="border:none;padding:2px 0">
+        <span class="stat-label">${stats.name}</span>
+        <span class="stat-value">↓ ${formatBytes(stats.rx_rate)}/s · ↑ ${formatBytes(stats.tx_rate)}/s</span>
+      </div>
+    `).join('');
+  }
+
+  // Per-Core CPU
+  if (data.per_core_cpu) {
+    const coreEl = document.getElementById('per-core-cpu');
+    coreEl.innerHTML = data.per_core_cpu.map((v, i) => {
+      const color = v < 30 ? '#4ade80' : v < 70 ? '#fbbf24' : '#f87171';
+      return `<div class="core-cell" style="background:${color}" title="Core ${i}: ${v.toFixed(1)}%">${v.toFixed(0)}</div>`;
+    }).join('');
+  }
+
   // Disk I/O
   const dr = data.disk_read_bytes_per_sec || 0;
   const dw = data.disk_write_bytes_per_sec || 0;
   document.getElementById('disk-read-val').textContent = formatBytes(dr) + '/s';
   document.getElementById('disk-write-val').textContent = formatBytes(dw) + '/s';
 
-  // Disk space
-  if (data.disk_total_bytes > 0) {
-    const usedDisk = data.disk_total_bytes - data.disk_available_bytes;
-    const diskPct = (usedDisk / data.disk_total_bytes * 100).toFixed(1);
-    document.getElementById('disk-space-val').textContent = formatBytes(usedDisk) + ' / ' + formatBytes(data.disk_total_bytes);
+  // Disk space (per mount point)
+  if (data.disk_space && data.disk_space.length > 0) {
+    const mainDisk = data.disk_space[0]; // Primary disk for summary
+    const diskPct = (mainDisk.used / mainDisk.total * 100).toFixed(1);
+    document.getElementById('disk-space-val').textContent = formatBytes(mainDisk.used) + ' / ' + formatBytes(mainDisk.total);
     const bar = document.getElementById('disk-bar');
     bar.style.width = diskPct + '%';
     bar.style.background = diskPct > 90 ? 'var(--danger)' : diskPct > 75 ? 'var(--accent)' : 'var(--accent-strong)';
+    
+    // Check all mounts for alerts
+    data.disk_space.forEach(d => {
+        const pct = (d.used / d.total * 100);
+        if (pct > 90) {
+            addAlert({ 
+                agent_id: 'system', 
+                kind: `disk_warning_${d.mount_point}`, 
+                severity: 'critical', 
+                message: `Disk space low on ${d.mount_point}: ${pct.toFixed(1)}% used`, 
+                detected_at: new Date().toISOString() 
+            });
+        }
+    });
+  }
+
+  // Anomalies
+  if (data.anomalies) {
+    data.anomalies.forEach(a => addAlert({ ...a }));
   }
 
   // Uptime
@@ -1876,7 +2530,7 @@ function updateUsage(data) {
     <span class="stat-value">${formatTokens(data.total_cache_write_tokens)}</span>
   </div>`;
 
-  // Per-session breakdown (sorted by cost descending, top 5)
+  // Per-session breakdown
   const sorted = [...data.sessions].sort((a, b) => b.cost_usd - a.cost_usd).slice(0, 5);
   for (const s of sorted) {
     const projName = s.project_path.split('/').pop() || s.project_path;
@@ -1886,8 +2540,77 @@ function updateUsage(data) {
       <span class="stat-value" style="color:${costColor(s.cost_usd)}">${formatCost(s.cost_usd)}</span>
     </div>`;
   }
-
   el.innerHTML = html;
+
+  // Cache Efficiency Donut Chart
+  const ctx = document.getElementById('cacheDonutChart');
+  if (ctx) {
+    if (cacheDonutChart) cacheDonutChart.destroy();
+    const total = data.total_cache_read_tokens + data.total_cache_write_tokens + (data.total_input_tokens - data.total_cache_read_tokens);
+    const hitRate = total > 0 ? ((data.total_cache_read_tokens / total) * 100).toFixed(1) : 0;
+    
+    cacheDonutChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Read', 'Write', 'Non-Cache'],
+        datasets: [{
+          data: [data.total_cache_read_tokens, data.total_cache_write_tokens, Math.max(0, data.total_input_tokens - data.total_cache_read_tokens)],
+          backgroundColor: ['#4ade80', '#fbbf24', '#3f3f46'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        cutout: '70%',
+        plugins: { legend: { display: false } }
+      }
+    });
+    
+    document.getElementById('cache-stats').innerHTML = `
+      <div style="text-align:center">
+        <div style="font-size:24px;font-weight:800;color:var(--success)">${hitRate}%</div>
+        <div class="stat-label">Cache Hit Rate</div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="stat-row"><span class="stat-label">Read</span><span class="stat-value">${formatTokens(data.total_cache_read_tokens)}</span></div>
+        <div class="stat-row"><span class="stat-label">Write</span><span class="stat-value">${formatTokens(data.total_cache_write_tokens)}</span></div>
+      </div>
+    `;
+  }
+
+  // Cost by Model Bar Chart
+  const barCtx = document.getElementById('costBarChart');
+  if (barCtx) {
+    if (costBarChart) costBarChart.destroy();
+    
+    // Aggregate costs by model
+    const modelCosts = {};
+    data.sessions.forEach(s => {
+      const m = s.model.replace('claude-', '').replace(/-20\d{6}$/, '');
+      modelCosts[m] = (modelCosts[m] || 0) + s.cost_usd;
+    });
+
+    const labels = Object.keys(modelCosts);
+    const values = Object.values(modelCosts);
+    
+    costBarChart = new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'USD',
+          data: values,
+          backgroundColor: 'var(--accent)',
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 9 } } } },
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
 }
 
 // ── Folder Tree Heatmap ──
@@ -3060,8 +3783,7 @@ async function destroyTeam() {
 }
 
 // ── Init ──
-initChart();
-initTimelineChart();
+// Charts initialized in window.onload to avoid double-init
 renderTeamTaskToolbar();
 initMessagesUI();
 updateBrandLogo();
@@ -3082,6 +3804,18 @@ updateBrandLogo();
     a.addEventListener('click', close);
   });
 })();
+// Initial state
+window.onload = () => {
+  initChart();
+  initTimelineChart();
+  switchPreset('overview');
+};
+
+document.querySelectorAll('.preset-switcher button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    userManualPreset = true;
+  });
+});
 </script>
 </body>
 </html>

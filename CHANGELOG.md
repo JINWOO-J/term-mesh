@@ -2,6 +2,20 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.92.0] - 2026-04-09
+
+### Added
+- **`term-mesh-cli` Claude Code skill** — bundled skill teaches Claude (when running inside term-mesh) how to open browser splits, evaluate JavaScript in browser panels, navigate/click pages, and manage workspaces/panes via the `term-mesh` CLI. Build phase copies the skill into `Resources/claude-skills/` with a managed-file marker; `ClaudeCommandInstaller` installs it to `~/.claude/skills/` on launch and respects user-customized files.
+- **README CLI usage section** — full command reference for window, workspace, surface, pane, browser, and team subcommands with worked examples.
+
+### Changed
+- **Slash command documentation refinements** — `.claude/commands/tm-op.md` extracted shared Result Collection block, added precedence rule for `--preset`/`--timeout`/`--rounds`, documented `tm-agent` binary fallback, added Autonomous Mode error-recovery subsection, defined stigmergy concept, and replaced literal `my-team` placeholders with `<team>`. `team-up.md` deduplicated command tables (links to `team.md` as canonical reference) and hoisted CRITICAL warning to top. `tm-bench.md` added explicit "Argument Parsing Precedence" section with worked examples for `agent N` + flag combinations.
+- **Settings dashboard no longer auto-restarts daemon** — toggle/bind/port/password changes no longer auto-restart the daemon (reverts the auto-restart behavior introduced in 0.91.0; was causing UX friction).
+
+### Fixed
+- **Shell-integration path security** — escape shell-integration paths and sanitize temp file names across `DashboardController`, `SettingsView`, `TabManager`, and `TeamOrchestrator` to prevent shell injection through path interpolation.
+- **TabManager refactor** — removed unnecessary `[weak self]` capture in `setTitle` closure (closure does not outlive `self`), added version-guard comment explaining the format compatibility strategy.
+
 ## [0.91.1] - 2026-04-08
 
 ### Fixed

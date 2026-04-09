@@ -36,6 +36,25 @@ Map the first word of `$ARGUMENTS`:
 - **`history`** → Show history: `python3 scripts/bench-agent.py --history`
 - **`compare`** → Compare runs: `python3 scripts/bench-agent.py --compare` followed by the remaining args.
 
+## Argument Parsing Precedence
+
+When parsing `$ARGUMENTS` for the `agent` subcommand, apply these rules in order:
+
+1. **Explicit `--repeat N` has highest priority.** If `$ARGUMENTS` contains `--repeat N`, use that value and do not search for bare numbers.
+2. **Extract the first bare integer as `--repeat N`.** If no explicit `--repeat` is present, scan tokens left-to-right and extract the first standalone integer (a token that is a number and not an argument value) as `--repeat N`.
+3. **Preserve remaining flags.** All non-extracted tokens (`--pane`, `--llm`, `--headless`, `--terminal`, `--rpc`, `--e2e`, `--note`, etc.) are passed through unchanged.
+
+### Parsing Examples
+
+| Input | `--repeat` | Mapped flags | Result |
+|-------|-----------|-------------|--------|
+| `agent` | (none) | (none) | Interactive selector |
+| `agent 5` | `--repeat 5` | (none) | Interactive, 5 iterations |
+| `agent --llm` | (none) | `--leader llm` | Interactive, LLM leader |
+| `agent 5 --llm` | `--repeat 5` | `--leader llm` | Interactive, 5 iter, LLM leader |
+| `agent --llm 3` | `--repeat 3` | `--leader llm` | Interactive, 3 iter, LLM leader |
+| `agent --repeat 5 --pane --llm` | `--repeat 5` (explicit) | `--mode pane --leader llm` | Interactive, 5 iter, pane, LLM leader |
+
 ## Interactive Flow (for bare `agent` or empty arguments)
 
 When `$ARGUMENTS` is empty or just `agent` with no flags:

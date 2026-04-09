@@ -50,11 +50,15 @@ Parse `$ARGUMENTS`의 첫 단어로 전략을 결정한다:
 - `--context` — 대화 맥락을 강제로 에이전트에게 주입 (자동 판단 무시)
 - `--no-context` — 대화 맥락 주입을 강제로 비활성화 (자동 판단 무시)
 
+**Precedence rule**: 명시된 플래그가 프리셋 값을 덮어쓴다. `--preset`과 `--timeout`을 함께 쓰면 `--timeout`이 우선, `--preset`과 `--rounds`를 함께 쓰면 `--rounds`가 우선한다. 덮어쓰이지 않은 플래그는 프리셋 값을 유지한다.
+
 ## Shared Setup
 
 모든 전략 실행 전에 반드시 수행:
 
-1. 팀 상태 확인:
+1. 팀 상태 확인 (PATH 해석):
+   - `tm-agent`가 PATH에 없으면 프로젝트 로컬 빌드 `./daemon/target/release/tm-agent`로 폴백 가능.
+   - 이후 모든 tm-agent 호출 전에 경로를 한 번만 해석한다.
 ```bash
 tm-agent status
 ```
@@ -99,6 +103,20 @@ tm-agent status
    - `refine`, `tournament`, `brainstorm`, `council`: 모든 에이전트 → 기본 모드
    - `review`, `red-team` attackers: 모든 에이전트 → 기본 모드
    - `chain`: explorer, reviewer, architect 역할 → 기본 모드
+
+   ### Error recovery (autonomous mode)
+
+   - **서브프로세스 실패**: 에이전트 exit code ≠ 0 → 해당 task 실패로 표시, 나머지 task는 계속 진행.
+   - **동시 수정 충돌**: 여러 autonomous delegate가 같은 파일을 수정하면 에이전트 레벨에서 충돌 방지되지 않음. 리더가 `--splits`로 파일 소유권을 사전 분리해야 함.
+   - **폴링 타임아웃**: 전체 timeout = `base_timeout × task_count`. 초과 시 남은 task를 abort하고 부분 결과만 수집.
+
+7. **Result Collection** — 모든 전략의 결과 수집은 다음 우선순위를 따른다 (이 패턴은 전 전략 공통):
+
+   1. **Task ID 파일** (가장 신뢰적, 태스크별 유니크): `~/.term-mesh/results/<team>/<task_id>.md`
+   2. **Agent reply 파일** (task ID 파일이 비어있을 때 fallback): `~/.term-mesh/results/<team>/<agent>-reply.md`
+   3. **tm-agent collect** (요약 수집, 잘릴 수 있음)
+
+   > 💡 `<team>`은 플레이스홀더입니다. 사용 전 `tm-agent status | jq -r .team_name`으로 실제 팀 이름을 해석하세요.
 
 ## Context Injection
 
@@ -158,11 +176,11 @@ Error: specific error message
 결과 수집 우선순위:
 1. **Task ID 파일** (가장 신뢰적 — 태스크별 유니크, 이전 전략에 오염되지 않음):
 ```bash
-cat ~/.term-mesh/results/my-team/<task_id>.md
+cat ~/.term-mesh/results/<team>/<task_id>.md
 ```
 2. **Agent reply 파일** (task ID 파일이 비어있을 때 fallback):
 ```bash
-cat ~/.term-mesh/results/my-team/<agent>-reply.md
+cat ~/.term-mesh/results/<team>/<agent>-reply.md
 ```
 3. **tm-agent collect** (요약 수집 — 잘릴 수 있음, 위 파일로 보완)
 
@@ -450,9 +468,9 @@ delegate 반환 JSON에서 task_id를 기억하고, 결과를 읽는다:
 ```bash
 # delegate 응답의 JSON에서 task_id 추출 (예: "id": "417a1043")
 # 우선순위 1: task_id 파일 (이전 전략에 오염되지 않음)
-cat ~/.term-mesh/results/my-team/{task_id}.md
+cat ~/.term-mesh/results/<team>/{task_id}.md
 # 우선순위 2: agent reply 파일 (task_id 파일이 비어있을 때)
-cat ~/.term-mesh/results/my-team/{agent}-reply.md
+cat ~/.term-mesh/results/<team>/{agent}-reply.md
 ```
 
 이 결과를 다음 단계의 "이전 단계 결과"로 전달한다.
@@ -643,7 +661,7 @@ tm-agent wait --timeout {timeout} --mode report
 라운드 2 이상이면 이전 반박 결과를 포함하여 반복한다:
 - PRO 에이전트에게: CON의 최신 반박 결과 + 이전 라운드 PRO 반박 결과를 함께 전달
 - CON 에이전트에게: PRO의 최신 반박 결과 + 이전 라운드 CON 반박 결과를 함께 전달
-- 라운드 간 결과는 `cat ~/.term-mesh/results/my-team/{task_id}.md` 로 정확히 수집 (이전 라운드 reply 파일이 새 라운드에서 덮어쓰여지므로 task_id 기반 수집 필수)
+- 라운드 간 결과는 `cat ~/.term-mesh/results/<team>/{task_id}.md` 로 정확히 수집 (이전 라운드 reply 파일이 새 라운드에서 덮어쓰여지므로 task_id 기반 수집 필수)
 
 ### Phase 4: VERDICT (판정)
 
@@ -1411,6 +1429,8 @@ tm-agent collect --lines 100
 ## Strategy: research
 
 idle 에이전트를 활용한 자율 multi-agent 탐색. board.jsonl을 통한 stigmergy 협동.
+
+> **stigmergy** — 에이전트가 공유 board(board.jsonl)에 흔적(메시지, 결과)을 남기고 그 흔적이 다른 에이전트의 다음 행동을 유도하는 분산 협동 패턴. 직접 메시징 없이 환경을 통해 조율됨.
 
 ### Execution
 

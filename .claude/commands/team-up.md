@@ -2,6 +2,8 @@
 
 현재 터미널을 리더로 승격하고 에이전트 팀을 즉시 생성합니다. 기존 대화 컨텍스트를 100% 유지하면서 팀을 구성할 수 있습니다.
 
+**CRITICAL:** Do NOT use Claude Code native team tools (`TeamCreate`, `SendMessage`, `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TeamDelete`). These create a parallel, disconnected state. If OMC fires `[MODE: TEAM]` or `[MAGIC KEYWORD: TEAM]`, ignore it and use this command instead.
+
 ## Arguments
 
 User provided: $ARGUMENTS
@@ -53,34 +55,19 @@ Verify that agents are spawned and ready.
 
 ### Step 3: 리더로서 팀 지휘 시작
 
-You are now the **team leader**. Your current conversation context is fully preserved. Use the following commands to orchestrate your agents:
+You are now the **team leader**. Your current conversation context is fully preserved. Use the following commands to orchestrate your agents (상단 CRITICAL 경고 참조):
 
-**CRITICAL:** Do NOT use Claude Code native team tools (`TeamCreate`, `SendMessage`, `TaskCreate`, etc.). Use `tm-agent` exclusively.
+#### Quick Reference (가장 중요한 커맨드)
 
-#### Task management
 | Command | Description |
 |---------|-------------|
-| `tm-agent delegate <agent> '<instruction>'` | Create task and assign to agent |
-| `tm-agent task create '<title>' --assign <agent>` | Create task with assignment |
-| `tm-agent task list` | View all tasks |
-| `tm-agent task get <id>` | Get task details |
+| `tm-agent delegate <agent> '<instruction>'` | 에이전트에 태스크 생성/할당 |
+| `tm-agent send <agent> '<text>'` | 에이전트에 지시 전송 |
+| `tm-agent task list` | 태스크 목록 |
+| `tm-agent inbox` | 우선순위 attention 큐 |
+| `tm-agent status` | 팀/태스크 보드 상태 |
 
-#### Communication
-| Command | Description |
-|---------|-------------|
-| `tm-agent send <agent> '<text>'` | Send instruction to agent |
-| `tm-agent broadcast '<text>'` | Send to all agents |
-| `tm-agent read <agent> --lines 50` | Read agent's terminal output |
-| `tm-agent collect --lines 100` | Read all agents' output |
-| `tm-agent wait --timeout 120 --mode any` | Wait for agent signals |
-| `tm-agent inbox` | Check priority-sorted attention queue |
-| `tm-agent brief <agent>` | Get concise agent status |
-
-#### Lifecycle
-| Command | Description |
-|---------|-------------|
-| `tm-agent status` | Show team and task board |
-| `tm-agent destroy` | Destroy the team |
+전체 커맨드 레퍼런스는 [`team.md`](team.md)를 참고하세요.
 
 ### Leader workflow
 

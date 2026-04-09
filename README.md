@@ -128,20 +128,120 @@ cd daemon && cargo run --bin term-meshd
 
 ## CLI Usage
 
-The `term-mesh` CLI provides a PTY wrapper for running commands under the control plane:
+The `term-mesh` CLI controls the app via Unix socket. Install location: `~/bin/term-mesh`
+
+### Running Commands (PTY Wrapper)
 
 ```bash
-# Run Claude Code in a PTY wrapper
-term-mesh run claude code
-
-# Run any command
-term-mesh run -- kiro-cli chat "fix this bug"
-
-# Show help
-term-mesh help
+term-mesh run claude code                    # Run Claude Code in PTY wrapper
+term-mesh run -- kiro-cli chat "fix this"    # Run any command
+term-mesh run --sandbox claude code          # Run in isolated git worktree
 ```
 
-Install location: `~/bin/term-mesh`
+### Window & Workspace Management
+
+```bash
+term-mesh list-windows                       # List all windows
+term-mesh new-window                         # Open a new window
+term-mesh list-workspaces                    # List workspace tabs
+term-mesh new-workspace                      # Create a new workspace tab
+term-mesh new-workspace --command "htop"     # New workspace running a command
+term-mesh select-workspace --workspace 2     # Switch to workspace by index
+term-mesh rename-workspace "My Project"      # Rename current workspace
+term-mesh close-workspace --workspace 3      # Close a workspace tab
+term-mesh current-workspace                  # Show active workspace info
+```
+
+### Panes & Splits
+
+```bash
+term-mesh new-split right                    # Split right (terminal)
+term-mesh new-split down                     # Split down
+term-mesh new-split right --type browser --url https://example.com
+                                             # Split with browser panel
+term-mesh list-panes                         # List panes in current workspace
+term-mesh focus-pane --pane 2                # Focus a specific pane
+term-mesh new-pane --type browser --url https://docs.dev
+                                             # Add browser tab to current pane
+term-mesh close-surface --surface surface:5  # Close a surface (tab in pane)
+term-mesh close-surface --surface surface:5 --close-pane
+                                             # Close surface and collapse pane
+```
+
+### Terminal Input & Output
+
+```bash
+term-mesh send "ls -la"                      # Send text to terminal
+term-mesh send-key Enter                     # Send a key press
+term-mesh read-screen                        # Read visible terminal content
+term-mesh read-screen --scrollback --lines 500
+                                             # Read scrollback buffer
+term-mesh capture-pane                       # tmux-compatible capture
+```
+
+### Built-in Browser
+
+```bash
+term-mesh browser open https://github.com   # Open browser in new split
+term-mesh browser navigate https://docs.dev  # Navigate existing browser
+term-mesh browser eval 'document.title'      # Execute JavaScript
+term-mesh browser snapshot                   # Get DOM snapshot
+term-mesh browser snapshot --interactive     # Interactive DOM with selectors
+term-mesh browser click '#submit-btn'        # Click an element
+term-mesh browser type '#search' "query"     # Type into an input
+term-mesh browser wait --selector '.loaded'  # Wait for element
+term-mesh browser get title                  # Get page title
+term-mesh browser get text '#content'        # Get element text
+term-mesh browser back                       # Navigate back
+term-mesh browser reload                     # Reload page
+term-mesh browser cookies get                # Get all cookies
+term-mesh browser console list               # List console messages
+```
+
+### Notifications & Sidebar Metadata
+
+```bash
+term-mesh notify --title "Done" --body "Build complete"
+term-mesh set-status build "passing" --icon checkmark --color "#00ff00"
+term-mesh clear-status build
+term-mesh set-progress 0.75 --label "Building..."
+term-mesh log --level info --source agent "Task completed"
+term-mesh sidebar-state                      # Full sidebar state dump
+```
+
+### tmux Compatibility
+
+```bash
+term-mesh resize-pane --pane 2 -R --amount 10  # Resize pane right
+term-mesh swap-pane --pane 2 --target-pane 3    # Swap two panes
+term-mesh break-pane                             # Break pane to new workspace
+term-mesh join-pane --target-pane 2              # Join pane into another
+term-mesh pipe-pane --command "tee log.txt"      # Pipe pane output
+term-mesh last-pane                              # Focus previous pane
+term-mesh next-window                            # Next workspace
+term-mesh find-window --content "error"          # Search across workspaces
+```
+
+### Handle Format
+
+Commands accept UUIDs, short refs (`window:1`, `workspace:2`, `pane:3`, `surface:4`), or indexes. Output defaults to refs; use `--id-format uuids` or `--id-format both` for UUIDs.
+
+```bash
+term-mesh --json list-workspaces             # JSON output
+term-mesh --id-format both list-panes        # Include UUIDs in output
+term-mesh identify                           # Show caller's workspace/surface
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `TERMMESH_WORKSPACE_ID` | Auto-set in term-mesh terminals; default `--workspace` |
+| `TERMMESH_SURFACE_ID` | Auto-set in term-mesh terminals; default `--surface` |
+| `TERMMESH_SOCKET_PATH` | Override socket path (default: `/tmp/term-mesh.sock`) |
+| `TERMMESH_SOCKET_PASSWORD` | Socket authentication password |
+
+Run `term-mesh help` or `term-mesh <command> --help` for full details.
 
 ## API Reference
 

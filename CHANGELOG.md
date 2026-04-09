@@ -2,6 +2,17 @@
 
 All notable changes to term-mesh are documented here.
 
+## [0.93.0] - 2026-04-09
+
+### Added
+- **`tm-agent attach` / `tm-agent detach` — workspace-local agent management** — Add or remove agent panes inside the caller's current workspace without spawning a new one. First `attach` auto-creates a workspace-local team (`ws-<first8hex>` derived from the workspace UUID) and adopts the caller's pane as the team leader; subsequent attaches append agents to the same team. `detach <agent_name>` closes that agent's pane and removes it from the team; the last detach destroys the team while preserving the leader pane. Rejected if the workspace already hosts a `tm-agent create`-based team, so workspace-local and create-spawned teams never mix. `tm-agent create` behavior is unchanged.
+- **`buildAgentPaneEnv` helper (single source of truth for agent pane env)** — Extracted from `createTeam` into `TeamOrchestrator.buildAgentPaneEnv(teamName:agentName:agentCli:windowId:workspaceId:)` so the workspace-local attach path and the existing create path construct the exact same agent environment. Guards against the 2026-03-19 regression where `TERMMESH_WINDOW_ID` / `TERMMESH_WORKSPACE_ID` went missing on spawned panes.
+- **`addAgentPaneToWorkspace` helper (shared pane construction)** — Also extracted from `createTeam`, encapsulates the full CLI-specific invocation build (claude/codex/gemini/kiro), shell wrapping with worktree `cd`, env injection, split pane spawn, pane title, and `AgentMember` construction. Used by both `createTeam`'s agent loop and the new `attachToWorkspace`.
+- **New JSON-RPC methods `team.attach` / `team.detach`** — Route through `dispatchTeamCommandAsync` and reuse `asyncTeamCreate`'s TabManager resolution precedence (`window_id` → `surface_id` → `workspace_id` → keyWindow) to prevent the 2026-03-17 multi-window routing regression. Both handlers run off-main with minimal `await MainActor.run` blocks and contain no `DispatchQueue.main.sync`.
+- **Rust CLI `Commands::Attach` / `Commands::Detach`** — Auto-derive the team name from `TERMMESH_WORKSPACE_ID` via `resolve_workspace_team_name` when `TERMMESH_TEAM` is unset, validate agent names against `^[a-zA-Z0-9_-]{1,32}$` via `validate_agent_name`, and require `TERMMESH_PANEL_ID` / `TERMMESH_WORKSPACE_ID` context via `require_termmesh_context`. Errors surface with structured codes: `existing_gui_team`, `agent_name_conflict`, `team_not_found`, `agent_not_found`, `not_in_workspace`.
+- **`tm-agent` Claude Code skill bundle** — `skills/tm-agent/SKILL.md` (328 lines) ships alongside `term-mesh`, `term-mesh-browser`, `term-mesh-debug-windows`, and `release`. Covers the full `tm-agent` CLI surface (create/attach/detach, messaging, task board, autonomous research/solve/consensus/swarm) with four end-to-end workflow examples, an invariants-and-gotchas section (socket focus policy, main-thread policy, adopted leader, send stagger, reply truncation), and a raw-RPC escape hatch.
+- **CLAUDE.md `attach` / `detach` quick reference** — "Team agent system" section gains `tm-agent attach <type>` / `tm-agent detach <name>` examples noting the current-workspace-only semantics.
+
 ## [0.92.0] - 2026-04-09
 
 ### Added

@@ -55,6 +55,8 @@ final class DashboardController: NSObject, WKNavigationDelegate {
 
     /// PIDs that we've already sent a notification for (avoid spamming).
     private var notifiedAlertPIDs: Set<Int32> = []
+
+    private let iso8601Formatter = ISO8601DateFormatter()
     /// Whether we've requested notification permission.
     private var notificationPermissionRequested = false
 
@@ -316,7 +318,7 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                 stats[assignee]?.completedTasks += 1
                 if let startedAt = task["started_at"] as? String,
                    let completedAt = task["completed_at"] as? String {
-                    let fmt = ISO8601DateFormatter()
+                    let fmt = iso8601Formatter
                     if let start = fmt.date(from: startedAt), let end = fmt.date(from: completedAt) {
                         let duration = end.timeIntervalSince(start)
                         stats[assignee]?.totalDurationSecs += duration
@@ -720,7 +722,9 @@ final class DashboardController: NSObject, WKNavigationDelegate {
                     } else {
                         focusTarget = "overview"
                     }
-                    webView.evaluateJavaScript("if(window.setAutoFocus)setAutoFocus('\(focusTarget)');") { _, _ in }
+                    if let focusJson = Self.dashboardJSONString(focusTarget) {
+                        webView.evaluateJavaScript("if(window.setAutoFocus)setAutoFocus(\(focusJson));") { _, _ in }
+                    }
                 }
             }
         }

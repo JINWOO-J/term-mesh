@@ -1392,22 +1392,6 @@ struct SettingsView: View {
 
                         SettingsCardNote("Dashboard settings auto-restart the daemon when changed. The dashboard shows system metrics, team status, agents, and task boards.")
         }
-        .onChange(of: dashboardEnabled) { _ in
-            restartDaemonForDashboard()
-        }
-        .onChange(of: dashboardLocalhostOnly) { _ in
-            restartDaemonForDashboard()
-        }
-        .onSubmit {
-            // Port and password text fields: restart on Enter/commit, not per keystroke.
-            restartDaemonForDashboard()
-        }
-    }
-
-    /// Restart the daemon so dashboard settings (port, bind, enabled) take effect immediately.
-    private func restartDaemonForDashboard() {
-        let daemon = daemonService ?? TermMeshDaemon.shared
-        daemon.restartDaemon {}
     }
 
     // MARK: - Section: Services
@@ -1925,7 +1909,7 @@ struct SettingsView: View {
             }
             return
         }
-        let work = DispatchWorkItem { [self] in
+        let work = DispatchWorkItem {
             isDaemonRestarting = true
             resolvedDaemon?.restartDaemon {
                 refreshDaemonStatus()
@@ -2199,15 +2183,16 @@ struct SettingsView: View {
         guard let integrationDir = Bundle.main.resourceURL?.appendingPathComponent("shell-integration").path else {
             return "# Shell integration directory not found. Try reinstalling term-mesh."
         }
+        let escaped = integrationDir.replacingOccurrences(of: "\"", with: "\\\"")
         switch shellName {
         case "zsh":
             // zsh integration requires ZDOTDIR at startup; cannot source into running session.
             // This opens a nested zsh with integration active.
-            return "ZDOTDIR=\"\(integrationDir)/zsh\" zsh"
+            return "ZDOTDIR=\"\(escaped)/zsh\" zsh"
         case "bash":
-            return "source \"\(integrationDir)/bash/ghostty.bash\""
+            return "source \"\(escaped)/bash/ghostty.bash\""
         case "fish":
-            return "source \"\(integrationDir)/fish/vendor_conf.d/ghostty.fish\""
+            return "source \"\(escaped)/fish/vendor_conf.d/ghostty.fish\""
         default:
             return "# Open a new term-mesh tab to reload shell integration (detected shell: \(shellName))"
         }

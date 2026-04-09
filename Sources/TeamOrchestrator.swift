@@ -2002,7 +2002,8 @@ final class TeamOrchestrator: ObservableObject {
         Self.cleanupKiroProfiles(teamName: name)
 
         // Clean up leader prompt temp file
-        try? FileManager.default.removeItem(atPath: "/tmp/term-mesh-leader-\(name).md")
+        let safeName = name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "..", with: "_")
+        try? FileManager.default.removeItem(atPath: "/tmp/term-mesh-leader-\(safeName).md")
 
         teams.removeValue(forKey: name)
         syncTeamStateToDaemon()

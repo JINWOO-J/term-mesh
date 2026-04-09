@@ -461,6 +461,10 @@ class TabManager: ObservableObject {
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             let session = try JSONDecoder().decode(SavedSessionState.self, from: data)
+            // Load guard: reject unknown future formats (version 3+) rather than silently misinterpret.
+            // The >= 2 guard in restoreSplitTree is intentionally broader — split tree restore degrades
+            // gracefully on unknown data (try? decode + silent skip), whereas loading unknown top-level
+            // fields could corrupt workspace state.
             guard (session.version == 1 || session.version == 2), !session.workspaces.isEmpty else { return nil }
             return session
         } catch {
@@ -518,6 +522,8 @@ class TabManager: ObservableObject {
         guard paneCount > 1, paneCount <= 128 else {
             if paneCount > 128 {
                 Logger.app.warning("session-restore: split tree too large (\(paneCount, privacy: .public) panes), skipping")
+            } else if paneCount == 0 {
+                Logger.app.warning("session-restore: split tree returned 0 panes (possible depth guard), skipping")
             }
             return
         }
@@ -565,6 +571,8 @@ class TabManager: ObservableObject {
                     forSplit: liveSplitId,
                     fromExternal: true
                 )
+            } else {
+                Logger.app.debug("session-restore: liveSplitId not found for pane \(currentPaneId.id, privacy: .public), divider position skipped")
             }
 
             // Recurse: first child keeps currentPaneId, second child uses newPaneId
@@ -1894,10 +1902,10 @@ class TabManager: ObservableObject {
 
         var created = newWorkspace ? 1 : 0
         let totalCount = count
-        let setTitle = { [weak self] (panelId: UUID, index: Int) in
+        let setTitle = { (panelId: UUID, index: Int) in
             tab.setPanelCustomTitle(panelId: panelId, title: "CLI \(index + 1)")
             created += 1
-            self?.titlebarProgress = .determinate(
+            self.titlebarProgress = .determinate(
                 Double(created) / Double(totalCount),
                 label: "Creating terminals (\(created)/\(totalCount))…",
                 color: .blue

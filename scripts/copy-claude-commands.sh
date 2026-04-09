@@ -1,34 +1,73 @@
 #!/bin/bash
-# Copy Claude slash commands to app bundle with managed-file marker.
+# Copy Claude slash commands and skills to app bundle with managed-file markers.
 #
 # This script prepends a "<!-- term-mesh-managed: ... -->" marker to each file.
 # ClaudeCommandInstaller.swift checks this marker at runtime:
-# - Files WITH the marker in ~/.claude/commands/ are overwritten on app update.
+# - Files WITH the marker in ~/.claude/{commands,skills}/ are overwritten on app update.
 # - Files WITHOUT the marker are treated as user-customized and preserved.
 #
 # NOTE: The bundled files will differ from the source files by 1 line (the marker).
-# Source of truth: .claude/commands/ in the git repo.
+# Source of truth: .claude/commands/ and .claude/skills/ in the git repo.
 #
-# IMPORTANT: When adding a new command to .claude/commands/ that should be
-# distributed with the app, add its filename to the COMMANDS array below.
+# IMPORTANT: When adding a new command/skill that should be distributed with the app,
+# add its filename to the arrays below.
 set -euo pipefail
 
-SRC="${SRCROOT}/.claude/commands"
-DEST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/claude-commands"
+SRC_CMDS="${SRCROOT}/.claude/commands"
+DEST_CMDS="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/claude-commands"
+
+SRC_SKILLS="${SRCROOT}/.claude/skills"
+DEST_SKILLS="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/claude-skills"
 
 # 설치할 커맨드 파일 목록 — 새 커맨드 추가 시 여기에 파일명 추가
 COMMANDS=(team.md team-up.md tm-bench.md tm-op.md)
 
-mkdir -p "$DEST"
+# 설치할 스킬 목록 (디렉토리명) — 새 스킬 추가 시 여기에 추가
+# 각 스킬은 .claude/skills/<name>/SKILL.md 형태여야 함
+SKILLS=(term-mesh-cli)
+
+mkdir -p "$DEST_CMDS"
 
 for f in "${COMMANDS[@]}"; do
-    if [ -f "$SRC/$f" ]; then
+    if [ -f "$SRC_CMDS/$f" ]; then
         {
             echo "<!-- term-mesh-managed: do not remove this line -->"
-            cat "$SRC/$f"
-        } > "$DEST/$f"
-        echo "Copied $f to bundle"
+            cat "$SRC_CMDS/$f"
+        } > "$DEST_CMDS/$f"
+        echo "Copied command $f to bundle"
     else
-        echo "warning: $SRC/$f not found, skipping"
+        echo "warning: $SRC_CMDS/$f not found, skipping"
+    fi
+done
+
+mkdir -p "$DEST_SKILLS"
+
+for skill in "${SKILLS[@]}"; do
+    src_file="$SRC_SKILLS/$skill/SKILL.md"
+    if [ -f "$src_file" ]; then
+        mkdir -p "$DEST_SKILLS/$skill"
+        # Skills have YAML frontmatter, so the marker goes AFTER the closing '---'.
+        # Insert marker as an HTML comment on the line right after the frontmatter block.
+        awk '
+            BEGIN { in_fm = 0; fm_done = 0; printed_marker = 0 }
+            NR == 1 && /^---[[:space:]]*$/ { in_fm = 1; print; next }
+            in_fm && /^---[[:space:]]*$/ {
+                print
+                print "<!-- term-mesh-managed: do not remove this line -->"
+                in_fm = 0
+                fm_done = 1
+                printed_marker = 1
+                next
+            }
+            { print }
+            END {
+                if (!printed_marker) {
+                    # No frontmatter; nothing we can do — leader installer will treat as unmanaged
+                }
+            }
+        ' "$src_file" > "$DEST_SKILLS/$skill/SKILL.md"
+        echo "Copied skill $skill to bundle"
+    else
+        echo "warning: $src_file not found, skipping"
     fi
 done

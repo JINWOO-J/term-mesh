@@ -24,7 +24,7 @@ APP_VERSION   := $(shell grep 'MARKETING_VERSION' GhosttyTabs.xcodeproj/project.
 DMG_NAME      := term-mesh-macos-$(APP_VERSION).dmg
 PROJECT_DIR   := $(shell pwd)
 
-.PHONY: build prod deploy deploy-prod dmg run stop clean daemon test install-commands
+.PHONY: build prod deploy deploy-prod dmg run stop clean daemon test install-commands sentry-upload-dsym
 
 build:
 	@echo "==> Generating BuildInfo.swift..."
@@ -136,6 +136,7 @@ prod:
 			tail -20 /tmp/term-mesh-cargo.log; \
 			exit 1; \
 		fi
+	@$(MAKE) sentry-upload-dsym DSYM_DIR="$(PROD_DIR)"
 	@echo ""
 	@echo "================================================"
 	@echo "  Release build complete!"
@@ -179,6 +180,32 @@ deploy-prod: daemon prod
 	@open "$(INSTALL_APP)"
 	@echo "==> Deployed Release to $(INSTALL_APP)"
 	@$(MAKE) install-commands
+
+# Upload dSYMs for Sentry symbolication. Non-fatal: skipped gracefully if
+# sentry-cli is missing, auth is absent, or DSYM_DIR contains no .dSYM bundles.
+# DSYM_DIR defaults to the Release build dir; override when uploading elsewhere.
+DSYM_DIR ?= $(PROD_DIR)
+sentry-upload-dsym:
+	@if ! command -v sentry-cli >/dev/null 2>&1; then \
+		echo "==> sentry-cli not installed; skipping dSYM upload"; \
+		exit 0; \
+	fi
+	@if ! sentry-cli info >/dev/null 2>&1; then \
+		echo "==> sentry-cli not authenticated; skipping dSYM upload"; \
+		exit 0; \
+	fi
+	@APP_DSYM="$(DSYM_DIR)/term-mesh.app.dSYM"; \
+	CLI_DSYM="$(DSYM_DIR)/term-mesh.dSYM"; \
+	ARGS=""; \
+	[ -d "$$APP_DSYM" ] && ARGS="$$ARGS $$APP_DSYM"; \
+	[ -d "$$CLI_DSYM" ] && ARGS="$$ARGS $$CLI_DSYM"; \
+	if [ -z "$$ARGS" ]; then \
+		echo "==> No term-mesh dSYMs found in $(DSYM_DIR); skipping upload"; \
+		exit 0; \
+	fi; \
+	echo "==> Uploading dSYMs to Sentry..."; \
+	sentry-cli debug-files upload --include-sources $$ARGS || \
+		echo "==> dSYM upload failed (non-fatal)"
 
 dmg: prod
 	@echo "==> Verifying daemon binaries..."

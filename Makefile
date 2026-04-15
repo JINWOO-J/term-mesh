@@ -92,11 +92,12 @@ deploy: build
 	@echo "==> Re-signing app bundle (binaries added after initial sign)..."
 	@codesign --force --deep --sign - "$(INSTALL_APP)"
 	@# Update symlinks (term-mesh = Swift CLI from app bundle, term-mesh-run = Rust PTY wrapper)
-	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/bin/term-mesh"
-	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/bin/term-meshd"
-	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/bin/term-mesh-run"
+	@mkdir -p "$(HOME)/.local/bin"
+	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/.local/bin/term-mesh"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/.local/bin/term-meshd"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/.local/bin/term-mesh-run"
 	@echo "==> Starting daemon..."
-	@nohup "$(HOME)/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
+	@nohup "$(HOME)/.local/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
 	@echo "==> Launching term-mesh..."
 	@open "$(INSTALL_APP)"
 	@echo "==> Deployed to $(INSTALL_APP)"
@@ -167,12 +168,13 @@ deploy-prod: daemon prod
 	@-cp "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$(INSTALL_APP)/Contents/Resources/bin/tm-agent" 2>/dev/null || true
 	@echo "==> Re-signing app bundle (binaries added after initial sign)..."
 	@codesign --force --deep --sign - "$(INSTALL_APP)"
-	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/bin/term-mesh"
-	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/bin/term-meshd"
-	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/bin/term-mesh-run"
-	@ln -sf "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$(HOME)/bin/tm-agent" 2>/dev/null || true
+	@mkdir -p "$(HOME)/.local/bin"
+	@ln -sf "$(INSTALL_APP)/Contents/Resources/bin/term-mesh" "$(HOME)/.local/bin/term-mesh"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-meshd" "$(HOME)/.local/bin/term-meshd"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/term-mesh-run" "$(HOME)/.local/bin/term-mesh-run"
+	@ln -sf "$(PROJECT_DIR)/daemon/target/release/tm-agent" "$(HOME)/.local/bin/tm-agent" 2>/dev/null || true
 	@echo "==> Starting daemon..."
-	@nohup "$(HOME)/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
+	@nohup "$(HOME)/.local/bin/term-meshd" > /tmp/term-meshd.log 2>&1 & sleep 0.5
 	@echo "==> Launching term-mesh..."
 	@open "$(INSTALL_APP)"
 	@echo "==> Deployed Release to $(INSTALL_APP)"

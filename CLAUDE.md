@@ -10,6 +10,27 @@ Run the setup script to initialize submodules, install Metal Toolchain, and buil
 
 This handles: submodule init, Metal Toolchain download, xcframework-* tag cleanup, GhosttyKit build (cached per ghostty SHA), and symlink creation.
 
+## Syncing submodules on a fresh pull (multi-machine)
+
+**IMPORTANT:** The `ghostty` submodule is pinned to `JINWOO-J/ghostty` (personal fork).
+Whenever you `git pull` on any machine and see ` m ghostty` in `git status`, or the
+pulled commit updated the submodule SHA / `.gitmodules` URL, run:
+
+```bash
+./scripts/sync-submodules.sh
+```
+
+This propagates `.gitmodules` URL changes into `.git/config` (`git submodule sync`)
+and checks each submodule out at the SHA the parent pins (`git submodule update --init`).
+Without this step the working tree keeps showing a "dirty" submodule and builds
+may use a stale ghostty.
+
+One-time convenience on each machine (optional, recommended):
+
+```bash
+git config --global submodule.recurse true   # auto-sync on future pull/checkout
+```
+
 ## Local dev
 
 After making code changes, always run the reload script with a tag to launch the Debug app:

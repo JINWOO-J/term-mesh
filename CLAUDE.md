@@ -10,6 +10,27 @@ Run the setup script to initialize submodules, install Metal Toolchain, and buil
 
 This handles: submodule init, Metal Toolchain download, xcframework-* tag cleanup, GhosttyKit build (cached per ghostty SHA), and symlink creation.
 
+## Syncing submodules on a fresh pull (multi-machine)
+
+**IMPORTANT:** The `ghostty` submodule is pinned to `JINWOO-J/ghostty` (personal fork).
+Whenever you `git pull` on any machine and see ` m ghostty` in `git status`, or the
+pulled commit updated the submodule SHA / `.gitmodules` URL, run:
+
+```bash
+./scripts/sync-submodules.sh
+```
+
+This propagates `.gitmodules` URL changes into `.git/config` (`git submodule sync`)
+and checks each submodule out at the SHA the parent pins (`git submodule update --init`).
+Without this step the working tree keeps showing a "dirty" submodule and builds
+may use a stale ghostty.
+
+One-time convenience on each machine (optional, recommended):
+
+```bash
+git config --global submodule.recurse true   # auto-sync on future pull/checkout
+```
+
 ## Local dev
 
 After making code changes, always run the reload script with a tag to launch the Debug app:
@@ -285,26 +306,29 @@ ssh term-mesh-vm 'cd /Users/term-mesh/GhosttyTabs && xcodebuild -project Ghostty
 
 ## Ghostty submodule workflow
 
-Ghostty changes must be committed in the `ghostty` submodule and pushed to the `manaflow-ai/ghostty` fork.
+Ghostty submodule is pinned to `JINWOO-J/ghostty` (personal fork of `manaflow-ai/ghostty`).
+Changes must be committed in the submodule and pushed to `origin` (JINWOO-J/ghostty) before
+updating the parent pointer.
+
 Keep `docs/ghostty-fork.md` up to date with any fork changes and conflict notes.
 
 ```bash
 cd ghostty
-git remote -v  # origin = upstream, manaflow = fork
+git remote -v  # origin = JINWOO-J/ghostty (fork), upstream = manaflow-ai/ghostty (READ only)
 git checkout -b <branch>
 git add <files>
 git commit -m "..."
-git push manaflow <branch>
+git push origin <branch>
 ```
 
-To keep the fork up to date with upstream:
+To keep the fork up to date with upstream (`manaflow-ai/ghostty`):
 
 ```bash
 cd ghostty
-git fetch origin
+git fetch upstream
 git checkout main
-git merge origin/main
-git push manaflow main
+git merge upstream/main
+git push origin main
 ```
 
 Then update the parent repo with the new submodule SHA:
@@ -323,6 +347,7 @@ Use the `/release` command to prepare a new release. This will:
 3. Update `CHANGELOG.md` and `docs-site/content/docs/changelog.mdx`
 4. Run `./scripts/bump-version.sh` to update both versions
 5. Commit, tag, and push
+6. Upload dSYM debug symbols to Sentry (`./scripts/upload-dsym.sh --build`)
 
 Version bumping:
 
@@ -340,8 +365,10 @@ Manual release steps (if not using the command):
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
+./scripts/upload-dsym.sh --build   # builds Release and uploads dSYM to Sentry
 ```
 
 Notes:
 - Versioning: bump the minor version for updates unless explicitly asked otherwise.
 - Changelog: always update both `CHANGELOG.md` and the docs-site version.
+- Sentry dSYM: required for symbolicated crash reports (EXC_BAD_ACCESS frames otherwise show `None`). `./scripts/upload-dsym.sh` without `--build` uploads the latest Release dSYM already in DerivedData.

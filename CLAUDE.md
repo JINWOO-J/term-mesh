@@ -323,6 +323,7 @@ Use the `/release` command to prepare a new release. This will:
 3. Update `CHANGELOG.md` and `docs-site/content/docs/changelog.mdx`
 4. Run `./scripts/bump-version.sh` to update both versions
 5. Commit, tag, and push
+6. Upload dSYM debug symbols to Sentry (`./scripts/upload-dsym.sh --build`)
 
 Version bumping:
 
@@ -340,8 +341,10 @@ Manual release steps (if not using the command):
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
+./scripts/upload-dsym.sh --build   # builds Release and uploads dSYM to Sentry
 ```
 
 Notes:
 - Versioning: bump the minor version for updates unless explicitly asked otherwise.
 - Changelog: always update both `CHANGELOG.md` and the docs-site version.
+- Sentry dSYM: required for symbolicated crash reports (EXC_BAD_ACCESS frames otherwise show `None`). `./scripts/upload-dsym.sh` without `--build` uploads the latest Release dSYM already in DerivedData.

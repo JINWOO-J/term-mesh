@@ -60,7 +60,13 @@ Prepare a new release for term-mesh. This command updates the changelog, bumps t
     - Create tag: `git tag vX.Y.Z`
     - Push tag: `git push origin vX.Y.Z`
 
-11. **Notify**
+11. **Upload dSYM debug symbols to Sentry**
+    - Build Release and upload in one step: `./scripts/upload-dsym.sh --build`
+    - Or upload an existing Release dSYM from DerivedData: `./scripts/upload-dsym.sh`
+    - Required for crash symbolication on issues like `EXC_BAD_ACCESS` in Sentry.
+    - If this fails (non-zero exit), the release is still valid — just re-run the script once sentry-cli auth is fixed.
+
+12. **Notify**
     - On success: `say "term-mesh release complete"`
     - On failure: `say "term-mesh release failed"`
 

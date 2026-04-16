@@ -285,26 +285,29 @@ ssh term-mesh-vm 'cd /Users/term-mesh/GhosttyTabs && xcodebuild -project Ghostty
 
 ## Ghostty submodule workflow
 
-Ghostty changes must be committed in the `ghostty` submodule and pushed to the `manaflow-ai/ghostty` fork.
+Ghostty submodule is pinned to `JINWOO-J/ghostty` (personal fork of `manaflow-ai/ghostty`).
+Changes must be committed in the submodule and pushed to `origin` (JINWOO-J/ghostty) before
+updating the parent pointer.
+
 Keep `docs/ghostty-fork.md` up to date with any fork changes and conflict notes.
 
 ```bash
 cd ghostty
-git remote -v  # origin = upstream, manaflow = fork
+git remote -v  # origin = JINWOO-J/ghostty (fork), upstream = manaflow-ai/ghostty (READ only)
 git checkout -b <branch>
 git add <files>
 git commit -m "..."
-git push manaflow <branch>
+git push origin <branch>
 ```
 
-To keep the fork up to date with upstream:
+To keep the fork up to date with upstream (`manaflow-ai/ghostty`):
 
 ```bash
 cd ghostty
-git fetch origin
+git fetch upstream
 git checkout main
-git merge origin/main
-git push manaflow main
+git merge upstream/main
+git push origin main
 ```
 
 Then update the parent repo with the new submodule SHA:
